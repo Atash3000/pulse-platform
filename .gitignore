@@ -1,0 +1,51 @@
+# ----- Node / NestJS -----------------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+.tsbuildinfo
+*.tsbuildinfo
+
+# ----- Environment / secrets --------------------------------------------
+# Real values (JWT secrets, Stripe keys, Clover keys, Telegram tokens)
+# never get committed. .env.example IS committed as the template.
+.env
+.env.*
+!.env.example
+
+# APNs auth keys (.p8 / .pem files) and other private keys
+*.pem
+*.p8
+*.key
+
+# AWS / cloud credentials accidentally dropped in the tree
+.aws/
+credentials.json
+
+# ----- Logs --------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ----- Editors / OS -----------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ----- Local docker volumes / generated data ----------------------------
+.docker/
+*.sqlite
+*.sqlite3
+
+# ----- Coverage / test output -------------------------------------------
+.nyc_output/
+junit.xml
+test-results/
+
+# ----- Claude session metadata (if any) ---------------------------------
+.claude/
