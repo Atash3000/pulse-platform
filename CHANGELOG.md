@@ -14,6 +14,28 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- `TelegramService` extended with six event-driven alert methods —
+  `newOrder`, `paymentFailed`, `itemSoldOut`, `orderingPaused`,
+  `orderCancelledByStaff`, `refundIssued`. Four match Spec Part 9
+  templates directly; two (`orderCancelledByStaff`, `refundIssued`)
+  are architectural extensions covering existing C1 outbox events
+  (`ORDER_CANCELLED`, `REFUND_CREATED`). Each method takes a typed
+  object literal of pre-formatted scalars (decoupled from TypeORM)
+  and logs a hybrid `[telegram-stub] {alert,chat_id,level,body,...}`
+  payload — `body` is the rendered Spec Part 9 string. Three pure
+  formatting helpers (`formatCustomerName`, `formatCents`,
+  `formatItemList` plus `formatOrderShortId` for UUID → display ID)
+  land in a co-located `telegram-formatters.ts`. Real Telegram Bot
+  API delivery is deferred to a consolidated turn after C5 + C4
+  prove the dispatch logic. `paymentFailed` and `orderingPaused`
+  are dead code in C3 — their first callers arrive when future
+  turns add the corresponding emit sites. `dailySummary` /
+  `weeklySummary` (also in Part 9) are deferred to a future
+  scheduled-summary turn — cron-driven, not event-driven, warrants
+  its own architecture. — see decision-log entry *"Telegram service
+  extension: six alert methods for notification handlers"*.
+  Bundle C3.
+
 - `PushNotificationService` — APNs push-notification stub service. Exposes
   `send(customerId, title, body, data?)`. Loads the customer from the DB,
   warns and returns when the row is missing, INFO-logs a `[push-skip]`

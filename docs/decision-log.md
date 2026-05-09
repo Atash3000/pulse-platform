@@ -694,3 +694,91 @@ Until C3, this service is exercised only by its own unit tests. A class-level JS
 `PushNotificationService` is added to `notifications.module.ts` providers + exports list. `TypeOrmModule.forFeature([Order, Customer, MenuItem])` already includes `Customer` from C1 — no additional `forFeature` entries needed. `app.module.ts` is unchanged.
 
 **Tests:** `apps/api/src/modules/notifications/push-notification.service.spec.ts` — 10 tests covering: validator throws on empty `customerId` / empty `title` / empty `body`, `findOne` returning null produces a WARN log and returns, a DB-error propagation test (findOne throws → send() throws, not warned-and-returned), customer with `push_token: null` produces an INFO `[push-skip]` log, customer with a populated `push_token` produces an INFO `[push-stub]` log with the expected fields, the `data` payload is included when provided and surfaces as `null` when omitted, and the push token value itself is NEVER present in any log line (security regression guard, asserts across both the `[push-stub]` and `[push-skip]` paths).
+
+---
+
+## 2026-05-09 — Telegram service extension: six alert methods for notification handlers
+
+**Decision:** extend `apps/api/src/modules/notifications/telegram.service.ts` with six event-driven alert methods (`newOrder`, `paymentFailed`, `itemSoldOut`, `orderingPaused`, `orderCancelledByStaff`, `refundIssued`), three pure formatting helpers in a co-located `telegram-formatters.ts` (`formatCustomerName`, `formatCents`, `formatItemList`, plus `formatOrderShortId` for UUID → display ID), and a hybrid `[telegram-stub] {alert,chat_id,level,body,...}` log shape. C3 lands the public surface and the stub format; real Bot API delivery is deferred to a consolidated turn after C5 + C4 prove the dispatch logic.
+
+**Source-mapping — four methods are direct Spec Part 9, two are architectural extensions:**
+
+| Method | Spec Part 9? | First caller (planned) |
+|---|---|---|
+| `newOrder` | ✅ direct match | C5 — `handleOrderPaid` after the `ORDER_PAID_NOTIFICATION` split-event lands. |
+| `paymentFailed` | ✅ direct match | NO CURRENT CALLER. Lands as dead code in C3; first caller arrives when a `PAYMENT_FAILED` outbox event + handler is added. The decision-log entry on `markFailedFromWebhook` explicitly defers this. |
+| `itemSoldOut` | ✅ direct match | C4 — `handleItemOutOfStock`. |
+| `orderingPaused` | ✅ direct match | NO CURRENT CALLER. Lands as dead code in C3; first caller arrives when a pause/resume admin endpoint emits an outbox event. No current schedule for that endpoint. |
+| `orderCancelledByStaff` | ❌ extension | C4 — `handleOrderCancelled`. The architectural need is real (C1's `ORDER_CANCELLED` outbox event must dispatch somewhere when wired); the Part 9 spec table just doesn't enumerate it. |
+| `refundIssued` | ❌ extension | C4 — `handleRefundCreated` (committed arm only; race-recorded variants stay on the C1 handler's existing warn-level path with `actionRequired`). |
+
+**Why the two extensions are added now in C3 rather than later:** the C1 outbox events `ORDER_CANCELLED` and `REFUND_CREATED` already exist on disk and need a Telegram-side method to call when C4 wires the handlers. Adding the methods in C3 alongside the four Part-9-direct ones keeps the Telegram public surface coherent (one cluster of event-driven alerts, all in one place) rather than splitting it across two turns. The decision-log entry's commit message and the file-level JSDoc both flag the extensions as architectural-not-Part-9 so a future reader doesn't go looking for them in the spec.
+
+**`dailySummary` and `weeklySummary` are deferred** to a separate scheduled-summary turn. They're cron-driven (9pm daily, Sunday weekly) rather than event-driven and warrant their own architecture (a `@Cron` task, aggregate queries against `orders` / `refunds` for the relevant window, idempotency under multi-pod deployments, retry semantics). Bundling them with C3's event-driven alerts would conflate two different concerns.
+
+**Hybrid log format — `[telegram-stub] ${JSON.stringify({...})}`:**
+
+The C3 alert methods log via:
+
+```ts
+[telegram-stub] ${JSON.stringify({
+  alert,    // discriminator: 'newOrder' | 'paymentFailed' | ...
+  chat_id,  // 'owner' | null  — label, not the raw chat ID
+  level,    // 'info' | 'warn' — matches the logger method used
+  body,     // rendered Spec Part 9 message string
+  ...extra, // e.g. orderId, itemId, locationName for log-correlation queries
+})}
+```
+
+This is **option (c)** from the C3 reconnaissance — the body field preserves the Part 9 message string verbatim (visible in CloudWatch for spec-compliance verification), the JSON wrapper gives a queryable structure, and the alert field discriminates for filtering.
+
+The pre-existing `alertDeadOutboxEvent` method uses a multi-line plain-text format (header line + key-value pairs joined with newlines) — intentionally NOT migrated in C3. That format was designed to be human-readable directly in CloudWatch when DEAD events fire (the message body itself is the operator alert), and changing it is out of scope. A regression test in `telegram.service.spec.ts` pins the legacy plain-text shape so a future "let's unify" refactor is an explicit decision rather than a silent change.
+
+**Why we don't dynamic-dispatch via `this.logger[level]`:** NestJS default `Logger` has `log`, `warn`, `error`, `debug`, `verbose` — there is no `info` method. Dynamic dispatch with `level: 'info'` would crash at runtime. The `emitStub` private helper uses an explicit `if (level === 'warn') logger.warn(line) else logger.log(line)` branch, preserving type safety on the Logger interface and matching C1 / C2's existing convention.
+
+**Scalar argument shape — TelegramService is decoupled from TypeORM:**
+
+Each new method takes a typed object literal of pre-formatted scalars rather than entity references. The caller (currently the C1 handlers, via C4 / C5 wiring) is responsible for:
+
+1. Loading the relevant entities from the database.
+2. Calling the formatters in `telegram-formatters.ts` (`formatCustomerName`, etc.).
+3. Passing pre-formatted strings + cents + IDs to the Telegram method.
+
+`TelegramService` is now pure presentation — no TypeORM imports, no `findOne` calls, no relation loading. Two concrete benefits:
+
+- **Testability**: a CLI tool, a one-off script, or a unit test can call `telegramService.newOrder({customerName: 'Test', ...})` with no database. The C3 spec file exercises this directly.
+- **Schema-rename robustness**: a future `Customer.full_name` rename ripples into the C1 handler and the formatter only — `TelegramService` is unaffected because it never touches the entity shape.
+
+The trade-off is slightly more verbose call sites (C5 will assemble `{ customerName: formatCustomerName(customer.full_name), itemSummary: formatItemList(items), ... }` rather than just passing `customer` and `order`). For Phase 1 the verbosity is fine; the alternative would have couples that bite later.
+
+**Log levels — INFO for routine, WARN for operator-action:**
+
+| Level | Methods | Reasoning |
+|---|---|---|
+| INFO (`logger.log`) | `newOrder`, `itemSoldOut`, `refundIssued` | Routine business alerts. Owner / staff want to see them but no immediate action required. |
+| WARN (`logger.warn`) | `paymentFailed`, `orderingPaused`, `orderCancelledByStaff` | Operator-action signals. Failed payments need follow-up; paused ordering means a location is offline; manager-initiated cancellation of a paid order has financial impact and warrants visibility. |
+
+`refundIssued` is INFO for the routine commit-arm refund. The race-recorded variants (`refund() Phase 3 race` and `markPaidFromWebhook` race-detection) carry `actionRequired` in their outbox payload and are handled by C1's existing `handleRefundCreated` warn-level path — they don't go through `refundIssued`.
+
+**`chat_id` is logged as a label, not the raw chat ID:**
+
+When `TELEGRAM_OWNER_CHAT_ID` is configured, the stub log shows `chat_id: 'owner'` rather than the raw chat-ID string. The chat ID alone isn't a credential (the bot token is), but defense-in-depth is cheap here and the label is enough to confirm targeting at future-bot-wiring time. When the env var is unset (dev / tests), `chat_id` is `null` and the stub log itself is the entire alert delivery.
+
+**Spec Part 9 deviation — UUID order display IDs:**
+
+Part 9 shows `Order #124` — a short numeric identifier. Pulse Coffee orders are UUID-keyed at the schema level (no `order_number` column). `formatOrderShortId` truncates a UUID to its first 8 chars and prefixes `#` — `#abc12345` is unique enough for visual correlation in a Telegram alert and short enough to match the Part 9 "compact ID" feel. The owner can paste the full UUID into the dashboard URL for disambiguation. If Phase 2 adds a sequential public order ID, this formatter swaps to use it.
+
+**Spec Part 9 deviation — `itemSoldOut` uppercases the item name:**
+
+The Part 9 example reads `OAT MILK SOLD OUT — Auto-hidden from app — Main St`, but the same item appears mixed-case in the `newOrder` example (`Oat Latte`). Either the Part 9 spec is inconsistent or `itemSoldOut` is banner-style formatting. The C3 implementation matches the spec literal — `itemName.toUpperCase()` is applied in `itemSoldOut` only. Easy to revert if the real-Bot delivery turn determines the spec author meant something else.
+
+**Real Bot API delivery considerations:**
+
+The actual Telegram Bot API send (HTTPS POST to `api.telegram.org`, JWT-style retry handling, reply-error introspection) is not in C3. The deferral lets the dispatch wiring (C4 — outbox.worker → notifications.dispatch) and the call-site shape (C5 — `handleOrderPaid` calling `newOrder` with real loaded fields) prove the routing logic is correct in CloudWatch via the stub log lines BEFORE we add network I/O. When real delivery lands, swapping the body of `emitStub` to "POST to Telegram + log on failure" is a localized change with no surface-area impact on the six methods or their tests.
+
+Open question to revisit at that turn: the C3 stub logs `chat_id: 'owner'` as a label rather than the raw chat-ID string (defense-in-depth — see the `chat_id` paragraph above). The real-delivery turn needs to decide whether the production log line should continue using the label or surface the resolved chat-ID for debuggability when a Telegram send fails — the latter helps an operator diagnose "is this hitting the wrong chat" without inspecting Parameter Store, but reintroduces the chat-ID into log persistence. This decision-log entry names the question rather than answering it; the real-delivery turn will pick a side with full context.
+
+**Tests:**
+
+- `apps/api/src/modules/notifications/telegram-formatters.spec.ts` — 17 tests covering the four formatters with edge cases (single-name customers, three-word names, whitespace handling, `formatCents` zero / odd-cents / large values, `formatItemList` quantity-extension, `formatOrderShortId` short / empty UUID inputs).
+- `apps/api/src/modules/notifications/telegram.service.spec.ts` — 12 tests covering: one happy-path per C3 method asserting the rendered Part 9 body string + alert / level / chat_id / orderId fields, a chat_id-null branch test for the `TELEGRAM_OWNER_CHAT_ID`-not-set fallback, a hybrid-log-convention test that asserts every C3 method emits the four canonical fields, and a regression test pinning the legacy `alertDeadOutboxEvent` plain-text format so a future "let's unify" change is explicit.
