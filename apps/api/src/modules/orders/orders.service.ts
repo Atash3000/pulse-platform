@@ -83,14 +83,16 @@ export class OrdersService {
       where: { id: orderId },
       relations: { location: true, items: true },
     });
-    if (!order) {
-      throw new NotFoundException(`Order ${orderId} not found`);
-    }
 
-    // Per spec: 403 (not 404) when the order belongs to someone else, so iOS
-    // doesn't get to differentiate "doesn't exist" from "not yours" by error code.
-    if (order.customer_id !== customerId) {
-      throw new ForbiddenException('You can only view your own orders');
+    // Privacy: collapse "doesn't exist" and "exists but isn't yours" into a
+    // single 404 response with an identical message. Returning 403 here would
+    // confirm to a caller that the order ID is real and belongs to someone
+    // else — letting an attacker enumerate valid order UUIDs by status code.
+    // This supersedes the original spec note that called for 403; that note's
+    // rationale was inverted (see decision-log 2026-05-08, "Privacy: 404 over
+    // 403 for cross-customer order access").
+    if (!order || order.customer_id !== customerId) {
+      throw new NotFoundException(`Order ${orderId} not found`);
     }
 
     return this.toOrderDetail(order);

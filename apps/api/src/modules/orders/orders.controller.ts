@@ -72,13 +72,16 @@ export class OrdersController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Customer order detail',
-    description: 'Polled by iOS every 10s while the order is active. Returns 403 (not 404) if the order belongs to a different customer — preserves privacy.',
+    description:
+      'Polled by iOS every 10s while the order is active. For privacy, the response code does NOT distinguish "order does not exist" from "order belongs to a different customer" — both return 404 with an identical message. iOS should treat 404 as a terminal "stop polling" signal regardless of the underlying cause.',
   })
   @ApiParam({ name: 'id', format: 'uuid', description: 'Order UUID' })
   @ApiResponse({ status: 200, description: 'Full order detail with items + modifier snapshots.' })
   @ApiResponse({ status: 401, description: 'Missing or invalid customer JWT.' })
-  @ApiResponse({ status: 403, description: 'Order belongs to a different customer.' })
-  @ApiResponse({ status: 404, description: 'Order does not exist.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Order does not exist or does not belong to you.',
+  })
   async getOrder(
     @Req() req: AuthedRequest,
     @Param('id', ParseUUIDPipe) id: string,
