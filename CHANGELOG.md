@@ -14,6 +14,20 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- `PushNotificationService` — APNs push-notification stub service. Exposes
+  `send(customerId, title, body, data?)`. Loads the customer from the DB,
+  warns and returns when the row is missing, INFO-logs a `[push-skip]`
+  line when the customer has no `push_token`, and INFO-logs a `[push-stub]`
+  line with the would-be APNs payload when a token is present. The push
+  token value is **never** logged — only `push_token_present: true | false`
+  surfaces in log output. Real APNs delivery is a Phase 2 Week 5
+  deliverable; this stub establishes the call-site contract that
+  `NotificationsService` handlers will eventually inject and call (wiring
+  lands in C3 alongside the Telegram extension). No production code path
+  yet calls this service; entirely additive infrastructure. — see
+  decision-log entry *"Push-notification service: APNs stub for deferred
+  C-series wiring"*. Bundle C2.
+
 - `NotificationsService` — a router with six stubbed handlers
   (`handleOrderPaid`, `handleOrderReady`, `handleOrderCancelled`,
   `handleOrderPickedUp`, `handleRefundCreated`, `handleItemOutOfStock`).

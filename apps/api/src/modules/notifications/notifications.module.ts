@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { Customer, MenuItem, Order } from '../../database/entities';
 import { NotificationsService } from './notifications.service';
+import { PushNotificationService } from './push-notification.service';
 import { TelegramService } from './telegram.service';
 
 /**
@@ -22,7 +23,7 @@ import { TelegramService } from './telegram.service';
     // surface the canonical name in the alert message.
     TypeOrmModule.forFeature([Order, Customer, MenuItem]),
   ],
-  providers: [NotificationsService, TelegramService],
-  exports: [NotificationsService, TelegramService],
+  providers: [NotificationsService, PushNotificationService, TelegramService],
+  exports: [NotificationsService, PushNotificationService, TelegramService],
 })
 export class NotificationsModule {}

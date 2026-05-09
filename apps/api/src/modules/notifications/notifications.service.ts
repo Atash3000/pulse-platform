@@ -22,10 +22,11 @@ import { Customer, MenuItem, Order, OutboxEventType } from '../../database/entit
  * Real Telegram or APNs delivery. Every handler in C1 logs what it WOULD
  * send via a structured info-level log (or warn-level when the payload
  * carries `actionRequired` — see Concern C in the decision-log entry). C2
- * adds the staff/owner/customer-facing methods to TelegramService and
- * updates handlers to call them; C3 adds the iOS APNs path. C1 is
- * intentionally a stub so the router can land independently and be
- * exercised by tests with no external dependencies.
+ * adds the iOS APNs stub (`PushNotificationService`); C3 extends
+ * `TelegramService` with the staff/owner/customer-facing send methods and
+ * wires both services into these handlers. C1 is intentionally a router
+ * stub so it can land independently and be exercised by tests with no
+ * external dependencies.
  *
  * Handler API surface
  * -------------------
@@ -115,7 +116,7 @@ export class NotificationsService {
   // decision-log entry "Notifications service: router pattern with stubbed
   // handlers" Future C4 wiring subsection. Until C4 lands, this handler is
   // exercised only by the C1 unit tests; the Telegram alert does NOT fire
-  // on real paid orders even after C2 adds real Telegram delivery.
+  // on real paid orders even after C3 adds real Telegram delivery.
   //
   // Payload shape (single emit site — webhook-orders.service.ts
   // markPaidFromWebhook outbox row): { orderId, customerId, locationId,

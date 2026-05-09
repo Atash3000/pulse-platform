@@ -549,7 +549,9 @@ The reload runs OUTSIDE the lock. The locked transaction itself never returns a 
 
 ## 2026-05-09 — Notifications service: router pattern with stubbed handlers
 
-**Decision:** introduce `apps/api/src/modules/notifications/notifications.service.ts` with a single public entry point `dispatch(eventType, payload)` and six private-by-convention handler methods (`handleOrderPaid`, `handleOrderReady`, `handleOrderCancelled`, `handleOrderPickedUp`, `handleRefundCreated`, `handleItemOutOfStock`). C1 lands the router and the handler stubs; real Telegram delivery (C2) and APNs delivery (C3) are separate, downstream turns; the wiring point that has the outbox worker call `notifications.dispatch(...)` is C4.
+**Decision:** introduce `apps/api/src/modules/notifications/notifications.service.ts` with a single public entry point `dispatch(eventType, payload)` and six private-by-convention handler methods (`handleOrderPaid`, `handleOrderReady`, `handleOrderCancelled`, `handleOrderPickedUp`, `handleRefundCreated`, `handleItemOutOfStock`). C1 lands the router and the handler stubs; the iOS APNs stub (C2) and the Telegram extension (C3) are separate, downstream turns; the wiring point that has the outbox worker call `notifications.dispatch(...)` is C4.
+
+> **Sequence note (post-C2 retroactive correction):** an earlier draft of this entry described C2 as Telegram and C3 as APNs. That ordering was inverted at C2-instruction time — the actual sequence is **C2 = APNs stub, C3 = Telegram extension**. References in this entry below are written to the corrected sequence; the C2 commit (`feat(notifications): add push-notification stub service (C2)`) updated this entry in-place rather than appending a follow-up note.
 
 **Why a router rather than direct dispatch from `outbox.worker`:**
 
@@ -559,8 +561,8 @@ The reload runs OUTSIDE the lock. The locked transaction itself never returns a 
 
 **Why handler stubs that do the DB loads but not the actual sending:**
 
-- Decouples C1 from C2 (Telegram methods on `TelegramService`) and C3 (iOS APNs path). C1 lands independently, exercised by tests with no external dependencies.
-- Each handler logs a structured info-level (or warn-level — see log-level differentiation below) line containing every field a future Telegram or APNs payload would carry. When C2 lands, we'll have a paper trail in CloudWatch confirming the right data is being passed through.
+- Decouples C1 from C2 (iOS APNs stub: `PushNotificationService`) and C3 (Telegram extension: send methods on `TelegramService`). C1 lands independently, exercised by tests with no external dependencies.
+- Each handler logs a structured info-level (or warn-level — see log-level differentiation below) line containing every field a future Telegram or APNs payload would carry. When C2 + C3 land, we'll have a paper trail in CloudWatch confirming the right data is being passed through.
 - Handlers mirror `orderWorker.handleOrderPaid`'s DB-load pattern: load the entity from the database (DB is truth, payload is hint) and read the canonical fields from the loaded row. If the order is amended between the outbox write and the worker pickup (refund, partial refund, status correction), the loaded row reflects the current state, not a stale snapshot.
 
 **The warn-not-throw asymmetry vs `orderWorker.handleOrderPaid`:**
@@ -629,7 +631,7 @@ Naive fan-out — calling both handlers from one dispatch tick and succeeding on
 
 **C4 must implement this split before fan-out lands; do not implement single-event-fan-out as an interim step.** The duplicate-alert bug is an externally-visible regression that's hard to debug after the fact.
 
-Until C4, the C1 `handleOrderPaid` is **NOT REACHABLE in production** — it's exercised only by C1's unit tests. A future C2 engineer wiring real Telegram delivery should not assume this handler fires on real paid orders; it doesn't, until C4 lands the split. An inline comment at the top of `handleOrderPaid` flags this for visibility.
+Until C4, the C1 `handleOrderPaid` is **NOT REACHABLE in production** — it's exercised only by C1's unit tests. A future C3 engineer wiring real Telegram delivery should not assume this handler fires on real paid orders; it doesn't, until C4 lands the split. An inline comment at the top of `handleOrderPaid` flags this for visibility.
 
 **Also in C4: flip `NotificationsService.dispatch`'s `default` branch from warn-and-return to throw.** C1 leaves the default as a warn-and-return because the router isn't called in production yet. Once C4 wires `outbox.worker → notifications.dispatch`, an unknown event type reaching the default branch silently returns PROCESSED to the outbox — meaning if a future engineer adds an `OutboxEventType` enum value, wires it into the emit path, but forgets to add the `case` in `NotificationsService.dispatch`, the notification is lost without trace. Throwing instead surfaces the missing handler as DEAD with a clear `last_error`, matching `outbox.worker`'s existing throw-on-unknown pattern (`outbox.worker.ts:227`). The C1 unit test asserting "warns and does not throw on unknown event type" needs to be inverted to "throws on unknown event type" at the same time — both changes land together in C4.
 
@@ -638,3 +640,55 @@ Until C4, the C1 `handleOrderPaid` is **NOT REACHABLE in production** — it's e
 The `handleX` methods are public on `NotificationsService` so that `dispatch()` can call them and so that unit tests can spy on routing. Production code paths must always go through `dispatch()` — calling handlers directly skips the routing layer and any future cross-cutting concerns added there. A class-level JSDoc comment documents the convention.
 
 **Tests:** `apps/api/src/modules/notifications/notifications.service.spec.ts` — 25 tests covering: routing for all six event types + unknown-type warn, happy-path load+log for each handler with the expected target_audience and structured fields, missing-row warn-and-return for each order-centric handler and for ITEM_OUT_OF_STOCK, malformed-payload throw for representative handlers (validator pattern), three REFUND_CREATED payload shapes (committed → INFO, Phase 3 race → WARN, webhook race → WARN with `staff_user_id: null`), and a defensive-future-emit test for ORDER_CANCELLED (no `cancelledBy` / `staffUserId` → logs as `null` rather than crashing).
+
+---
+
+## 2026-05-09 — Push-notification service: APNs stub for deferred C-series wiring
+
+**Decision:** introduce `apps/api/src/modules/notifications/push-notification.service.ts` exposing `PushNotificationService.send(customerId, title, body, data?)`. C2 lands the service shape, the validator/finder split, and the structured stub log; real APNs delivery is a Phase 2 Week 5 deliverable. The C1 `NotificationsService` handlers do NOT yet inject this service — wiring lands together with C3 (Telegram extension), so the C-series order is: C1 (router) → C2 (APNs stub, this entry) → C3 (Telegram extension + wire both into handlers) → C4 (outbox.worker → notifications.dispatch wiring + ORDER_PAID split).
+
+**C-series sequence renumbering:** the C1 decision-log entry originally described C2 as Telegram and C3 as APNs. That ordering was inverted at C2-instruction time. The C1 entry has been updated in-place (same commit as this C2 entry) so the on-disk sequence matches reality. References in this entry assume the corrected sequence.
+
+**Why a stub now rather than the real APNs send:**
+
+- APNs requires the production-shaped infra: an APNs auth key (`.p8` file) loaded into the secret manager, a JWT signer per request, an HTTP/2 connection pool to `api.push.apple.com`, and per-token retry/backoff handling. None of that is needed to design and validate the call-site contract that `NotificationsService.handleOrderReady` (and friends) will eventually use.
+- A stub with the right shape lets us land the service interface, the validator/finder split, and the testing pattern in C2 without standing up an APNs sandbox. C3's Telegram extension lands the same week and wires both services into the existing C1 handlers; the real APNs implementation slots into C2's stub later without changing the call sites.
+- Keeping C2 as a stub also means **C2 has no external runtime dependencies**, so its tests run in CI without secrets and without network access — same property C1 relies on for its router tests.
+
+**The `send()` contract — validator/finder split mirrors C1:**
+
+```ts
+async send(
+  customerId: string,
+  title: string,
+  body: string,
+  data?: Record<string, unknown>,
+): Promise<void>
+```
+
+- **Validation FIRST**, before any DB call. `customerId`, `title`, and `body` must be non-empty strings — `assertNonEmptyString` throws on failure with a clear field name. The throw is caught upstream by the outbox-worker dispatch and surfaces as a DEAD event with a clear `last_error` so the operator can fix the buggy emit site. Validation failure is a programming error at the caller, not a transient runtime condition.
+- **Customer lookup via `customers.findOne({where:{id}})`**. If `findOne` returns `null`, log a `[push]` WARN and return — best-effort, mirrors `NotificationsService` (C1) row-not-found handling. Other exceptions from `findOne` (DB connection drops, type errors) propagate naturally.
+- **`customer.push_token === null`** is the common path (most customers haven't enabled iOS push or have signed out): log a `[push-skip]` line at INFO level and return. This is normal, not an error — log level reflects that. The `push-skip` event shape carries `push_token_present: false` and a human-readable `reason`.
+- **`customer.push_token` is present**: log a `[push-stub]` line at INFO level with the would-be APNs payload (customer_id, push_token_present: true, title, body, data). Real APNs delivery will replace this log with a real send call; the structured payload remains the same so downstream consumers (analytics, metrics) get a stable shape.
+
+**The warn-not-throw asymmetry vs `orderWorker.handleOrderPaid`:**
+
+Same logic as the C1 `NotificationsService`. Pushes are best-effort; if the customer was deleted, retrying won't bring them back; DEAD-eventing a notification isn't actionable for the manager. Notifications log-and-return on missing rows; analytics-and-state handlers retry-toward-DEAD because durable state mutation does need eventual consistency.
+
+**Security: do NOT log push tokens. Ever.**
+
+APNs push tokens are device identifiers. Anyone who has both a token AND the bundle's APNs auth key can send arbitrary notifications to the user's device — that is a privilege-escalation vector for anyone with read access to CloudWatch logs. The structured log line carries `push_token_present: true | false` as a boolean indicating whether a token exists; the token value itself is **never** logged.
+
+Future engineers MUST NOT "improve" the logging by adding the token value, even temporarily for debugging — use a debugger or a one-off script that doesn't write to persistent logs instead. The class-level JSDoc on `PushNotificationService` documents this constraint at the call site so a casual reader can't miss it. A regression test in `push-notification.service.spec.ts` asserts the push token value is absent from every log line, including the WARN and skip paths.
+
+**Wiring status — NOT YET CALLED IN PRODUCTION:**
+
+C1's `NotificationsService` handlers (`handleOrderReady`, `handleOrderPickedUp`, etc.) currently log their would-be push context inline; they do not yet inject `PushNotificationService`. C3 (Telegram extension) bundles the wiring step: at C3 time the relevant handlers gain a constructor injection of `PushNotificationService` and call `pushNotifications.send(...)` after their structured stub log (or in place of it).
+
+Until C3, this service is exercised only by its own unit tests. A class-level JSDoc comment on `PushNotificationService` flags the wiring status so a Phase 2 engineer arriving at the file doesn't assume the customer-facing push is live.
+
+**Module wiring:**
+
+`PushNotificationService` is added to `notifications.module.ts` providers + exports list. `TypeOrmModule.forFeature([Order, Customer, MenuItem])` already includes `Customer` from C1 — no additional `forFeature` entries needed. `app.module.ts` is unchanged.
+
+**Tests:** `apps/api/src/modules/notifications/push-notification.service.spec.ts` — 10 tests covering: validator throws on empty `customerId` / empty `title` / empty `body`, `findOne` returning null produces a WARN log and returns, a DB-error propagation test (findOne throws → send() throws, not warned-and-returned), customer with `push_token: null` produces an INFO `[push-skip]` log, customer with a populated `push_token` produces an INFO `[push-stub]` log with the expected fields, the `data` payload is included when provided and surfaces as `null` when omitted, and the push token value itself is NEVER present in any log line (security regression guard, asserts across both the `[push-stub]` and `[push-skip]` paths).
