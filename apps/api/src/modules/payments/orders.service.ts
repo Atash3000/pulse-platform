@@ -66,6 +66,84 @@ export class OrdersService {
         return;
       }
 
+      // ---------------------------------------------------------------------
+      // Race detection — payment.succeeded arrived for an order that's
+      // already been moved to a terminal state. See decision-log entry
+      // "Webhook-after-state-change races: log + outbox, never throw" for
+      // the full reasoning behind this branch.
+      //
+      // Three real-world races produce this:
+      //
+      //   cancel-after-pay:    customer hit POST /orders/:id/cancel between
+      //                        their Stripe sheet confirmation and the webhook
+      //                        landing. order_status = CANCELLED, but Stripe
+      //                        actually took the money.
+      //
+      //   cleanup-after-pay:   PendingPaymentCleanupTask reaped the order at
+      //                        minute 30 because the webhook was lagging.
+      //                        order_status = FAILED, but Stripe actually
+      //                        took the money.
+      //
+      //   post-refund-success: order was already REFUNDED somehow (operator
+      //                        action, edge case). Shouldn't normally happen
+      //                        but guarded for completeness.
+      //
+      // Without this branch, the OrderStateMachine.assertTransition below
+      // would throw ConflictException — Stripe sees 5xx and retries the
+      // webhook every few minutes for THREE DAYS. We instead:
+      //   - log the race with full diagnostic detail
+      //   - emit a REFUND_CREATED outbox row (CANCELLED/FAILED only) so the
+      //     future notifications module can alert the owner
+      //   - return without throwing → Stripe sees 200 and stops retrying
+      //
+      // We deliberately do NOT call stripe.refunds.create from here. The
+      // refund needs a manager's eyes on it ("in case something is fishy
+      // about the race") — they go through /admin/orders/:id/refund. The
+      // outbox row is the liability ledger entry, not the refund itself.
+      // ---------------------------------------------------------------------
+      const raceType = this.detectPostPaymentRace(order.order_status);
+      if (raceType) {
+        const amountReceived = intent.amount_received ?? intent.amount;
+        this.logger.warn(
+          `webhook race detected: order ${order.id} is ${order.order_status} ` +
+            `but payment_intent.succeeded arrived ` +
+            `(race=${raceType}, stripe_event=${event.id}, payment_intent=${intent.id}, ` +
+            `amount_received=${amountReceived}, request_id=${requestId}). ` +
+            `Returning 200 to Stripe; manager intervention required for refund.`,
+        );
+
+        // Emit REFUND_CREATED outbox row for races where money was actually
+        // received but the order is in a no-fulfilment state. The notifications
+        // module surfaces this to the owner; the manager runs the refund via
+        // POST /admin/orders/:id/refund. No outbox row for REFUNDED — already
+        // refunded, nothing to surface.
+        if (
+          raceType === 'cancel-after-pay' ||
+          raceType === 'cleanup-after-pay'
+        ) {
+          await em.insert(OutboxEvent, {
+            event_type: OutboxEventType.REFUND_CREATED,
+            status: OutboxStatus.PENDING,
+            attempts: 0,
+            payload: {
+              orderId: order.id,
+              customerId: order.customer_id,
+              locationId: order.location_id,
+              amountCents: amountReceived,
+              currency: intent.currency,
+              stripePaymentIntentId: intent.id,
+              stripeEventId: event.id,
+              requestId,
+              raceType,
+              orderStatusAtRace: order.order_status,
+              paymentStatusAtRace: order.payment_status,
+              actionRequired: 'manager-refund-via-admin-endpoint',
+            },
+          });
+        }
+        return;
+      }
+
       const fromStatus = order.order_status;
 
       // Validate the transition. Webhook is the only actor permitted to set PAID.
@@ -133,6 +211,37 @@ export class OrdersService {
         `order ${order.id} → PAID (stripe_event=${event.id}, request_id=${requestId})`,
       );
     });
+  }
+
+  /**
+   * Identifies whether the current order_status corresponds to a known
+   * post-payment race when a payment_intent.succeeded webhook arrives.
+   *
+   *   CANCELLED → 'cancel-after-pay'  — customer cancelled mid-flight
+   *                                     (POST /orders/:id/cancel between
+   *                                     Stripe sheet confirm and webhook)
+   *   FAILED    → 'cleanup-after-pay' — PendingPaymentCleanupTask reaped the
+   *                                     order before the webhook landed
+   *   REFUNDED  → 'post-refund-success' — terminal, refund had already been
+   *                                       issued; payment shouldn't have
+   *                                       succeeded in the first place
+   *
+   * Returns null for PENDING_PAYMENT (the happy path) and any other status —
+   * the caller treats null as "proceed with the normal PAID transition".
+   */
+  private detectPostPaymentRace(
+    orderStatus: OrderStatus,
+  ): 'cancel-after-pay' | 'cleanup-after-pay' | 'post-refund-success' | null {
+    switch (orderStatus) {
+      case OrderStatus.CANCELLED:
+        return 'cancel-after-pay';
+      case OrderStatus.FAILED:
+        return 'cleanup-after-pay';
+      case OrderStatus.REFUNDED:
+        return 'post-refund-success';
+      default:
+        return null;
+    }
   }
 
   /**
