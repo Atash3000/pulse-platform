@@ -67,6 +67,22 @@ export class NotificationsService {
 
   // ---------------------------------------------------------------------------
   // Router — single entry point. Add new event types here, not at call sites.
+  //
+  // Exhaustiveness: the `default` branch's `const _exhaustive: never =
+  // eventType` line is a COMPILE-TIME check that every `OutboxEventType` enum
+  // value has an explicit `case` above. If a future engineer adds a seventh
+  // enum value (e.g., `ORDER_REFUNDED_VIA_DISPUTE` for Phase 2) to
+  // `entities.ts` and forgets to add a corresponding case here, the build
+  // FAILS with "Type 'X' is not assignable to type 'never'." That's the
+  // signal to wire the new event type.
+  //
+  // The runtime warn-and-return is preserved as defence-in-depth for the
+  // case where a malformed payload at runtime carries a string that isn't
+  // even in the enum (e.g., a corrupted DB row, or an outbox row written
+  // before the enum was renamed). C4 will replace this with `throw new
+  // Error(...)` when wiring outbox.worker → notifications.dispatch — at
+  // that point, an unknown runtime value should fail loudly toward DEAD,
+  // not silently log-and-mark-PROCESSED.
   // ---------------------------------------------------------------------------
 
   async dispatch(
@@ -92,15 +108,16 @@ export class NotificationsService {
       case OutboxEventType.ITEM_OUT_OF_STOCK:
         await this.handleItemOutOfStock(payload);
         return;
-      default:
-        // Unknown event type — log a warning but do NOT throw. The outbox
-        // worker's own dispatch already throws on truly-unknown enum values
-        // (so they're caught at compile time when the enum changes); this
-        // branch is defence-in-depth for the case where a future event type
-        // is added to the enum but not yet wired here.
+      default: {
+        // Compile-time exhaustiveness — if a new enum value is added to
+        // `OutboxEventType` without a corresponding `case` above, the
+        // following assignment fails to compile because `eventType` is no
+        // longer narrowed to `never` here.
+        const _exhaustive: never = eventType;
         this.logger.warn(
-          `[notifications] no handler registered for event type ${String(eventType)}; skipping`,
+          `[notifications] no handler registered for event type ${String(_exhaustive)}; skipping`,
         );
+      }
     }
   }
 
@@ -134,7 +151,7 @@ export class NotificationsService {
       return;
     }
     const customer = await this.customers.findOne({ where: { id: order.customer_id } });
-    this.logStubMessage('ORDER_PAID', payload, {
+    this.logStubMessage('ORDER_PAID', {
       event_type: 'ORDER_PAID',
       target_audience: 'manager',
       order_id: order.id,
@@ -164,7 +181,7 @@ export class NotificationsService {
       return;
     }
     const customer = await this.customers.findOne({ where: { id: order.customer_id } });
-    this.logStubMessage('ORDER_READY', payload, {
+    this.logStubMessage('ORDER_READY', {
       event_type: 'ORDER_READY',
       target_audience: 'customer',
       order_id: order.id,
@@ -204,7 +221,7 @@ export class NotificationsService {
     const cancelledBy = typeof payload.cancelledBy === 'string' ? payload.cancelledBy : null;
     const staffUserId = typeof payload.staffUserId === 'string' ? payload.staffUserId : null;
     const reason = typeof payload.reason === 'string' ? payload.reason : null;
-    this.logStubMessage('ORDER_CANCELLED', payload, {
+    this.logStubMessage('ORDER_CANCELLED', {
       event_type: 'ORDER_CANCELLED',
       target_audience: 'customer+manager',
       order_id: order.id,
@@ -237,7 +254,7 @@ export class NotificationsService {
     }
     const customer = await this.customers.findOne({ where: { id: order.customer_id } });
     const pickedUpAt = typeof payload.pickedUpAt === 'string' ? payload.pickedUpAt : null;
-    this.logStubMessage('ORDER_PICKED_UP', payload, {
+    this.logStubMessage('ORDER_PICKED_UP', {
       event_type: 'ORDER_PICKED_UP',
       target_audience: 'analytics',
       order_id: order.id,
@@ -344,7 +361,7 @@ export class NotificationsService {
     const locationId = typeof payload.locationId === 'string' ? payload.locationId : null;
     const staffUserId = typeof payload.staffUserId === 'string' ? payload.staffUserId : null;
     const soldOutAt = typeof payload.soldOutAt === 'string' ? payload.soldOutAt : null;
-    this.logStubMessage('ITEM_OUT_OF_STOCK', payload, {
+    this.logStubMessage('ITEM_OUT_OF_STOCK', {
       event_type: 'ITEM_OUT_OF_STOCK',
       target_audience: 'manager+affected-carts',
       item_id: item.id,
@@ -395,15 +412,10 @@ export class NotificationsService {
    */
   private logStubMessage(
     eventType: string,
-    rawPayload: Record<string, unknown>,
     context: Record<string, unknown>,
   ): void {
     this.logger.log(
       `[notifications-stub] ${eventType}: ${JSON.stringify(context)}`,
     );
-    // The raw payload is referenced via parameter to keep it in scope for
-    // future structured-logging migration; once we ship to a structured
-    // log platform (e.g. Datadog) it'll be emitted as a distinct field.
-    void rawPayload;
   }
 }
