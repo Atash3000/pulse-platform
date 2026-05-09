@@ -20,6 +20,7 @@ import {
   OutboxStatus,
   Payment,
   PaymentStatus,
+  PickupType,
   Refund,
 } from '../../database/entities';
 import { OrderStateMachine } from '../orders/order-state-machine';
@@ -129,7 +130,28 @@ export class AdminOrdersService {
       orderId,
       OrderStatus.ACCEPTED,
       async (em, order) => {
-        // estimated_ready_at = now + current_wait_minutes from this location's settings
+        // estimated_ready_at semantics differ by pickup_type:
+        //
+        //   ASAP       → recompute as now + current_wait_minutes when staff
+        //                accept. This is the only authoritative input for
+        //                ASAP orders.
+        //
+        //   SCHEDULED  → leave alone. The customer chose a specific pickup
+        //                time at checkout; HoursService.canAcceptOrders()
+        //                returned that time as estimatedReadyAt
+        //                (modules/locations/hours.service.ts SCHEDULED
+        //                branch), which checkout.service.ts step 5 persisted
+        //                onto the order. Overwriting it here would silently
+        //                shift the customer's pickup time and break the iOS
+        //                countdown display, which polls /orders/:id and
+        //                expects estimated_ready_at to match the time the
+        //                customer chose.
+        //
+        // Do NOT "simplify" by always recomputing. The asymmetry is
+        // intentional. See decision-log entry "Scheduled orders:
+        // estimated_ready_at set once at checkout, never overwritten".
+        if (order.pickup_type !== PickupType.ASAP) return;
+
         const settings = await em.findOne(LocationSettings, {
           where: { location_id: staff.location_id },
         });

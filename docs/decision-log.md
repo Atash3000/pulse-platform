@@ -248,6 +248,138 @@ This adds ~15 lines, no migration, and removes the locks-during-dispatch concern
 
 ---
 
+## 2026-05-08 — Customer cancel during PENDING_PAYMENT
+
+**Decision:** `POST /api/v1/orders/:id/cancel` is valid from `PENDING_PAYMENT` (in addition to `DRAFT`). The state machine's `PENDING_PAYMENT → CANCELLED` transition is allowed for the `customer` and `system` actors. Before flipping the DB status, the handler best-effort cancels the underlying Stripe `PaymentIntent` so the customer's open Stripe sheet can't accidentally complete the payment after our cancel commits.
+
+**The bug this fixes:** the previous state machine only allowed `customer: DRAFT → CANCELLED`, but checkout creates DRAFT and updates to PENDING_PAYMENT inside a single transaction — DRAFT is never observable outside that transaction. So `POST /orders/:id/cancel` could only ever return 403/404/409. The endpoint was dead code.
+
+**Considered:**
+- Allow `customer: PENDING_PAYMENT → CANCELLED` only. Rejected — `'system'` is the same actor the abandoned-checkout cleanup task uses, and a future variant might want to cancel rather than mark FAILED. Adding both actors at once costs nothing.
+- Allow staff/manager to cancel a PENDING_PAYMENT order. Rejected — payment is in flight; staff have no business deciding the customer's intent before Stripe confirms or fails it. Once PAID, the manager cancel/refund flow takes over.
+
+**Why best-effort Stripe cancel before the DB flip:** the customer's iOS app may have an open Stripe payment sheet at the moment they tap our cancel. If we flip the DB first and Stripe takes the payment afterwards, we end up in a `cancel-after-pay` race (covered separately in the webhook race-mitigation entry). Cancelling the PaymentIntent first closes that window for nearly all cases. Stripe-side failure is non-fatal — the DB cancel still commits, and the race-mitigation branch handles the rare case where the payment lands anyway.
+
+**Best-effort, not transactional:** the Stripe cancel call sits inside the locking DB transaction. If Stripe is unreachable, we log a warning and proceed with the DB cancel anyway — DB is the truth, Stripe will expire the PI on its own ~24h after creation.
+
+**Tests:** `apps/api/src/modules/orders/order-state-machine.spec.ts` ("PENDING_PAYMENT → CANCELLED") covers actor permissions; `apps/api/src/modules/orders/orders.service.spec.ts` covers the cross-customer privacy posture; live curl verification confirmed the end-to-end flow.
+
+---
+
+## 2026-05-08 — Abandoned-checkout cleanup: 30-minute threshold, FAILED state, no outbox event
+
+**Decision:** A `@Cron(EVERY_5_MINUTES)` scheduled task in `modules/orders/pending-payment-cleanup.task.ts` reaps orders left in `PENDING_PAYMENT` for more than **30 minutes**. Reaped orders transition to `order_status = FAILED, payment_status = FAILED` with `order_events.reason = "abandoned at checkout"`. **No outbox event is emitted.**
+
+**Considered:**
+- No cleanup at all — let abandoned PENDING_PAYMENT orders accumulate, accept the operational drift. This is what we shipped initially. The orders table grows, customer history shows ghosts, iOS polling never terminates.
+- A shorter threshold (5 or 10 minutes). Faster cleanup but risks racing with slow customers — Stripe payment sheets can take a couple of minutes on flaky networks.
+- A longer threshold (1–2 hours). Closer to Stripe's own ~24-hour PI expiry, but leaves a much larger window where iOS polls a permanently in-flight order.
+- Transitioning to `CANCELLED` instead of `FAILED`. Discussed below.
+- Transitioning to `CANCELLED` and emitting `ORDER_CANCELLED` so the customer gets a "your order was cancelled" notification.
+
+**Why 30 minutes:** Stripe payment sheets typically time out at 10–15 minutes server-side. 30 min gives even a slow customer a comfortable buffer beyond that. Anything older is essentially certainly abandoned. We can tune this once we have real abandonment metrics.
+
+**Why FAILED, not CANCELLED:** `CANCELLED` implies an explicit decision (customer cancel, manager cancel, refund flow). An abandonment is neither — the customer simply didn't complete payment. `FAILED` captures the operational reality cleanly: payment never happened, this order will never be fulfilled. It's the same terminal state Stripe-side payment errors produce, so reporting can treat both uniformly. Keeps enum semantics tight.
+
+**Why no outbox event:** `ORDER_CANCELLED` outbox events drive customer notifications and refund processing. Neither applies:
+- The customer never paid, so there's nothing to refund.
+- A push to "your order was cancelled" lands hours after the customer already abandoned. They likely don't remember tapping Checkout. Worse-than-nothing UX.
+
+iOS polling discovers the FAILED state on its next tick and stops polling. That's the cleanup, no notification needed.
+
+**State machine extension:** `PENDING_PAYMENT → FAILED` was previously allowed only for the `stripe-webhook` actor. Extended to `[stripe-webhook, system]`. Pinned with a unit test in `order-state-machine.spec.ts`.
+
+**Concurrency:** `SELECT FOR UPDATE SKIP LOCKED` for the claim, gated by `WORKERS_ENABLED` (same as the outbox worker). Two worker pods firing the cron simultaneously will grab disjoint batches; an API-only pod with `WORKERS_ENABLED=false` won't fire the cron at all. Same trade-off as the outbox worker (Stripe cancel call inside the locking transaction) and same upgrade path documented elsewhere — fine for Phase 1's low scheduled-task volume.
+
+**Race condition with the Stripe webhook:** A customer who pays at minute 29 (Stripe webhook still in flight) while our cleanup task fires at minute 30 produces a race. Both transactions take pessimistic locks on the order row; whichever lands first wins. If the webhook lands first, the order is `PAID` and our cleanup's `WHERE order_status = 'PENDING_PAYMENT'` filter excludes it from the next batch — no harm. If the cleanup lands first, the order is `FAILED` when the webhook arrives; the webhook's `assertTransition(FAILED, PAID, 'stripe-webhook')` rejects it and Stripe retries. **This race is real but vanishingly rare** at a 30-minute threshold (a customer who took 30+ minutes to confirm is the population that abandons). Mitigation if it surfaces in practice: make `markPaidFromWebhook` idempotent against `FAILED` — log the late payment and trigger a refund.
+
+---
+
+## 2026-05-08 — Privacy: 404 over 403 for cross-customer order access (correction of earlier reasoning)
+
+**Decision:** `GET /api/v1/orders/:id` returns **404** with an identical message both when the order doesn't exist and when it exists but belongs to a different customer. We do NOT use 403 here.
+
+**Background — what we were doing wrong:** the original orders-module instruction in this thread argued for 403 with the rationale "returning 404 would leak that the order ID does not exist, which is a privacy concern." We implemented 403 accordingly. The reasoning is **inverted**:
+
+- `404` collapses "doesn't exist" and "not yours" into the same response — caller cannot distinguish them.
+- `403` confirms the resource exists and belongs to someone else — that IS the leak.
+
+For a UUID-keyed resource the practical attack surface is small (UUID v4 has ~10³⁸ values), but the principle stands and the cost of doing it correctly is one line. There's no scenario where leaking "this ID belongs to someone else" is preferable to a uniform 404.
+
+**Considered:**
+- Keep 403 (status quo). Rejected — leaks existence.
+- Return 404 only on missing rows, 403 on cross-customer (status quo). Same problem.
+- Return 404 for both cases with identical body shape and message (this decision).
+- Return 403 for both cases. Rejected — wrong semantically; clients (iOS especially) treat 404 as "give up polling, this resource is gone" which is exactly what a customer who doesn't own the order should be told.
+
+**Why an iOS-aware framing matters:** iOS polls `GET /orders/:id` every 10 seconds while the status is non-terminal. The "stop polling" signal in our contract is "404 → resource gone for good." Returning 403 would invite a special-case branch on the client to also stop polling on 403 — fragile. With 404, the iOS poller's existing terminal-state handling does the right thing automatically.
+
+**Impact on the cancel endpoint:** `POST /api/v1/orders/:id/cancel` currently has the same pattern (`ForbiddenException` on cross-customer access). It was NOT changed in this fix because the explicit instruction was scoped to `getOrderForCustomer`. The same privacy argument applies and the cancel endpoint should be updated when reviewed; flagged as a follow-up.
+
+**Where the inverted note used to live:** the inline comment in `orders.service.ts:getOrderForCustomer` previously said "Per spec: 403 (not 404) when the order belongs to someone else, so iOS doesn't get to differentiate 'doesn't exist' from 'not yours' by error code." That was a confused paraphrase — the rationale described 404 behaviour but pointed at 403. Replaced with a clear explanation that names the leak.
+
+**A3-followup (same day):** the same fix was applied to `cancelOrderAsCustomer` and its controller annotations. A regression test in `orders.service.spec.ts` pins the privacy invariant: the cross-customer 404 and the missing-order 404 produce byte-identical response bodies (apart from the UUID itself).
+
+---
+
+## 2026-05-09 — Webhook-after-state-change races: log + outbox, never throw
+
+**Decision:** When `payment_intent.succeeded` arrives for an order that's already in a terminal state (`CANCELLED`, `FAILED`, or `REFUNDED`), `markPaidFromWebhook` returns 200 without throwing. For `CANCELLED` and `FAILED` it inserts a `REFUND_CREATED` outbox row carrying `amountCents`, the race-type label, and the order/payment status at race time. For `REFUNDED` it logs and returns. **Stripe's `refunds.create` is NOT called automatically.**
+
+**The races covered:**
+
+| race-type | trigger | how it produces the conflict |
+|---|---|---|
+| `cancel-after-pay` | A1 fix made `POST /orders/:id/cancel` work for `PENDING_PAYMENT`. | Customer hits cancel between confirming the Stripe sheet and our webhook landing. The cancel commits first; the webhook arrives saying "actually they paid." |
+| `cleanup-after-pay` | A2 added `PendingPaymentCleanupTask` to reap `PENDING_PAYMENT` orders > 30 min old. | A 29-minute-old order whose Stripe webhook is delayed gets reaped at minute 30. The webhook arrives at minute 31 saying "actually they paid." |
+| `post-refund-success` | Defensive — shouldn't normally happen. | Order is already `REFUNDED` (manager refunded earlier somehow) and a stale Stripe event redelivers. |
+
+**Considered:**
+- Keep the status-quo behavior — let `OrderStateMachine.assertTransition` throw `ConflictException`. The webhook controller doesn't catch it; Nest returns 409; **Stripe retries every few minutes for three days**, hammering us with 5xx the whole time. Customer's money sits in Stripe with no operational signal on our side.
+- Auto-refund inline (call `stripe.refunds.create` from inside the webhook handler). Rejected — race detection should be a tripwire, not an irreversible action. "In case something is fishy" with the race (compromised account, replay attack, payload tampering), a human needs to look before money moves.
+- Update `payment_status` to `SUCCEEDED` + insert a `payments` row in the race branch so the manager-refund endpoint works directly. Considered — would mean three-status invariants are stricter (always reflect Stripe truth on `payment_status`). Deferred for now to keep this fix minimal; the outbox row carries `amountCents` and `stripePaymentIntentId`, which is enough for the manager to drive a Stripe-dashboard refund or an extended admin endpoint later.
+
+**Why this design wins:**
+
+- **Stripe stops retrying immediately.** A 200 response means Stripe considers the event delivered. Without this, every race produces 3 days of webhook noise.
+- **The liability is recorded in the outbox**, exactly the place built to surface things that need follow-through. The future notifications module gets one place to look — `outbox_events WHERE event_type='REFUND_CREATED' AND payload->>'raceType' IS NOT NULL` — for "owner alerts about money owed back to customers."
+- **Manager keeps the refund decision.** The race could be benign (clock skew), but it could also indicate a tampered webhook or a replay. `/admin/orders/:id/refund` requires a manager + a written reason; the audit trail is intact.
+- **No silent state corruption.** We don't promote a CANCELLED order to PAID just because Stripe says so — the customer's intent was to cancel; the order stays cancelled; the refund is the resolution.
+
+**REFUNDED gets no outbox row** because the order is already terminal — there's nothing to surface, and emitting a `REFUND_CREATED` event for an already-refunded order would confuse the future handler.
+
+**Operational signal for now:** until the notifications module ships, races appear in CloudWatch as a `[OrdersService] WARN webhook race detected` line. CloudWatch alarm on `race=cancel-after-pay OR race=cleanup-after-pay` count > 0 in any 1-hour window is the recommended Phase 1 monitor.
+
+**Tests:** `apps/api/src/modules/payments/orders.service.spec.ts` covers all three race types with explicit assertions on: no-throw, structured warn log, REFUND_CREATED outbox emission for CANCELLED + FAILED only, no payments row / order_event in the race branch, and that the existing `payment_status=SUCCEEDED` idempotency path still wins precedence over the race branch.
+
+---
+
+## 2026-05-09 — Scheduled orders: estimated_ready_at set once at checkout, never overwritten
+
+**Decision:** `AdminOrdersService.accept()` only recomputes `estimated_ready_at` for `pickup_type = ASAP`. For `SCHEDULED` orders, the field set at checkout is the source of truth and is never modified by staff transitions. `LocationSettings.findOne` is not consulted on the SCHEDULED branch — `current_wait_minutes` is irrelevant when the customer chose a specific pickup time.
+
+**Authoritative source for each pickup type:**
+
+| pickup_type | who sets `estimated_ready_at` | when |
+|---|---|---|
+| `ASAP` | `HoursService.canAcceptOrders()` returns `now + current_wait_minutes` (from `location_settings`); recomputed by `AdminOrdersService.accept()` at staff-accept time using the same formula with the wait-minutes value current as of accept | initially at checkout, then again at accept |
+| `SCHEDULED` | `HoursService.canAcceptOrders()` returns `scheduledTime` (the pickup time the customer chose). Persisted by `CheckoutService` at checkout step 5. **Never touched again.** | once, at checkout |
+
+**Considered:**
+- Always recompute on accept (status quo before the fix). Rejected — silently shifts the customer's pickup time. A 2pm pickup that staff accepts at 8:50am would become a 8:55am pickup. Customer's countdown display in iOS goes haywire.
+- Recompute on accept but cap at `scheduled_pickup_at` for SCHEDULED. Rejected — adds branching to the time math without a clear semantic improvement; the value at checkout is already correct.
+- Skip the `accept` recompute entirely and trust whatever was set at checkout for both types. Rejected — for ASAP, `current_wait_minutes` may have been adjusted (`PUT /admin/wait-time`) between checkout and accept; the staff-accept moment is the right moment to refresh that value.
+
+**Why this asymmetry is correct:** `current_wait_minutes` is a forward-looking estimate that staff own and adjust as the queue grows. For ASAP, the "right" wait-minutes is the one in effect at accept time. For SCHEDULED, the pickup time was negotiated with the customer at checkout — there's no "current" wait-minutes notion that applies; the customer doesn't care how busy you are at 8:50am if their pickup is at 2pm.
+
+**iOS dependency:** the customer-facing `OrderStatusView` polls `GET /orders/:id` every 10 seconds and displays a countdown to `estimated_ready_at`. The countdown jumps backwards or forwards if the field changes between polls. For SCHEDULED orders this would be especially jarring — the customer is shown "Pickup at 2:00 PM" at checkout, then "Pickup at 8:55 AM" after the barista accepts at 8:50, then back to 2:00 if the field is touched again. Pinning the field once removes this class of UI bug entirely.
+
+**Don't "simplify" by removing the branch.** A future engineer reading `accept()` may notice the asymmetry and consider it accidental complexity. It isn't. The inline comment in `admin-orders.service.ts` cites this entry; the test in `admin-orders.service.spec.ts` ("SCHEDULED: does NOT call LocationSettings.findOne") will fail loudly if the branch is removed.
+
+**Tests:** `apps/api/src/modules/admin/admin-orders.service.spec.ts` — 7 tests covering ASAP exact-arithmetic with `jest.useFakeTimers()`, SCHEDULED unchanged from the original timestamp, `LocationSettings.findOne` call-count assertions per branch, default-wait-minutes behaviour when no settings row exists, and `order_events` audit row written in both branches.
+
+---
+
 ## 2026-05-08 — Documentation structure
 
 **Decision:** A `docs/` folder with one document per concern (architecture, golden rules, glossary, troubleshooting, decision log) and per-module READMEs next to the code. Onboarding docs for each AI chat live under `docs/ai-onboarding/`.
