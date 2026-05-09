@@ -24,6 +24,7 @@ import {
   AdminOrderEventRow,
   AdminOrderListItem,
   AdminOrdersService,
+  RefundResult,
 } from './admin-orders.service';
 import { requireStaff } from './staff-context';
 
@@ -135,21 +136,51 @@ export class AdminOrdersController {
   @ApiOperation({
     summary: 'Issue a full or partial refund (manager+).',
     description:
-      'amount_cents omitted = full refund. Stripe is called BEFORE any DB write — if Stripe errors, the database is untouched and the response is 502.',
+      'amount_cents omitted = full refund. Stripe is pre-validated, then called, then the DB write happens under a row lock. If Stripe accepts the refund but a concurrent refund races us inside the lock, the response carries status="race-recorded" with a manual-reconciliation flag — the money DID move at Stripe, but no DB refund row was created.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Refund created. Returns the order and refund row.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Two shapes by discriminator. status="committed": refund persisted, order updated. status="race-recorded": Stripe refunded but a DB race blocked persistence; manager must reconcile via Stripe dashboard.',
+  })
   @ApiResponse({ status: 400, description: 'reason missing/short, or amount_cents out of bounds.' })
   @ApiResponse({ status: 403, description: 'Insufficient role.' })
   @ApiResponse({ status: 404, description: 'Order not at this location.' })
   @ApiResponse({ status: 502, description: 'Stripe refund call failed; database unchanged.' })
-  refund(
+  async refund(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RefundOrderDto,
   ) {
     const staff = requireStaff(req);
-    return this.orders.refund(staff, id, dto.reason, dto.amount_cents);
+    const result: RefundResult = await this.orders.refund(
+      staff,
+      id,
+      dto.reason,
+      dto.amount_cents,
+    );
+
+    if (result.status === 'race-recorded') {
+      // Surface the race outcome to the caller with the same discriminator
+      // the service uses, plus an operator-facing message. Don't drop the
+      // race shape into the generic { order, refund } response — callers
+      // would silently treat it as a successful commit.
+      return {
+        status: result.status,
+        stripeRefundId: result.stripeRefundId,
+        amountCents: result.amountCents,
+        requiresManualReconciliation: result.requiresManualReconciliation,
+        message:
+          'Refund processed at Stripe but a database race was detected. ' +
+          'Manager must reconcile this refund manually via Stripe dashboard.',
+      };
+    }
+    return {
+      status: result.status,
+      order: result.order,
+      refund: result.refund,
+    };
   }
 
   // ---- Audit trail (MANAGER+) --------------------------------------------

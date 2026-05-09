@@ -354,6 +354,49 @@ For a UUID-keyed resource the practical attack surface is small (UUID v4 has ~10
 
 ---
 
+## 2026-05-09 — Refund pre-validation before Stripe call: avoid money out with no DB record
+
+**Decision:** `AdminOrdersService.refund()` runs as three explicit phases:
+
+1. **Pre-validation** (no Stripe call, no row lock) — order existence + location scope, `stripe_payment_id` set, refund amount sane, **cumulative refund check** (existing refunds + this one ≤ total_cents), cumulative `isFullRefund` computation, state-machine assertion if full, payments-row existence.
+2. **Stripe call** with an idempotency key `refund-{orderId}-{amountCents}-{floor(now/60000)}`. No DB lock held.
+3. **Locked DB write** — re-runs the cumulative check inside the lock; if a concurrent refund landed between phases, log a structured ERROR, emit a REFUND_CREATED outbox row flagged with `error: 'race-with-concurrent-refund'`, and return success WITHOUT throwing (Stripe already moved money).
+
+This bundles three related bugs:
+- **A5** — pre-validation before Stripe.
+- **A6** — cumulative refund tracking in the validation step.
+- **A7** — cumulative `isFullRefund` computation.
+- **A8** — Stripe idempotency key.
+
+**The bug A5 fixes:** the previous flow called Stripe BEFORE the state-machine assertion. Refunding a FAILED order would call Stripe successfully, then the assertion would throw `ConflictException` because FAILED is terminal in the state machine. The transaction rolled back — Stripe had moved money but the DB had no `refunds` row, no `outbox_events` row, no `order_events` row. Money out, zero record. Reconciliation impossible without diffing Stripe's refund list against our table.
+
+**The bug A6 fixes:** the previous validation only checked `refundAmount > total_cents`. A $20 order with a prior $5 partial refund would let a $20 refund attempt sail through validation; only Stripe's amount-too-large error would catch it (after the request). Worse — two managers issuing simultaneous partial refunds whose sum exceeded the total each saw a "valid" amount in their own request.
+
+**The bug A7 fixes:** `isFullRefund` was computed as `refundAmount === total_cents`, which is the **non-cumulative** notion. A $5 partial on a $20 order followed by a $15 refund would leave the order's `payment_status = PARTIALLY_REFUNDED` forever and `order_status = PICKED_UP` (or wherever) instead of transitioning to `REFUNDED`. The new check is `existingRefundedCents + refundAmount === total_cents`.
+
+**The bug A8 fixes:** no idempotency key was passed to Stripe. A retried request after a network blip would create a SECOND refund.
+
+**Considered:**
+
+- Keep the locked transaction but reorder operations within it — assertion before Stripe. Rejected — ties up row-level locks during the (up-to-10s) Stripe call. Cancel-with-state-machine-rejection still requires the same pre-flight check structure regardless.
+- Auto-reverse the Stripe refund if the locked re-check fails. Rejected — Stripe doesn't have an "uncreate" for refunds. The money has already moved. Surfacing it via outbox is the only path.
+- Throw on the Phase 3 race so the caller sees an error. Rejected — Stripe accepted the refund, the customer's money is en route to their card. Throwing here loses the record entirely; the manager has nothing to reconcile against. Mirroring the `markPaidFromWebhook` race pattern (log + outbox + don't throw) keeps the liability visible.
+
+**Idempotency key format rationale:**
+
+`refund-{orderId}-{amountCents}-{floor(now/60000)}`
+
+- `orderId` + `amountCents` — semantic uniqueness per intended refund operation.
+- `floor(now/60000)` — minute bucket. A retry within the same minute (network blip, server crash mid-flight) gets the same key → Stripe deduplicates → at-most-one refund. A deliberate second refund a minute later gets a fresh key → Stripe creates the second refund as intended.
+
+The minute bucket is a conscious trade-off: it could let two distinct intended refunds for the same amount within the same minute collide. In practice that requires a manager to issue two identical-amount refunds within 60 seconds — extremely rare for a single human; if it happens, Stripe's de-duplication does the right thing semantically (the second is treated as a retry of the first, no duplicate refund).
+
+**Why no auto-refund on the Phase 3 race:** the same logic as `markPaidFromWebhook` race-mitigation — when the system detects an unsafe state, manager intervention is the resolution path, not automated money movement. The outbox row carries enough metadata (`stripeRefundId`, `phase1ExistingCents`, `phase3ExistingCents`, `actionRequired: 'manual-reconciliation'`) for the future notifications module to surface the discrepancy to the owner.
+
+**Tests:** `apps/api/src/modules/admin/admin-orders.service.spec.ts` extends with 10 refund-specific tests covering: FAILED order rejected without Stripe call (A5), amount-exceeds-total rejected without Stripe call, cumulative exceeds total rejected without Stripe call (A6), cumulative full refund flips order_status to REFUNDED (A7), cumulative partial refund leaves order_status unchanged, idempotency key format with `jest.useFakeTimers` (A8), Phase 3 race produces log + outbox + no-throw + synthetic refund object, plus three negative-coverage cases for the privacy guards and missing-payment-row branch.
+
+---
+
 ## 2026-05-09 — Scheduled orders: estimated_ready_at set once at checkout, never overwritten
 
 **Decision:** `AdminOrdersService.accept()` only recomputes `estimated_ready_at` for `pickup_type = ASAP`. For `SCHEDULED` orders, the field set at checkout is the source of truth and is never modified by staff transitions. `LocationSettings.findOne` is not consulted on the SCHEDULED branch — `current_wait_minutes` is irrelevant when the customer chose a specific pickup time.

@@ -55,20 +55,37 @@ export class StripeService {
    * admin refund flow. We pass the order UUID + staff user id in metadata so
    * Stripe's dashboard search can find the refund alongside the original PI.
    *
+   * `idempotencyKey` is forwarded to Stripe via the request options. Stripe
+   * de-duplicates concurrent / retried requests with the same key for ~24h
+   * — passing the same key from a retry returns the original refund instead
+   * of creating a second one. The caller is responsible for picking a key
+   * that's stable across legitimate retries but unique per intended refund;
+   * AdminOrdersService.refund() uses
+   *   refund-{orderId}-{amountCents}-{minute-bucket}
+   * so a network blip + immediate retry within the same minute is safe, but
+   * a deliberate second refund a minute later gets a fresh key.
+   *
+   * See decision-log entry "Refund pre-validation before Stripe call: avoid
+   * money out with no DB record" for the surrounding design.
+   *
    * Throws whatever Stripe throws — caller wraps in BadGatewayException so
    * the DB does NOT get updated when Stripe fails.
    */
   async createRefund(params: {
     paymentIntentId: string;
     amountCents: number;
+    idempotencyKey?: string;
     metadata?: Record<string, string>;
   }): Promise<Stripe.Refund> {
-    return this.stripe.refunds.create({
-      payment_intent: params.paymentIntentId,
-      amount: params.amountCents,
-      reason: 'requested_by_customer',
-      metadata: params.metadata,
-    });
+    return this.stripe.refunds.create(
+      {
+        payment_intent: params.paymentIntentId,
+        amount: params.amountCents,
+        reason: 'requested_by_customer',
+        metadata: params.metadata,
+      },
+      params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : undefined,
+    );
   }
 
   /**
