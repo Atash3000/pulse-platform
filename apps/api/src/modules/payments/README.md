@@ -12,7 +12,7 @@ Three places in the system can speak about money:
 
 Only the third one knows for certain whether the customer was charged. The webhook is Stripe's report of that fact, signed with a secret only Stripe and our server hold.
 
-So `payment_status = SUCCEEDED` and `order_status = PAID` are set **exclusively** in `OrdersService.markPaidFromWebhook()`, called from `PaymentsController.handleWebhook()` after signature verification. No other code path touches these columns. Not the iOS app, not the dashboard, not an admin endpoint, not a manual `UPDATE` we're tempted to slip in for a refund flow. Only the webhook.
+So `payment_status = SUCCEEDED` and `order_status = PAID` are set **exclusively** in `WebhookOrdersService.markPaidFromWebhook()` (in `webhook-orders.service.ts`), called from `PaymentsController.handleWebhook()` after signature verification. No other code path touches these columns. Not the iOS app, not the dashboard, not an admin endpoint, not a manual `UPDATE` we're tempted to slip in for a refund flow. Only the webhook.
 
 The tradeoff: the customer sees "paid" in the iOS app a few hundred milliseconds *after* Stripe confirms, instead of immediately. That latency is acceptable because every other approach is broken.
 

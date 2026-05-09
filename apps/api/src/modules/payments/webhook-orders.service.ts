@@ -15,9 +15,21 @@ import {
 } from '../../database/entities';
 import { OrderStateMachine } from '../orders/order-state-machine';
 
+/**
+ * WebhookOrdersService owns the side effects triggered by Stripe webhooks:
+ * marking orders PAID after successful payment, marking orders FAILED on
+ * payment decline, and detecting post-payment race conditions. This service
+ * does NOT handle customer-facing order reads or writes — those live in
+ * `OrdersService` at `modules/orders/orders.service.ts`. The split exists
+ * because webhook handling has different concurrency, error-handling, and
+ * security characteristics than the read/write API: webhooks must be
+ * idempotent under Stripe retries, must not throw on detected races (see
+ * decision-log entry "Webhook-after-state-change races: log + outbox, never
+ * throw"), and are authenticated by signature rather than JWT.
+ */
 @Injectable()
-export class OrdersService {
-  private readonly logger = new Logger(OrdersService.name);
+export class WebhookOrdersService {
+  private readonly logger = new Logger(WebhookOrdersService.name);
 
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 

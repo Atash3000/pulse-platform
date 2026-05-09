@@ -9,7 +9,7 @@ import {
   OutboxEvent,
   Payment,
 } from '../../database/entities';
-import { OrdersService } from './orders.service';
+import { WebhookOrdersService } from './webhook-orders.service';
 import { PaymentsController } from './payments.controller';
 import { StripeService } from './stripe.service';
 import { STRIPE_CLIENT, STRIPE_WEBHOOK_SECRET } from './stripe.token';
@@ -56,7 +56,7 @@ const webhookSecretProvider = {
     stripeClientProvider,
     webhookSecretProvider,
     StripeService,
-    OrdersService,
+    WebhookOrdersService,
   ],
   // StripeService is exported so CheckoutService can inject it for
   // PaymentIntent creation. The raw client and the secret are not exported —

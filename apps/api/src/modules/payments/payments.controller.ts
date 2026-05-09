@@ -14,8 +14,8 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import type Stripe from 'stripe';
 
-import { OrdersService } from './orders.service';
 import { StripeService } from './stripe.service';
+import { WebhookOrdersService } from './webhook-orders.service';
 
 // The webhook is excluded from the Swagger document — it's not a client-facing
 // API; Stripe is the only authorised caller. We keep the contract documented
@@ -27,7 +27,7 @@ export class PaymentsController {
 
   constructor(
     private readonly stripe: StripeService,
-    private readonly orders: OrdersService,
+    private readonly orders: WebhookOrdersService,
   ) {}
 
   /**

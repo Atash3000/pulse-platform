@@ -20,7 +20,7 @@ The diagnosis steps below describe the **Phase 2** failure mode for when this se
    FROM outbox_events
    WHERE payload->>'orderId' = '<order-uuid>';
    ```
-   - No row → the webhook handler's outbox transaction failed. Check Sentry for an exception inside `OrdersService.markPaidFromWebhook()`.
+   - No row → the webhook handler's outbox transaction failed. Check Sentry for an exception inside `WebhookOrdersService.markPaidFromWebhook()`.
    - Row with `status = PENDING`, `attempts = 0` for >5 seconds → outbox worker isn't running. Check ECS task logs for the `outbox.worker` process.
    - Row with `status = DEAD` → the worker gave up after 5 attempts. `last_error` will tell you why. Owner has been Telegram-alerted.
 

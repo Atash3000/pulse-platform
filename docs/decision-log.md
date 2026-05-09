@@ -166,8 +166,8 @@ A SQL `CHECK` constraint can't model the actor dimension at all — Postgres doe
 
 - `OrdersService.cancelOrderAsCustomer` (DRAFT → CANCELLED, customer)
 - `CheckoutService.checkout` (DRAFT → PENDING_PAYMENT, system)
-- `OrdersService.markPaidFromWebhook` (PENDING_PAYMENT → PAID, stripe-webhook)
-- `OrdersService.markFailedFromWebhook` (PENDING_PAYMENT → FAILED, stripe-webhook)
+- `WebhookOrdersService.markPaidFromWebhook` (PENDING_PAYMENT → PAID, stripe-webhook)
+- `WebhookOrdersService.markFailedFromWebhook` (PENDING_PAYMENT → FAILED, stripe-webhook)
 - `AdminOrdersService.transitionStaff` (PAID/ACCEPTED/IN_PROGRESS/READY transitions, staff)
 - `AdminOrdersService.cancelByManager` (manager-initiated cancel, manager)
 - `AdminOrdersService.refund` (full refund only — partial refunds change `payment_status`, not `order_status`, so no transition assertion)
@@ -348,9 +348,9 @@ For a UUID-keyed resource the practical attack surface is small (UUID v4 has ~10
 
 **REFUNDED gets no outbox row** because the order is already terminal — there's nothing to surface, and emitting a `REFUND_CREATED` event for an already-refunded order would confuse the future handler.
 
-**Operational signal for now:** until the notifications module ships, races appear in CloudWatch as a `[OrdersService] WARN webhook race detected` line. CloudWatch alarm on `race=cancel-after-pay OR race=cleanup-after-pay` count > 0 in any 1-hour window is the recommended Phase 1 monitor.
+**Operational signal for now:** until the notifications module ships, races appear in CloudWatch as a `[WebhookOrdersService] WARN webhook race detected` line. CloudWatch alarm on `race=cancel-after-pay OR race=cleanup-after-pay` count > 0 in any 1-hour window is the recommended Phase 1 monitor.
 
-**Tests:** `apps/api/src/modules/payments/orders.service.spec.ts` covers all three race types with explicit assertions on: no-throw, structured warn log, REFUND_CREATED outbox emission for CANCELLED + FAILED only, no payments row / order_event in the race branch, and that the existing `payment_status=SUCCEEDED` idempotency path still wins precedence over the race branch.
+**Tests:** `apps/api/src/modules/payments/webhook-orders.service.spec.ts` covers all three race types with explicit assertions on: no-throw, structured warn log, REFUND_CREATED outbox emission for CANCELLED + FAILED only, no payments row / order_event in the race branch, and that the existing `payment_status=SUCCEEDED` idempotency path still wins precedence over the race branch.
 
 ---
 

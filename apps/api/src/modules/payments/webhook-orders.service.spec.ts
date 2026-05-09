@@ -11,10 +11,10 @@ import {
   OutboxStatus,
   PaymentStatus,
 } from '../../database/entities';
-import { OrdersService } from './orders.service';
+import { WebhookOrdersService } from './webhook-orders.service';
 
 // =============================================================================
-// Webhook OrdersService — race-condition tests for markPaidFromWebhook.
+// WebhookOrdersService — race-condition tests for markPaidFromWebhook.
 //
 // Three races to defend against (see decision-log "Webhook-after-state-change
 // races"). For each, the webhook handler MUST:
@@ -32,8 +32,8 @@ import { OrdersService } from './orders.service';
 // silent.
 // =============================================================================
 
-describe('Webhook OrdersService — markPaidFromWebhook race detection', () => {
-  let service: OrdersService;
+describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
+  let service: WebhookOrdersService;
   let txGetOne: jest.Mock;
   let mockSave: jest.Mock;
   let mockInsert: jest.Mock;
@@ -78,11 +78,11 @@ describe('Webhook OrdersService — markPaidFromWebhook race detection', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        OrdersService,
+        WebhookOrdersService,
         { provide: getDataSourceToken(), useValue: fakeDs },
       ],
     }).compile();
-    service = moduleRef.get(OrdersService);
+    service = moduleRef.get(WebhookOrdersService);
 
     // Capture WARN logs for race-detection assertions. Restore in afterEach.
     warnSpy = jest
