@@ -12,6 +12,55 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Fixed
+
+- Dashboard top items now correctly count units sold rather than line
+  items. A single order with multiple of the same item (e.g., a catering
+  order of 12 lattes) now contributes its full quantity to the
+  `units_sold` ranking. The field has been renamed from `order_count` to
+  `units_sold` to reflect its semantic. — see decision-log entry
+  *"Dashboard arithmetic: net revenue and unit sales semantics"*. Bundle
+  A10.
+
+- Dashboard revenue is now net of partial refunds. Previously, an order
+  with a partial refund contributed its gross total to today's revenue;
+  now it contributes the net amount. Fully refunded orders continue to
+  be excluded entirely (REFUNDED is not in `REVENUE_STATUSES`). Average
+  order value follows the same net calculation. — see decision-log entry
+  *"Dashboard arithmetic: net revenue and unit sales semantics"*. Bundle
+  A11.
+
+- Refund attempts on unrefundable orders no longer move money at Stripe
+  before the validation rejects them. A refund attempt on a FAILED or
+  otherwise non-refundable order, or one whose amount would exceed the
+  remaining refundable, is now rejected in a pre-validation phase BEFORE
+  the Stripe call — previously the assertion ran after Stripe had already
+  moved money, leaving the merchant with money out and no DB record.
+  Cumulative partial refunds correctly transition the order to REFUNDED
+  when the cumulative refund total reaches the order amount (e.g., a
+  prior $5 partial on a $20 order followed by a $15 refund now flips the
+  order to REFUNDED, where it previously stayed in PARTIALLY_REFUNDED).
+  Stripe refund calls now carry an idempotency key so a retried request
+  after a network blip cannot double-refund. Successful refund outbox
+  events now carry `refundType` (`partial`, `single-full`, or
+  `cumulative-full`), `isCumulativelyFull`, and `cumulativeRefundedCents`
+  so downstream notifications can word the receipt correctly. The race
+  branch now returns a discriminated `status: 'race-recorded'` shape
+  instead of a synthetic refund object — callers cannot accidentally
+  treat a Stripe-succeeded-but-DB-raced refund as a normal commit.
+  — see decision-log entry *"Refund pre-validation before Stripe call:
+  avoid money out with no DB record"*. Bundles A5, A6, A7, A8.
+
+### Added
+
+- `POST /admin/orders/:id/picked-up` now emits an `ORDER_PICKED_UP`
+  outbox event alongside the READY → PICKED_UP transition. Mirrors the
+  `markReady → ORDER_READY` shape so the future analytics module
+  (retention, time-to-pickup metrics) and any close-of-loop receipt push
+  receive the close-of-loop event from day one. The outbox worker
+  currently no-ops the event; the case branch in
+  `workers/outbox.worker.ts` already lists it. Bundle A9.
+
 ## [0.2.0-alpha] — 2026-05-09
 
 ### Fixed

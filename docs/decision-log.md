@@ -430,3 +430,41 @@ The minute bucket is a conscious trade-off: it could let two distinct intended r
 **Considered:** A single `ARCHITECTURE.md` in the repo root, or a wiki, or no docs at all (lean on the spec PDF).
 
 **Why this:** The PDF spec describes the destination but not the journey. AI chats start every session with no memory of prior decisions, and the per-domain split (one chat per app) means each chat needs its own focused entry point. Single-doc-in-root would grow into a 5k-line wall. A wiki is one more system to keep in sync. The current structure colocates module docs with their code so they get updated alongside it.
+
+---
+
+## 2026-05-09 — Dashboard arithmetic: net revenue and unit sales semantics
+
+**Decision:** `AdminDashboardService.getSummary()` reports
+
+- `revenue_cents_today` = SUM(`orders.total_cents` − COALESCE(SUM(`refunds.amount_cents`), 0)) over today's orders in `REVENUE_STATUSES`. Net of partial refunds, computed via a `LEFT JOIN` against a per-order refund subquery.
+- `top_items[].units_sold` = SUM(`order_items.quantity`) per `menu_item_id`, ordered by `units_sold DESC`. Units sold, not order_items rows.
+
+This bundles two adjacent bugs in the dashboard query surface:
+
+- **A10** — top items mis-ranked. The previous `COUNT(*)::int AS order_count` counted the **number of `order_items` rows** containing each menu item, not the **quantity** sold. A catering order of 12 lattes (one `order_items` row, `quantity = 12`) ranked equal to twelve separate single-latte orders. The owner's view of "what sold today" was wrong by however much the day's catering or office orders weighed.
+- **A11** — revenue gross instead of net. The previous aggregate summed `total_cents` over the day's orders. An order with a $5 partial refund still contributed its full $20 to revenue. AOV inherited the same gross figure.
+
+**Why SUM(quantity) is the correct semantic for top items:** the field is "what items did we sell today, ranked by demand". A latte sold as 12 in one transaction satisfies the same demand as 12 lattes sold in 12 transactions — the kitchen made 12 drinks either way; the inventory drained 12 units of milk and 12 shots. The line-count answer treats the catering order as a single data point, which is wrong both for the operational view (how many drinks did we make?) and the inventory view (how much did we deplete?). The two test counterexamples — a `quantity=12` catering order ranking against `quantity=1`, and the same item appearing across multiple orders summing to 5 — pin both halves of the regression.
+
+**Why LEFT JOIN over a denormalized `net_revenue_cents` column on `orders`:**
+
+- Considered: maintain `net_revenue_cents` on `orders` itself, updated transactionally whenever a refund row is inserted. Rejected — adds a write path that the existing refund flow doesn't have, with its own failure modes (transaction rollback semantics, ordering with the `payment_status` mutation, what-if-the-update-fails-but-the-refund-row-committed). The LEFT JOIN approach is correct **by construction** — there is no way for the read query to drift from the source-of-truth `refunds` table because it computes net at read time. The query plan is simple (subquery aggregates per `order_id` then joins on the indexed FK); if it ever shows up as slow on a real dataset, an index on `refunds(order_id)` already exists.
+- Considered: subtract refunds in application code after fetching gross. Rejected — turns one query into N (or two with a separate refunds-by-order query), and every caller of dashboard data would need to remember to net out. SQL keeps the semantic in one place.
+
+**Why the subquery and not a direct JOIN on `refunds`:** `LEFT JOIN refunds r ON r.order_id = o.id` would multiply rows when an order has multiple refund rows — a $20 order with two $5 refunds would appear twice in the JOIN, once per refund. `SUM(o.total_cents - r.amount_cents)` would then be `(20 - 5) + (20 - 5) = 30`, not the correct `20 - 10 = 10`, and `COUNT(*)` would over-report by the refund-row factor. Pre-aggregating refunds per `order_id` in the subquery collapses that to one row per order before the join, so `COUNT(*)` stays clean and the subtraction is correct. A test with two partial refunds against the same order pins this.
+
+**Cross-day refund limitation (deliberate Phase 1 simplification):** today's dashboard reports today's orders with all their refunds netted out, NOT "today's transactions" (orders + refunds keyed on their own `created_at`). Concretely:
+
+- Order created yesterday, refunded today: yesterday's revenue is unchanged in the dashboard's eyes; today's revenue does not show the refund (the order isn't in today's window). The refund effectively vanishes from the dashboard.
+- Order created today, refunded today: handled correctly. This is the dominant case for a coffee shop — the customer comes back the same day to complain, the manager refunds within minutes.
+
+**Why we accept the cross-day limitation in Phase 1:**
+
+- Coffee-shop refunds are overwhelmingly same-day. The owner who notices that yesterday's spilled-latte refund didn't reduce yesterday's reported revenue is rare in absolute terms.
+- A correct cross-day report would require a second card on the dashboard ("Transactions today: gross $X, refunds $Y, net $Z") rather than retroactively mutating yesterday's headline number — owners look at the dashboard for a snapshot of *today*, and changing yesterday's number under their feet creates more confusion than it fixes.
+- The fix would touch the SQL surface twice (once for `revenue_cents_today`, once for the new transactions card) and add a fourth time-window concept; not warranted while we have one location and same-day-refund parity.
+
+**When to revisit:** Phase 2 multi-location dashboards or any owner asking "where did yesterday's $5 go" both push this onto the table. The fix is a separate "transactions" report card keyed on `refunds.created_at`, not a retroactive mutation of historical revenue.
+
+**Tests:** `apps/api/src/modules/admin/admin-dashboard.service.spec.ts` — 6 tests covering catering quantity-12 ranking, same-item quantity summing across orders, $20 minus $5 partial refund, two partial refunds stacking on one order, fully-refunded order excluded by status filter, and AOV using net rather than gross.
