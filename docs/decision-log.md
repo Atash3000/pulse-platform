@@ -544,3 +544,97 @@ The reload runs OUTSIDE the lock. The locked transaction itself never returns a 
 **Defensive guard against post-commit reload returning null:** `loadAdminOrderDetail` throws `InternalServerErrorException` if the order is missing. This requires a DELETE between commit and reload, and the codebase doesn't issue order DELETEs anywhere. The throw is a "this can never happen" guard rather than an expected branch — preferred over a silent map-to-an-empty-shape that would mask a real bug.
 
 **Tests:** `apps/api/src/modules/admin/admin-orders.service.spec.ts` — every transition test mocks both `txGetOne` (locked SELECT) and `ordersFindOne` (post-commit reload), plus `customersFindOne` (mapper input). The nullable-customer test covers the `customers.findOne → null` defensive path. No test currently exercises the "order disappears between commit and reload" case because it requires bypassing the assumption that orders are never DELETEd; the `InternalServerErrorException` guard is defensive code by design.
+
+---
+
+## 2026-05-09 — Notifications service: router pattern with stubbed handlers
+
+**Decision:** introduce `apps/api/src/modules/notifications/notifications.service.ts` with a single public entry point `dispatch(eventType, payload)` and six private-by-convention handler methods (`handleOrderPaid`, `handleOrderReady`, `handleOrderCancelled`, `handleOrderPickedUp`, `handleRefundCreated`, `handleItemOutOfStock`). C1 lands the router and the handler stubs; real Telegram delivery (C2) and APNs delivery (C3) are separate, downstream turns; the wiring point that has the outbox worker call `notifications.dispatch(...)` is C4.
+
+**Why a router rather than direct dispatch from `outbox.worker`:**
+
+- Single point of testing for routing logic. Adding a new event type means one new case in `dispatch()` and one new handler — no change to the worker.
+- `outbox.worker.ts` currently maintains its own dispatch switch. After C4 collapses the five no-op cases into a single `await this.notifications.dispatch(...)` call, future event types are added in one place (`NotificationsService.dispatch`), not two.
+- Cross-cutting concerns (telemetry, fan-out, dedup) can land in the router without touching the worker or the handlers individually.
+
+**Why handler stubs that do the DB loads but not the actual sending:**
+
+- Decouples C1 from C2 (Telegram methods on `TelegramService`) and C3 (iOS APNs path). C1 lands independently, exercised by tests with no external dependencies.
+- Each handler logs a structured info-level (or warn-level — see log-level differentiation below) line containing every field a future Telegram or APNs payload would carry. When C2 lands, we'll have a paper trail in CloudWatch confirming the right data is being passed through.
+- Handlers mirror `orderWorker.handleOrderPaid`'s DB-load pattern: load the entity from the database (DB is truth, payload is hint) and read the canonical fields from the loaded row. If the order is amended between the outbox write and the worker pickup (refund, partial refund, status correction), the loaded row reflects the current state, not a stale snapshot.
+
+**The warn-not-throw asymmetry vs `orderWorker.handleOrderPaid`:**
+
+Notification handlers warn-and-return ONLY on the explicit row-not-found condition (`findOne` returned `null`). Any other exception during DB access — connection drops, query failures, type errors — must propagate so the outbox retries the event and eventually marks it DEAD if the failure is persistent.
+
+The intended pattern at every warn-and-return site:
+
+```ts
+const order = await this.orders.findOne({ where: { id: orderId } });
+if (!order) {
+  this.logger.warn(`[notifications] order ${orderId} not found in DB — skipping`);
+  return;
+}
+// continue — any throw above this point propagates naturally, only the
+// explicit row-not-found case warns
+```
+
+Do NOT wrap handler bodies in `try/catch`. That pattern would swallow real DB errors and silently lose notifications.
+
+The asymmetry vs `orderWorker.handleOrderPaid` (which throws on missing order so the outbox retries toward DEAD) is intentional:
+
+- Notifications are best-effort. If the order has been deleted, retrying won't bring it back.
+- DEAD-eventing a notification isn't actionable for the manager — there's no remedial action they can take from a "your customer 'your coffee is ready' push didn't fire because the order vanished" alert.
+- Analytics-and-state handlers retry-toward-DEAD because the customer-state mutation (`last_visit_at`) is a durable record that DOES need eventual consistency.
+- Notification handlers log-and-return on missing rows because the alert is best-effort and lossy by nature.
+
+**Malformed payloads still throw.** The validator pattern (mirrors `orderWorker.handleOrderPaid`'s `extractOrderId`) throws on a missing required string field (`orderId` for the five order-centric handlers, `itemId` for `handleItemOutOfStock`). Validation failure is a programming error at the emit site, not a transient runtime condition — the throw surfaces it to the outbox as DEAD with a clear `last_error` so the operator can fix the emitter. This is distinct from the row-not-found case (`findOne` returning null), which warns and returns.
+
+**Defensive payload reading — REFUND_CREATED has three emit sites:**
+
+- `apps/api/src/modules/admin/admin-orders.service.ts` `refund()` committed arm
+- `apps/api/src/modules/admin/admin-orders.service.ts` `refund()` Phase 3 race branch
+- `apps/api/src/modules/payments/webhook-orders.service.ts` `markPaidFromWebhook` race detection
+
+The cross-site **common subset is four fields** — `orderId`, `customerId`, `locationId`, `amountCents`. `staffUserId` is present only on the two admin-actored sites; the webhook race emit is system-actored and carries `requestId` instead. The handler reads `staffUserId` defensively (`typeof payload.staffUserId === 'string' ? payload.staffUserId : null`) so the webhook-race log line surfaces `staffUserId: null` rather than crashing or surfacing `undefined`.
+
+The defensive-reading pattern is applied uniformly across handlers (Concern B from the C1 reconnaissance refinements — defense in depth). Future emit-site additions for `ORDER_CANCELLED` (e.g., a customer-side cancel path with no `staffUserId` / no `cancelledBy`) won't silently regress the handler. A test exercises this future-emit path to pin the contract.
+
+**Log-level differentiation:**
+
+When the payload carries an `actionRequired` field (set on the two race emit sites: `'manual-reconciliation'` for the Phase 3 race, `'manager-refund-via-admin-endpoint'` for the webhook race), the handler logs at WARN level. Otherwise INFO (`logger.log` — NestJS `Logger` has no `info` method, so dynamic dispatch via `this.logger[level]` would crash; explicit `if (actionRequired) this.logger.warn(...) else this.logger.log(...)` preserves type safety on the Logger interface).
+
+The operator-facing benefit: greppable WARN-level signal in CloudWatch when a refund needs manual reconciliation, distinct from the routine INFO-level signal on a normal committed refund.
+
+**ITEM_OUT_OF_STOCK uses MenuItem, not Order:**
+
+`MenuItem` is platform-wide in the schema — verified: there is no `MenuItem.location_id`. Per-location availability lives in `Inventory` (a separate row keyed on `(item_id, location_id)`). The `handleItemOutOfStock` handler:
+
+- Loads `MenuItem` from `payload.itemId` to get the canonical item name (the alert message needs "Iced Latte sold out at downtown").
+- Uses `payload.locationId` for location context (because the loaded entity has none).
+
+This is the only handler that reads location from the payload rather than the loaded entity, by necessity. An inline comment in the handler documents the asymmetry.
+
+**Future C4 wiring:**
+
+The C4 turn modifies **`apps/api/src/workers/outbox.worker.ts:200-228`** (NOT `order.worker.ts` — which only has `handleOrderPaid`, the analytics + `last_visit_at` handler). The current outbox.worker dispatch switch has five no-op cases (`ORDER_CANCELLED`, `ORDER_READY`, `ORDER_PICKED_UP`, `REFUND_CREATED`, `ITEM_OUT_OF_STOCK`) that warn-and-return-PROCESSED. C4 collapses those into a single `await this.notifications.dispatch(event.event_type, event.payload)` call.
+
+**`ORDER_PAID` requires fan-out and a split-event design:**
+
+`ORDER_PAID` already has an existing handler (`orderWorker.handleOrderPaid`, doing analytics + `last_visit_at`) that must continue running on every paid order. The C1 spec (Part 9) also calls for a manager "NEW ORDER" Telegram alert on every paid order, which `notifications.handleOrderPaid` will own once C4 wires it.
+
+Naive fan-out — calling both handlers from one dispatch tick and succeeding only if both succeed — creates a duplicate-alert bug: any transient failure in the second handler causes the outbox to retry the whole event, the first handler's idempotent re-run is fine but the second handler's external side effect (Telegram message) fires twice. Owner gets duplicate "NEW ORDER" alerts on every transient failure.
+
+**Recommended C4 design: split into two atomic outbox events at the emit site —** `ORDER_PAID` (analytics, retried by `orderWorker.handleOrderPaid`) and `ORDER_PAID_NOTIFICATION` (alert, retried by `notifications.dispatch`). Each retries independently. The split adds emit-site changes in `webhook-orders.service.ts` `markPaidFromWebhook` (write two outbox rows in the same transaction) plus a new `OutboxEventType` enum value `ORDER_PAID_NOTIFICATION` (requires a Postgres enum migration), but this is a smaller surface than retrofitting per-handler idempotency tracking.
+
+**C4 must implement this split before fan-out lands; do not implement single-event-fan-out as an interim step.** The duplicate-alert bug is an externally-visible regression that's hard to debug after the fact.
+
+Until C4, the C1 `handleOrderPaid` is **NOT REACHABLE in production** — it's exercised only by C1's unit tests. A future C2 engineer wiring real Telegram delivery should not assume this handler fires on real paid orders; it doesn't, until C4 lands the split. An inline comment at the top of `handleOrderPaid` flags this for visibility.
+
+**Also in C4: flip `NotificationsService.dispatch`'s `default` branch from warn-and-return to throw.** C1 leaves the default as a warn-and-return because the router isn't called in production yet. Once C4 wires `outbox.worker → notifications.dispatch`, an unknown event type reaching the default branch silently returns PROCESSED to the outbox — meaning if a future engineer adds an `OutboxEventType` enum value, wires it into the emit path, but forgets to add the `case` in `NotificationsService.dispatch`, the notification is lost without trace. Throwing instead surfaces the missing handler as DEAD with a clear `last_error`, matching `outbox.worker`'s existing throw-on-unknown pattern (`outbox.worker.ts:227`). The C1 unit test asserting "warns and does not throw on unknown event type" needs to be inverted to "throws on unknown event type" at the same time — both changes land together in C4.
+
+**Handler API surface — public for testability:**
+
+The `handleX` methods are public on `NotificationsService` so that `dispatch()` can call them and so that unit tests can spy on routing. Production code paths must always go through `dispatch()` — calling handlers directly skips the routing layer and any future cross-cutting concerns added there. A class-level JSDoc comment documents the convention.
+
+**Tests:** `apps/api/src/modules/notifications/notifications.service.spec.ts` — 25 tests covering: routing for all six event types + unknown-type warn, happy-path load+log for each handler with the expected target_audience and structured fields, missing-row warn-and-return for each order-centric handler and for ITEM_OUT_OF_STOCK, malformed-payload throw for representative handlers (validator pattern), three REFUND_CREATED payload shapes (committed → INFO, Phase 3 race → WARN, webhook race → WARN with `staff_user_id: null`), and a defensive-future-emit test for ORDER_CANCELLED (no `cancelledBy` / `staffUserId` → logs as `null` rather than crashing).

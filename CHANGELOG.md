@@ -12,6 +12,22 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Added
+
+- `NotificationsService` — a router with six stubbed handlers
+  (`handleOrderPaid`, `handleOrderReady`, `handleOrderCancelled`,
+  `handleOrderPickedUp`, `handleRefundCreated`, `handleItemOutOfStock`).
+  Each handler loads the relevant entity from the database the same way
+  `orderWorker.handleOrderPaid` does, then logs a structured info-level
+  (or warn-level when the payload carries `actionRequired`) line
+  containing every field a future Telegram or APNs payload would carry.
+  No real Telegram or APNs delivery is wired up yet (C2 and C3
+  respectively), and the outbox worker is not yet calling
+  `dispatch()` (C4). This is entirely additive infrastructure; no
+  user-visible behaviour change. — see decision-log entry
+  *"Notifications service: router pattern with stubbed handlers"*.
+  Bundle C1.
+
 ### Changed
 
 - Admin transition endpoints (`accept`, `progress`, `ready`, `picked-up`,
