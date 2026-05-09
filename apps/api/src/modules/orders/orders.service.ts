@@ -1,9 +1,4 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 
@@ -17,6 +12,7 @@ import {
   OutboxEventType,
   OutboxStatus,
 } from '../../database/entities';
+import { StripeService } from '../payments/stripe.service';
 import { OrderStateMachine } from './order-state-machine';
 
 export interface OrderItemDetail {
@@ -75,6 +71,7 @@ export class OrdersService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
+    private readonly stripe: StripeService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -145,22 +142,46 @@ export class OrdersService {
         .where('o.id = :id', { id: orderId })
         .getOne();
 
-      if (!order) {
+      // Privacy: collapse "doesn't exist" and "not yours" into a single 404
+      // with an identical message — same posture as getOrderForCustomer above.
+      // 403 here would tell a caller "this UUID is real and belongs to someone
+      // else", letting them enumerate valid order IDs by status code. See
+      // decision-log entry "Privacy: 404 over 403 for cross-customer order
+      // access" for the full reasoning.
+      if (!order || order.customer_id !== customerId) {
         throw new NotFoundException(`Order ${orderId} not found`);
       }
-      if (order.customer_id !== customerId) {
-        throw new ForbiddenException('You can only cancel your own orders');
+
+      // Customers may cancel from DRAFT (defensive — checkout doesn't expose
+      // DRAFT today) or from PENDING_PAYMENT (payment sheet shown but not
+      // confirmed). Anything else throws 409 with the actor's valid next set.
+      const fromStatus = order.order_status;
+
+      // If the order has a Stripe PaymentIntent, cancel it BEFORE flipping
+      // the DB status. This way the customer can't accidentally complete
+      // payment in their open Stripe sheet AFTER our cancel commits.
+      // Stripe-side cleanup is best effort: failures are logged but do NOT
+      // abort the local cancel — the DB is the truth, and a stale PI either
+      // expires on Stripe's side or gets cleaned up later.
+      if (
+        fromStatus === OrderStatus.PENDING_PAYMENT &&
+        order.stripe_payment_id
+      ) {
+        try {
+          await this.stripe.cancelPaymentIntent(order.stripe_payment_id);
+        } catch (err) {
+          this.logger.warn(
+            `cancelOrderAsCustomer: Stripe cancel failed for ${order.stripe_payment_id} (order=${order.id}): ${(err as Error).message}. Proceeding with DB cancel.`,
+          );
+        }
       }
 
-      // Spec: customers can only cancel orders in DRAFT.
-      // The state machine throws ConflictException with `validNext` populated.
       OrderStateMachine.assertTransition(
-        order.order_status,
+        fromStatus,
         OrderStatus.CANCELLED,
         'customer',
       );
 
-      const fromStatus = order.order_status;
       order.order_status = OrderStatus.CANCELLED;
       await em.save(order);
 

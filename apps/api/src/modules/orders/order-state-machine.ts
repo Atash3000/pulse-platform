@@ -33,7 +33,22 @@ const TRANSITIONS: ReadonlyMap<OrderStatus, ReadonlyMap<OrderStatus, readonly Ac
       OrderStatus.PENDING_PAYMENT,
       new Map<OrderStatus, readonly ActorType[]>([
         [OrderStatus.PAID, ['stripe-webhook']],
-        [OrderStatus.FAILED, ['stripe-webhook']],
+        // 'system' is the PendingPaymentCleanupTask reaping orders abandoned
+        // mid-checkout (customer closed the app after the PaymentIntent was
+        // created but before confirming payment). 'stripe-webhook' fires
+        // when Stripe reports payment_intent.payment_failed. See decision-log
+        // entry "Abandoned-checkout cleanup: 30-minute threshold, FAILED
+        // state, no outbox event" for the full reasoning.
+        [OrderStatus.FAILED, ['stripe-webhook', 'system']],
+        // Customer can cancel BEFORE confirming payment in the Stripe sheet.
+        // 'system' here is reserved for the same cleanup task if we later
+        // decide abandoned checkouts should resolve to CANCELLED instead of
+        // FAILED — currently they go to FAILED. (DRAFT → CANCELLED for
+        // customer stays in place as defence in depth in case checkout ever
+        // exposes a DRAFT row outside its transaction.) See decision-log
+        // entry "Customer cancel during PENDING_PAYMENT" — without this
+        // transition the cancel endpoint was dead code.
+        [OrderStatus.CANCELLED, ['customer', 'system']],
       ]),
     ],
     [

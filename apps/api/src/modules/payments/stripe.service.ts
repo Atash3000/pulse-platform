@@ -72,6 +72,41 @@ export class StripeService {
   }
 
   /**
+   * Cancels a PaymentIntent that hasn't been confirmed yet. Used by the
+   * customer cancel flow when an order is in PENDING_PAYMENT — we'd rather
+   * not leave a confirmable PI alive in Stripe after the customer has told
+   * us they don't want the order any more.
+   *
+   * Idempotent: if Stripe says the intent is already canceled (or already
+   * succeeded, or in any non-cancellable terminal state), we swallow the
+   * error and return. Our DB is the truth; Stripe-side cleanup is best
+   * effort. The caller is expected to log the error and proceed.
+   *
+   * Throws on transient errors (network, 5xx) so the caller can decide
+   * whether to retry — for the cancel flow today, the caller catches and
+   * logs all errors regardless.
+   */
+  async cancelPaymentIntent(intentId: string): Promise<void> {
+    try {
+      await this.stripe.paymentIntents.cancel(intentId);
+    } catch (err) {
+      // Stripe returns StripeInvalidRequestError with code
+      // 'payment_intent_unexpected_state' when the intent is already in a
+      // state that doesn't accept a cancel (canceled, succeeded, etc.).
+      // Treat that as success — the post-condition we want (intent is no
+      // longer confirmable by the customer) holds.
+      const code = (err as { code?: string })?.code;
+      if (code === 'payment_intent_unexpected_state') {
+        this.logger.log(
+          `cancelPaymentIntent: intent ${intentId} already in terminal state — treating as success`,
+        );
+        return;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Verifies the Stripe-Signature header against the raw request body.
    * MUST be called on every webhook request before any other processing.
    * Throws BadRequestException for any signature failure — the only valid

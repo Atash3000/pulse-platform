@@ -91,13 +91,16 @@ export class OrdersController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cancel an order (customer)',
-    description: 'Customers may only cancel orders in DRAFT. Any other status returns 409 with a clear message.',
+    description:
+      'Valid from DRAFT or PENDING_PAYMENT (i.e. before the customer confirms payment in the Stripe sheet). For PENDING_PAYMENT orders the server also asks Stripe to cancel the underlying PaymentIntent. After the webhook flips the order to PAID, only a manager can cancel.',
   })
   @ApiParam({ name: 'id', format: 'uuid', description: 'Order UUID' })
   @ApiResponse({ status: 200, description: 'Order cancelled. Returns the updated order detail.' })
   @ApiResponse({ status: 401, description: 'Missing or invalid customer JWT.' })
-  @ApiResponse({ status: 403, description: 'Order belongs to a different customer.' })
-  @ApiResponse({ status: 404, description: 'Order does not exist.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Order does not exist or does not belong to you.',
+  })
   @ApiResponse({ status: 409, description: 'Order is not in a state where it can be cancelled by the customer.' })
   async cancelOrder(
     @Req() req: AuthedRequest,
