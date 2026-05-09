@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -34,14 +35,34 @@ const ACTIVE_QUEUE_STATUSES: OrderStatus[] = [
   OrderStatus.READY,
 ];
 
-export interface AdminOrderListItem {
+/**
+ * The canonical admin-side view of an order. Used as the response shape for
+ * BOTH the active-orders list endpoint AND every transition endpoint (accept,
+ * progress, ready, picked-up, cancel, refund-committed). Includes
+ * `payment_status` and `scheduled_pickup_at` which were missing from the
+ * pre-B2 list shape, plus per-line `unit_price_cents` and richer modifier
+ * fields (`modifierId`, `priceCents`) that were already on the underlying
+ * `OrderItem` entity but never exposed to admin clients.
+ *
+ * `customer_name` is nullable: defensive against orphaned orders (customer
+ * row missing) and stale reads. `Order.customer_id` is NOT NULL at the
+ * schema level, so the null path is dead code under normal operation.
+ *
+ * `scheduled_pickup_at` is null for ASAP orders.
+ *
+ * See decision-log entry "Admin response shape: AdminOrderDetail as the
+ * unified DTO".
+ */
+export interface AdminOrderDetail {
   id: string;
   customer_id: string;
-  customer_name: string;
+  customer_name: string | null;
   order_status: string;
+  payment_status: string;
   clover_sync_status: string;
   total_cents: number;
   pickup_type: string;
+  scheduled_pickup_at: string | null;
   estimated_ready_at: string | null;
   notes: string | null;
   created_at: string;
@@ -50,9 +71,21 @@ export interface AdminOrderListItem {
     menu_item_id: string;
     item_name: string;
     quantity: number;
-    modifiers: Array<{ name: string }>;
+    unit_price_cents: number;
+    modifiers: Array<{
+      modifierId: string;
+      name: string;
+      priceCents: number;
+    }>;
   }>;
 }
+
+/**
+ * @deprecated Use `AdminOrderDetail`. Retained as an alias because external
+ * consumers may import this name. The two types are identical; the alias
+ * will be removed once all consumers migrate.
+ */
+export type AdminOrderListItem = AdminOrderDetail;
 
 export interface AdminOrderEventRow {
   id: string;
@@ -72,14 +105,43 @@ export interface AdminOrderEventRow {
  * on `status` makes the manual-reconciliation case impossible to ignore at
  * the type level. See decision-log entry "Refund pre-validation before
  * Stripe call: avoid money out with no DB record" — Phase 3 race section.
+ *
+ * Post-B2: the `committed` arm carries an `AdminOrderDetail` (the unified
+ * admin response shape) rather than a raw `Order` entity, mirroring the
+ * other transition endpoints. The `race-recorded` arm is unchanged because
+ * its semantics are genuinely different — there is no order shape to
+ * return when the persistence step was skipped.
  */
 export type RefundResult =
-  | { status: 'committed'; order: Order; refund: Refund }
+  | { status: 'committed'; order: AdminOrderDetail; refund: Refund }
   | {
       status: 'race-recorded';
       stripeRefundId: string;
       amountCents: number;
       requiresManualReconciliation: true;
+    };
+
+/**
+ * Internal-only outcome returned by the locked transaction inside `refund()`.
+ * The public `RefundResult` is constructed by the outer `refund()` method
+ * AFTER the transaction commits, so the order reload (for the committed
+ * branch's `AdminOrderDetail` mapping) runs OUTSIDE the row lock — see
+ * decision-log entry "Reload outside the locked transaction for admin
+ * transition responses" for why we don't hold the lock through the items
+ * JOIN + customer lookup.
+ *
+ * Not exported — consumers see only `RefundResult`.
+ */
+type RefundOutcome =
+  | {
+      kind: 'race-recorded';
+      stripeRefundId: string;
+      amountCents: number;
+    }
+  | {
+      kind: 'committed-needs-reload';
+      orderId: string;
+      refund: Refund;
     };
 
 @Injectable()
@@ -107,7 +169,7 @@ export class AdminOrdersService {
   // GET /admin/orders — live queue scoped to staff's location
   // ---------------------------------------------------------------------------
 
-  async listActiveOrders(staff: StaffContext): Promise<AdminOrderListItem[]> {
+  async listActiveOrders(staff: StaffContext): Promise<AdminOrderDetail[]> {
     const orders = await this.orders.find({
       where: {
         location_id: staff.location_id,
@@ -118,37 +180,108 @@ export class AdminOrdersService {
     });
     if (orders.length === 0) return [];
 
-    // One round trip for customer names — avoid 1+N.
+    // One round trip for customer names — avoid 1+N. The mapper below takes
+    // a single Customer per order; we look each one up in the batched map.
     const customerIds = [...new Set(orders.map((o) => o.customer_id))];
     const customers = await this.customers.find({ where: { id: In(customerIds) } });
-    const customerNameById = new Map(customers.map((c) => [c.id, c.full_name]));
+    const customerById = new Map(customers.map((c) => [c.id, c]));
 
-    return orders.map((o) => ({
-      id: o.id,
-      customer_id: o.customer_id,
-      customer_name: customerNameById.get(o.customer_id) ?? '',
-      order_status: o.order_status,
-      clover_sync_status: o.clover_sync_status,
-      total_cents: o.total_cents,
-      pickup_type: o.pickup_type,
-      estimated_ready_at: o.estimated_ready_at?.toISOString() ?? null,
-      notes: o.notes,
-      created_at: o.created_at.toISOString(),
-      items: (o.items ?? []).map((i) => ({
-        id: i.id,
-        menu_item_id: i.menu_item_id,
-        item_name: i.item_name,
-        quantity: i.quantity,
-        modifiers: (i.modifiers ?? []).map((m) => ({ name: m.name })),
+    return orders.map((o) => this.toAdminOrderDetail(o, customerById.get(o.customer_id) ?? null));
+  }
+
+  /**
+   * Pure mapper: `Order` (+ optional `Customer`) → `AdminOrderDetail`. Does
+   * NOT load the customer internally — the caller passes it. This preserves
+   * the list path's batched customer lookup (one query for N customers
+   * instead of N queries) and keeps the transition path free to do a single
+   * customer lookup alongside the post-transaction reload.
+   *
+   * `null` for `customer` is acceptable: the resulting `customer_name` is
+   * also `null`. See the `AdminOrderDetail` doc for why this is defensive
+   * rather than an expected production path.
+   */
+  private toAdminOrderDetail(
+    order: Order,
+    customer?: Customer | null,
+  ): AdminOrderDetail {
+    return {
+      id: order.id,
+      customer_id: order.customer_id,
+      customer_name: customer?.full_name ?? null,
+      order_status: order.order_status,
+      payment_status: order.payment_status,
+      clover_sync_status: order.clover_sync_status,
+      total_cents: order.total_cents,
+      pickup_type: order.pickup_type,
+      scheduled_pickup_at: order.scheduled_pickup_at
+        ? order.scheduled_pickup_at.toISOString()
+        : null,
+      estimated_ready_at: order.estimated_ready_at
+        ? order.estimated_ready_at.toISOString()
+        : null,
+      notes: order.notes,
+      created_at: order.created_at.toISOString(),
+      items: (order.items ?? []).map((it) => ({
+        id: it.id,
+        menu_item_id: it.menu_item_id,
+        item_name: it.item_name,
+        quantity: it.quantity,
+        unit_price_cents: it.unit_price_cents,
+        modifiers: (it.modifiers ?? []).map((m) => ({
+          modifierId: m.modifierId,
+          name: m.name,
+          priceCents: m.priceCents,
+        })),
       })),
-    }));
+    };
+  }
+
+  /**
+   * Reload the order with its items relation, fetch the associated customer,
+   * and map to the unified `AdminOrderDetail` shape.
+   *
+   * Reload runs OUTSIDE the just-committed locked transaction. Two reasons:
+   *   1. Lock-contention: holding the row lock through a items JOIN +
+   *      customer lookup serialises every concurrent admin operation on
+   *      the same order behind one slow read. Releasing the lock first
+   *      keeps the critical section to the state-machine work alone.
+   *   2. Returning the current DB state means the response reflects
+   *      whatever-it-is-now rather than a possibly-stale post-transition
+   *      snapshot, which matches what the staff member's UI is going to
+   *      display anyway (the dashboard polls /admin/orders every 5s).
+   *
+   * The microscopic race window between commit and reload — a concurrent
+   * transition landing in those few milliseconds — is acceptable for
+   * Phase 1 single-location operations; the next list poll resyncs anyway.
+   * See decision-log entry "Reload outside the locked transaction for
+   * admin transition responses".
+   */
+  private async loadAdminOrderDetail(orderId: string): Promise<AdminOrderDetail> {
+    const reloaded = await this.orders.findOne({
+      where: { id: orderId },
+      relations: { items: true },
+    });
+    if (!reloaded) {
+      // Defensive — the order was just committed by THIS request inside the
+      // locked transaction. Hitting this path requires another process to
+      // have hard-deleted the row in the few ms since commit. The codebase
+      // never DELETEs orders (status fields, never DROP), so this is the
+      // "this can never happen" guard rather than an expected branch.
+      throw new InternalServerErrorException(
+        `Order ${orderId} disappeared after transition`,
+      );
+    }
+    const customer = await this.customers.findOne({
+      where: { id: reloaded.customer_id },
+    });
+    return this.toAdminOrderDetail(reloaded, customer);
   }
 
   // ---------------------------------------------------------------------------
   // POST /admin/orders/:id/accept — PAID → ACCEPTED
   // ---------------------------------------------------------------------------
 
-  async accept(staff: StaffContext, orderId: string): Promise<Order> {
+  async accept(staff: StaffContext, orderId: string): Promise<AdminOrderDetail> {
     return this.transitionStaff(
       staff,
       orderId,
@@ -189,7 +322,7 @@ export class AdminOrdersService {
   // POST /admin/orders/:id/progress — ACCEPTED → IN_PROGRESS
   // ---------------------------------------------------------------------------
 
-  async progress(staff: StaffContext, orderId: string): Promise<Order> {
+  async progress(staff: StaffContext, orderId: string): Promise<AdminOrderDetail> {
     return this.transitionStaff(staff, orderId, OrderStatus.IN_PROGRESS);
   }
 
@@ -197,7 +330,7 @@ export class AdminOrdersService {
   // POST /admin/orders/:id/ready — IN_PROGRESS → READY (+ ORDER_READY outbox)
   // ---------------------------------------------------------------------------
 
-  async markReady(staff: StaffContext, orderId: string): Promise<Order> {
+  async markReady(staff: StaffContext, orderId: string): Promise<AdminOrderDetail> {
     return this.transitionStaff(
       staff,
       orderId,
@@ -220,7 +353,7 @@ export class AdminOrdersService {
   // POST /admin/orders/:id/picked-up — READY → PICKED_UP
   // ---------------------------------------------------------------------------
 
-  async markPickedUp(staff: StaffContext, orderId: string): Promise<Order> {
+  async markPickedUp(staff: StaffContext, orderId: string): Promise<AdminOrderDetail> {
     return this.transitionStaff(
       staff,
       orderId,
@@ -249,8 +382,12 @@ export class AdminOrdersService {
   // POST /admin/orders/:id/cancel — manager+; PAID|ACCEPTED|IN_PROGRESS|READY → CANCELLED
   // ---------------------------------------------------------------------------
 
-  async cancelByManager(staff: StaffContext, orderId: string, reason: string): Promise<Order> {
-    return this.ds.transaction(async (em) => {
+  async cancelByManager(
+    staff: StaffContext,
+    orderId: string,
+    reason: string,
+  ): Promise<AdminOrderDetail> {
+    await this.ds.transaction(async (em) => {
       const order = await this.lockedFetch(em, staff.location_id, orderId);
       const fromStatus = order.order_status;
       OrderStateMachine.assertTransition(fromStatus, OrderStatus.CANCELLED, 'manager');
@@ -287,8 +424,9 @@ export class AdminOrdersService {
       this.logger.log(
         `order ${order.id} → CANCELLED by staff=${staff.staff_user_id} (was ${fromStatus})`,
       );
-      return order;
     });
+
+    return this.loadAdminOrderDetail(orderId);
   }
 
   // ---------------------------------------------------------------------------
@@ -440,7 +578,7 @@ export class AdminOrdersService {
     // gets a notification once the notifications module ships and reconciles
     // by hand).
     // -------------------------------------------------------------------------
-    return this.ds.transaction(async (em) => {
+    const outcome: RefundOutcome = await this.ds.transaction(async (em) => {
       const locked = await this.lockedFetch(em, staff.location_id, orderId);
       const lockedExistingCents = await this.sumRefundsForOrderInTx(em, orderId);
 
@@ -477,12 +615,12 @@ export class AdminOrdersService {
         // The outbox row above carries the liability so the manager can
         // reconcile manually. Surface this to callers as a distinct
         // discriminator so HTTP / test code cannot accidentally treat it
-        // as a normal commit.
+        // as a normal commit. The `race-recorded` arm needs no order
+        // reload — there is no order shape to return.
         return {
-          status: 'race-recorded',
+          kind: 'race-recorded',
           stripeRefundId,
           amountCents: refundAmount,
-          requiresManualReconciliation: true,
         };
       }
 
@@ -585,8 +723,34 @@ export class AdminOrdersService {
         `refund ${stripeRefundId}: order=${locked.id} amount_cents=${refundAmount} ` +
           `type=${refundType} cumulative=${cumulativeRefundedCents}/${locked.total_cents}`,
       );
-      return { status: 'committed', order: locked, refund: savedRefund };
+      // Hand off to the outer method, which reloads the order with items +
+      // customer OUTSIDE this transaction and produces the public
+      // `RefundResult` with a mapped `AdminOrderDetail`.
+      return {
+        kind: 'committed-needs-reload',
+        orderId: locked.id,
+        refund: savedRefund,
+      };
     });
+
+    if (outcome.kind === 'race-recorded') {
+      return {
+        status: 'race-recorded',
+        stripeRefundId: outcome.stripeRefundId,
+        amountCents: outcome.amountCents,
+        requiresManualReconciliation: true,
+      };
+    }
+
+    // committed-needs-reload — reload + map outside the just-committed lock,
+    // same pattern as the staff-transition methods. See decision-log entry
+    // "Reload outside the locked transaction for admin transition responses".
+    const orderDetail = await this.loadAdminOrderDetail(outcome.orderId);
+    return {
+      status: 'committed',
+      order: orderDetail,
+      refund: outcome.refund,
+    };
   }
 
   /**
@@ -660,8 +824,8 @@ export class AdminOrdersService {
     orderId: string,
     to: OrderStatus,
     afterUpdate?: (em: import('typeorm').EntityManager, order: Order) => Promise<void>,
-  ): Promise<Order> {
-    return this.ds.transaction(async (em) => {
+  ): Promise<AdminOrderDetail> {
+    await this.ds.transaction(async (em) => {
       const order = await this.lockedFetch(em, staff.location_id, orderId);
       const fromStatus = order.order_status;
       OrderStateMachine.assertTransition(fromStatus, to, 'staff');
@@ -686,8 +850,12 @@ export class AdminOrdersService {
       });
 
       this.logger.log(`order ${order.id}: ${fromStatus} → ${to} by staff=${staff.staff_user_id}`);
-      return order;
     });
+
+    // Reload + map happens AFTER the locked transaction commits — see
+    // `loadAdminOrderDetail` doc for the trade-offs (lock-contention savings
+    // and "current state, not stale snapshot" rationale).
+    return this.loadAdminOrderDetail(orderId);
   }
 
   /**

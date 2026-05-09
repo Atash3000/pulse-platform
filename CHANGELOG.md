@@ -12,6 +12,27 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Changed
+
+- Admin transition endpoints (`accept`, `progress`, `ready`, `picked-up`,
+  `cancel`, `refund`) now return a consistent `AdminOrderDetail` response
+  shape that includes the order's items, customer name, payment status,
+  and scheduled pickup time. The list endpoint already returned a similar
+  shape; transitions previously returned the raw `Order` entity without
+  relations.
+- The active-orders list endpoint and transition endpoints now expose
+  `items[].unit_price_cents` and richer modifier fields (`modifierId`,
+  `priceCents`) — previously only modifier `name` was returned. Per-line
+  pricing is admin-role-gated and intended for manager dashboards.
+- The shape change is a wire-format update for admin clients only; iOS
+  and webhook paths are unaffected. `customer_name` is now nullable in
+  the type system; downstream admin clients that treated it as
+  definitely-a-string should handle the null case explicitly.
+- `AdminOrderListItem` is preserved as a deprecated alias for
+  `AdminOrderDetail` so existing imports continue to compile; the alias
+  will be removed once consumers migrate. — see decision-log entry
+  *"Admin response shape: AdminOrderDetail as the unified DTO"*. Bundle B2.
+
 ### Fixed
 
 - Dashboard top items now correctly count units sold rather than line

@@ -47,12 +47,21 @@ describe('AdminOrdersService.accept', () => {
   let mockSave: jest.Mock;
   let mockInsert: jest.Mock;
   let settingsFindOne: jest.Mock;
+  // Post-B2: every transition does a reload + customer lookup OUTSIDE the
+  // locked transaction (see decision-log entry "Reload outside the locked
+  // transaction for admin transition responses"). The orders repo's findOne
+  // is the reload; the customers repo's findOne feeds the toAdminOrderDetail
+  // mapper. Both are mocked per-test to control the response shape.
+  let ordersFindOne: jest.Mock;
+  let customersFindOne: jest.Mock;
 
   beforeEach(async () => {
     txGetOne = jest.fn();
     mockSave = jest.fn().mockImplementation(async (entity) => entity);
     mockInsert = jest.fn().mockResolvedValue(undefined);
     settingsFindOne = jest.fn();
+    ordersFindOne = jest.fn();
+    customersFindOne = jest.fn();
 
     // SELECT FOR UPDATE chain used by lockedFetch
     const fakeSelectQb = {
@@ -83,11 +92,15 @@ describe('AdminOrdersService.accept', () => {
       providers: [
         AdminOrdersService,
         { provide: getDataSourceToken(), useValue: fakeDs },
-        // The other repos are required by the constructor but unused by accept().
-        { provide: getRepositoryToken(Order), useValue: {} },
+        // Orders repo: findOne for the post-transition reload.
+        { provide: getRepositoryToken(Order), useValue: { findOne: ordersFindOne } },
         { provide: getRepositoryToken(OrderItem), useValue: {} },
         { provide: getRepositoryToken(OrderEvent), useValue: { find: jest.fn() } },
-        { provide: getRepositoryToken(Customer), useValue: { find: jest.fn() } },
+        // Customers repo: findOne for the customer lookup feeding the mapper.
+        {
+          provide: getRepositoryToken(Customer),
+          useValue: { findOne: customersFindOne, find: jest.fn() },
+        },
         { provide: getRepositoryToken(LocationSettings), useValue: {} },
         { provide: getRepositoryToken(Payment), useValue: {} },
         { provide: getRepositoryToken(Refund), useValue: {} },
@@ -118,17 +131,45 @@ describe('AdminOrdersService.accept', () => {
     });
     txGetOne.mockResolvedValueOnce(orderRef);
     settingsFindOne.mockResolvedValueOnce({ current_wait_minutes: 7 });
+    // Reload after commit returns the (now-mutated) orderRef with items
+    // populated for the mapper. Customer lookup feeds customer_name.
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce({
+      id: orderRef.customer_id,
+      full_name: 'Alice Customer',
+    });
 
     const returned = await service.accept(STAFF, orderRef.id);
 
     // Exact arithmetic — fake timers pin Date.now().
     const expectedReadyAt = new Date('2026-05-09T14:07:00.000Z');
     expect(orderRef.estimated_ready_at).toEqual(expectedReadyAt);
-    expect(returned.estimated_ready_at).toEqual(expectedReadyAt);
+    // Returned shape is AdminOrderDetail (post-B2): estimated_ready_at is an
+    // ISO string, not a Date object. The mapper does the toISOString() at
+    // serialisation time.
+    expect(returned.estimated_ready_at).toBe(expectedReadyAt.toISOString());
 
     // Status flipped, save called with the mutated order.
     expect(orderRef.order_status).toBe(OrderStatus.ACCEPTED);
     expect(mockSave).toHaveBeenCalledWith(orderRef);
+
+    // AdminOrderDetail shape pinning — customer_name from the customer
+    // lookup, items from the reload (empty here), payment_status passed
+    // through. Pin once here so the rest of the accept tests can focus on
+    // behaviour rather than re-asserting the shape.
+    expect(returned).toEqual(
+      expect.objectContaining({
+        id: orderRef.id,
+        customer_id: orderRef.customer_id,
+        customer_name: 'Alice Customer',
+        order_status: OrderStatus.ACCEPTED,
+        payment_status: orderRef.payment_status,
+        clover_sync_status: orderRef.clover_sync_status,
+        pickup_type: PickupType.ASAP,
+        scheduled_pickup_at: null,
+        items: [],
+      }),
+    );
   });
 
   it('ASAP: defaults to 5-minute wait when LocationSettings row is missing', async () => {
@@ -139,6 +180,8 @@ describe('AdminOrdersService.accept', () => {
     const orderRef = makeOrder({ pickup_type: PickupType.ASAP });
     txGetOne.mockResolvedValueOnce(orderRef);
     settingsFindOne.mockResolvedValueOnce(null); // no settings row
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce(null);
 
     await service.accept(STAFF, orderRef.id);
 
@@ -163,13 +206,19 @@ describe('AdminOrdersService.accept', () => {
       estimated_ready_at: scheduledTime,
     });
     txGetOne.mockResolvedValueOnce(orderRef);
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce(null);
 
-    await service.accept(STAFF, orderRef.id);
+    const returned = await service.accept(STAFF, orderRef.id);
 
     // Field equals the original timestamp exactly — not overwritten.
     expect(orderRef.estimated_ready_at).toEqual(scheduledTime);
     // Status still flipped to ACCEPTED.
     expect(orderRef.order_status).toBe(OrderStatus.ACCEPTED);
+    // Mapped response surfaces the pre-existing scheduled time as an ISO
+    // string in the new scheduled_pickup_at field (post-B2 addition).
+    expect(returned.scheduled_pickup_at).toBe(scheduledTime.toISOString());
+    expect(returned.estimated_ready_at).toBe(scheduledTime.toISOString());
   });
 
   // ---------------------------------------------------------------------------
@@ -186,6 +235,8 @@ describe('AdminOrdersService.accept', () => {
       estimated_ready_at: new Date('2026-05-09T14:00:00.000Z'),
     });
     txGetOne.mockResolvedValueOnce(orderRef);
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce(null);
 
     await service.accept(STAFF, orderRef.id);
 
@@ -196,10 +247,35 @@ describe('AdminOrdersService.accept', () => {
     const orderRef = makeOrder({ pickup_type: PickupType.ASAP });
     txGetOne.mockResolvedValueOnce(orderRef);
     settingsFindOne.mockResolvedValueOnce({ current_wait_minutes: 5 });
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce(null);
 
     await service.accept(STAFF, orderRef.id);
 
     expect(settingsFindOne).toHaveBeenCalledTimes(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test (post-B2): nullable customer path. Customers.findOne returns null
+  // when the customer row has been deleted out from under an orphaned order.
+  // The schema enforces customer_id NOT NULL on orders, so this scenario
+  // requires a hard-deleted customer row — defensive code rather than an
+  // expected production path. The mapped response carries customer_name=null.
+  // ---------------------------------------------------------------------------
+
+  it('nullable customer path: customers.findOne returning null produces customer_name=null', async () => {
+    const orderRef = makeOrder({ pickup_type: PickupType.ASAP });
+    txGetOne.mockResolvedValueOnce(orderRef);
+    settingsFindOne.mockResolvedValueOnce({ current_wait_minutes: 5 });
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce(null); // orphaned-customer scenario
+
+    const returned = await service.accept(STAFF, orderRef.id);
+
+    expect(returned.customer_name).toBeNull();
+    // Other shape fields still populate from the order itself.
+    expect(returned.id).toBe(orderRef.id);
+    expect(returned.order_status).toBe(OrderStatus.ACCEPTED);
   });
 
   // ---------------------------------------------------------------------------
@@ -215,6 +291,8 @@ describe('AdminOrdersService.accept', () => {
       const orderRef = makeOrder({ pickup_type: PickupType.ASAP });
       txGetOne.mockResolvedValueOnce(orderRef);
       settingsFindOne.mockResolvedValueOnce({ current_wait_minutes: 5 });
+      ordersFindOne.mockResolvedValueOnce(orderRef);
+      customersFindOne.mockResolvedValueOnce(null);
 
       await service.accept(STAFF, orderRef.id);
 
@@ -236,6 +314,8 @@ describe('AdminOrdersService.accept', () => {
         estimated_ready_at: new Date('2026-05-09T14:00:00.000Z'),
       });
       txGetOne.mockResolvedValueOnce(orderRef);
+      ordersFindOne.mockResolvedValueOnce(orderRef);
+      customersFindOne.mockResolvedValueOnce(null);
 
       await service.accept(STAFF, orderRef.id);
 
@@ -311,7 +391,8 @@ describe('AdminOrdersService.refund', () => {
   let mockInsert: jest.Mock;
   let phase1SumGetRawOne: jest.Mock;   // Phase 1 cumulative refund sum
   let phase3SumGetRawOne: jest.Mock;   // Phase 3 in-tx cumulative refund sum
-  let ordersFindOne: jest.Mock;        // Phase 1 order load
+  let ordersFindOne: jest.Mock;        // Phase 1 order load AND post-commit reload (post-B2)
+  let customersFindOne: jest.Mock;     // post-B2: customer lookup for AdminOrderDetail mapping
   let paymentsFindOne: jest.Mock;      // Phase 1 payments row check
   let createRefundMock: jest.Mock;
   let logErrorSpy: jest.SpyInstance;
@@ -323,6 +404,7 @@ describe('AdminOrdersService.refund', () => {
     phase1SumGetRawOne = jest.fn();
     phase3SumGetRawOne = jest.fn();
     ordersFindOne = jest.fn();
+    customersFindOne = jest.fn();
     paymentsFindOne = jest.fn();
     createRefundMock = jest.fn();
 
@@ -371,7 +453,10 @@ describe('AdminOrdersService.refund', () => {
         { provide: getRepositoryToken(Order), useValue: { findOne: ordersFindOne } },
         { provide: getRepositoryToken(OrderItem), useValue: {} },
         { provide: getRepositoryToken(OrderEvent), useValue: { find: jest.fn() } },
-        { provide: getRepositoryToken(Customer), useValue: { find: jest.fn() } },
+        {
+          provide: getRepositoryToken(Customer),
+          useValue: { findOne: customersFindOne, find: jest.fn() },
+        },
         { provide: getRepositoryToken(LocationSettings), useValue: {} },
         {
           provide: getRepositoryToken(Refund),
@@ -490,6 +575,12 @@ describe('AdminOrdersService.refund', () => {
     createRefundMock.mockResolvedValueOnce({ id: 're_full_test' });
     txGetOneOrder.mockResolvedValueOnce(order);
     phase3SumGetRawOne.mockResolvedValueOnce({ total: '1000' }); // unchanged in lock
+    // Post-B2: committed branch reloads outside the lock + maps to AdminOrderDetail.
+    ordersFindOne.mockResolvedValueOnce(order);
+    customersFindOne.mockResolvedValueOnce({
+      id: order.customer_id,
+      full_name: 'Refund Customer',
+    });
 
     const result = await service.refund(STAFF, order.id, 'final refund', 1000);
 
@@ -502,7 +593,10 @@ describe('AdminOrdersService.refund', () => {
         `expected status='committed' but got status='${result.status}'`,
       );
     }
+    // result.order is the mapped AdminOrderDetail (post-B2), not a raw Order.
+    // order_status field is preserved on the mapped shape.
     expect(result.order.order_status).toBe(OrderStatus.REFUNDED);
+    expect(result.order.customer_name).toBe('Refund Customer');
     // The Phase 3 OrderEvent insert should record full_refund=true and the
     // cumulative total.
     const orderEventInsert = mockInsert.mock.calls.find(
@@ -556,6 +650,9 @@ describe('AdminOrdersService.refund', () => {
     createRefundMock.mockResolvedValueOnce({ id: 're_single_full' });
     txGetOneOrder.mockResolvedValueOnce(order);
     phase3SumGetRawOne.mockResolvedValueOnce({ total: '0' });
+    // Post-B2 reload + customer lookup
+    ordersFindOne.mockResolvedValueOnce(order);
+    customersFindOne.mockResolvedValueOnce(null);
 
     await service.refund(STAFF, order.id, 'whole-order refund', 2000);
 
@@ -593,6 +690,9 @@ describe('AdminOrdersService.refund', () => {
     createRefundMock.mockResolvedValueOnce({ id: 're_partial_test' });
     txGetOneOrder.mockResolvedValueOnce(order);
     phase3SumGetRawOne.mockResolvedValueOnce({ total: '500' });
+    // Post-B2 reload + customer lookup
+    ordersFindOne.mockResolvedValueOnce(order);
+    customersFindOne.mockResolvedValueOnce(null);
 
     await service.refund(STAFF, order.id, 'extra small refund', 500);
 
@@ -652,6 +752,9 @@ describe('AdminOrdersService.refund', () => {
     createRefundMock.mockResolvedValueOnce({ id: 're_idem_test' });
     txGetOneOrder.mockResolvedValueOnce(order);
     phase3SumGetRawOne.mockResolvedValueOnce({ total: '0' });
+    // Post-B2 reload + customer lookup
+    ordersFindOne.mockResolvedValueOnce(order);
+    customersFindOne.mockResolvedValueOnce(null);
 
     await service.refund(STAFF, order.id, 'idempotency test', 200);
 
@@ -791,11 +894,15 @@ describe('AdminOrdersService.markPickedUp', () => {
   let txGetOne: jest.Mock;
   let mockSave: jest.Mock;
   let mockInsert: jest.Mock;
+  let ordersFindOne: jest.Mock;
+  let customersFindOne: jest.Mock;
 
   beforeEach(async () => {
     txGetOne = jest.fn();
     mockSave = jest.fn().mockImplementation(async (entity) => entity);
     mockInsert = jest.fn().mockResolvedValue(undefined);
+    ordersFindOne = jest.fn();
+    customersFindOne = jest.fn();
 
     const fakeSelectQb = {
       setLock: jest.fn().mockReturnThis(),
@@ -818,10 +925,13 @@ describe('AdminOrdersService.markPickedUp', () => {
       providers: [
         AdminOrdersService,
         { provide: getDataSourceToken(), useValue: fakeDs },
-        { provide: getRepositoryToken(Order), useValue: {} },
+        { provide: getRepositoryToken(Order), useValue: { findOne: ordersFindOne } },
         { provide: getRepositoryToken(OrderItem), useValue: {} },
         { provide: getRepositoryToken(OrderEvent), useValue: { find: jest.fn() } },
-        { provide: getRepositoryToken(Customer), useValue: { find: jest.fn() } },
+        {
+          provide: getRepositoryToken(Customer),
+          useValue: { findOne: customersFindOne, find: jest.fn() },
+        },
         { provide: getRepositoryToken(LocationSettings), useValue: {} },
         { provide: getRepositoryToken(Refund), useValue: {} },
         { provide: getRepositoryToken(Payment), useValue: {} },
@@ -847,8 +957,13 @@ describe('AdminOrdersService.markPickedUp', () => {
       payment_status: PaymentStatus.SUCCEEDED,
     });
     txGetOne.mockResolvedValueOnce(orderRef);
+    ordersFindOne.mockResolvedValueOnce(orderRef);
+    customersFindOne.mockResolvedValueOnce({
+      id: orderRef.customer_id,
+      full_name: 'Bob Pickup',
+    });
 
-    await service.markPickedUp(STAFF, orderRef.id);
+    const returned = await service.markPickedUp(STAFF, orderRef.id);
 
     // Status flipped
     expect(orderRef.order_status).toBe(OrderStatus.PICKED_UP);
@@ -879,5 +994,18 @@ describe('AdminOrdersService.markPickedUp', () => {
       to_status: OrderStatus.PICKED_UP,
       created_by: STAFF.staff_user_id,
     });
+
+    // AdminOrderDetail shape pinning (post-B2): customer_name from the
+    // post-transaction customers.findOne, order_status reflects the
+    // mutation, payment_status passed through the mapper.
+    expect(returned).toEqual(
+      expect.objectContaining({
+        id: orderRef.id,
+        order_status: OrderStatus.PICKED_UP,
+        payment_status: PaymentStatus.SUCCEEDED,
+        customer_name: 'Bob Pickup',
+        customer_id: orderRef.customer_id,
+      }),
+    );
   });
 });

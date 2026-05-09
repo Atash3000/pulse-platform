@@ -21,8 +21,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import {
+  AdminOrderDetail,
   AdminOrderEventRow,
-  AdminOrderListItem,
   AdminOrdersService,
   RefundResult,
 } from './admin-orders.service';
@@ -47,8 +47,12 @@ export class AdminOrdersController {
     description:
       'Returns active orders only (PAID, ACCEPTED, IN_PROGRESS, READY) for the location in the staff JWT. Polled by the staff dashboard every 5 seconds.',
   })
-  @ApiResponse({ status: 200, description: 'Active orders, oldest first.' })
-  list(@Req() req: Request): Promise<AdminOrderListItem[]> {
+  @ApiResponse({
+    status: 200,
+    description:
+      'Active orders, oldest first. Each item has the AdminOrderDetail shape — see the service interface for fields (id, customer_id, customer_name (nullable), order_status, payment_status, clover_sync_status, total_cents, pickup_type, scheduled_pickup_at, estimated_ready_at, notes, created_at, items[]).',
+  })
+  list(@Req() req: Request): Promise<AdminOrderDetail[]> {
     const staff = requireStaff(req);
     return this.orders.listActiveOrders(staff);
   }
@@ -60,10 +64,17 @@ export class AdminOrdersController {
   @Roles(StaffRole.BARISTA, StaffRole.MANAGER, StaffRole.OWNER)
   @ApiOperation({ summary: 'PAID → ACCEPTED. Sets estimated_ready_at.' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Order transitioned to ACCEPTED.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Order transitioned to ACCEPTED. Returns the AdminOrderDetail shape (same fields as GET /admin/orders), reloaded from the DB after the locked transaction commits.',
+  })
   @ApiResponse({ status: 404, description: 'Order not at this location.' })
   @ApiResponse({ status: 409, description: 'Order not in PAID status.' })
-  accept(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+  accept(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminOrderDetail> {
     const staff = requireStaff(req);
     return this.orders.accept(staff, id);
   }
@@ -73,9 +84,15 @@ export class AdminOrdersController {
   @Roles(StaffRole.BARISTA, StaffRole.MANAGER, StaffRole.OWNER)
   @ApiOperation({ summary: 'ACCEPTED → IN_PROGRESS.' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Order transitioned to IN_PROGRESS.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Order transitioned to IN_PROGRESS. Returns the AdminOrderDetail shape.',
+  })
   @ApiResponse({ status: 409, description: 'Order not in ACCEPTED status.' })
-  progress(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+  progress(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminOrderDetail> {
     const staff = requireStaff(req);
     return this.orders.progress(staff, id);
   }
@@ -87,9 +104,15 @@ export class AdminOrdersController {
     summary: 'IN_PROGRESS → READY. Inserts an ORDER_READY outbox event for push delivery.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Order transitioned to READY.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Order transitioned to READY. Returns the AdminOrderDetail shape.',
+  })
   @ApiResponse({ status: 409, description: 'Order not in IN_PROGRESS status.' })
-  ready(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+  ready(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminOrderDetail> {
     const staff = requireStaff(req);
     return this.orders.markReady(staff, id);
   }
@@ -99,9 +122,15 @@ export class AdminOrdersController {
   @Roles(StaffRole.BARISTA, StaffRole.MANAGER, StaffRole.OWNER)
   @ApiOperation({ summary: 'READY → PICKED_UP. Closes the order.' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Order transitioned to PICKED_UP.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Order transitioned to PICKED_UP. Returns the AdminOrderDetail shape.',
+  })
   @ApiResponse({ status: 409, description: 'Order not in READY status.' })
-  pickedUp(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+  pickedUp(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminOrderDetail> {
     const staff = requireStaff(req);
     return this.orders.markPickedUp(staff, id);
   }
@@ -117,7 +146,10 @@ export class AdminOrdersController {
       'Valid from PAID, ACCEPTED, IN_PROGRESS, or READY. DRAFT and PENDING_PAYMENT cancellations are not the manager\'s territory. Inserts ORDER_CANCELLED outbox event only when payment_status=SUCCEEDED.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Order cancelled.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Order cancelled. Returns the AdminOrderDetail shape.',
+  })
   @ApiResponse({ status: 400, description: 'reason missing or too short.' })
   @ApiResponse({ status: 403, description: 'Insufficient role.' })
   @ApiResponse({ status: 409, description: 'Order is in a status managers may not cancel.' })
@@ -125,7 +157,7 @@ export class AdminOrdersController {
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelOrderDto,
-  ) {
+  ): Promise<AdminOrderDetail> {
     const staff = requireStaff(req);
     return this.orders.cancelByManager(staff, id, dto.reason);
   }
@@ -142,7 +174,7 @@ export class AdminOrdersController {
   @ApiResponse({
     status: 200,
     description:
-      'Two shapes by discriminator. status="committed": refund persisted, order updated. status="race-recorded": Stripe refunded but a DB race blocked persistence; manager must reconcile via Stripe dashboard.',
+      'Discriminated union. status="committed" body: { status, refund, order } where order is the unified AdminOrderDetail shape (same as GET /admin/orders) reloaded after the locked transaction commits. status="race-recorded" body: { status, stripeRefundId, amountCents, requiresManualReconciliation: true, message } — Stripe accepted the refund but a concurrent DB race blocked persistence; manager must reconcile via Stripe dashboard. Race-recorded responses carry NO order field because no DB refund row was created and no order mutation occurred.',
   })
   @ApiResponse({ status: 400, description: 'reason missing/short, or amount_cents out of bounds.' })
   @ApiResponse({ status: 403, description: 'Insufficient role.' })

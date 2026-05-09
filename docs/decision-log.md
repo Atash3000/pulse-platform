@@ -468,3 +468,79 @@ This bundles two adjacent bugs in the dashboard query surface:
 **When to revisit:** Phase 2 multi-location dashboards or any owner asking "where did yesterday's $5 go" both push this onto the table. The fix is a separate "transactions" report card keyed on `refunds.created_at`, not a retroactive mutation of historical revenue.
 
 **Tests:** `apps/api/src/modules/admin/admin-dashboard.service.spec.ts` — 6 tests covering catering quantity-12 ranking, same-item quantity summing across orders, $20 minus $5 partial refund, two partial refunds stacking on one order, fully-refunded order excluded by status filter, and AOV using net rather than gross.
+
+---
+
+## 2026-05-09 — Admin response shape: AdminOrderDetail as the unified DTO
+
+**Decision:** every admin-orders endpoint that returns an order — `GET /admin/orders` (list) and the six transition endpoints (`accept`, `progress`, `ready`, `picked-up`, `cancel`, `refund` committed-arm) — returns the same `AdminOrderDetail` shape:
+
+```ts
+interface AdminOrderDetail {
+  id: string;
+  customer_id: string;
+  customer_name: string | null;
+  order_status: string;
+  payment_status: string;
+  clover_sync_status: string;
+  total_cents: number;
+  pickup_type: string;
+  scheduled_pickup_at: string | null;
+  estimated_ready_at: string | null;
+  notes: string | null;
+  created_at: string;
+  items: Array<{
+    id: string;
+    menu_item_id: string;
+    item_name: string;
+    quantity: number;
+    unit_price_cents: number;
+    modifiers: Array<{ modifierId: string; name: string; priceCents: number }>;
+  }>;
+}
+```
+
+The previous `AdminOrderListItem` is preserved as a deprecated alias so existing imports keep compiling.
+
+**Why list and transitions diverged historically:** the list endpoint always projected (`customer_name` joined in, `items` loaded, raw enums stringified). Transitions returned `lockedFetch`'s raw `Order` directly — that's a TypeORM entity with no relations loaded (the lock query is bare for performance), no customer name attached, and JS `Date` objects rather than ISO strings. Admin clients had to either (a) ignore the transition response and wait for the next 5-second list poll to learn what happened, or (b) reconcile two different shapes for the same logical resource.
+
+**Why this is worth fixing:** contract drift compounds. Two clients (today's dashboard, tomorrow's hypothetical second admin client) parsing two shapes makes type errors ship as runtime bugs. The Swagger surface was misleading too — `@ApiResponse` didn't pin a schema, so generated SDKs typed transition responses as the raw `Order` entity, exposing internal columns the API shouldn't promise.
+
+**Why we kept the discriminated union on the refund endpoint despite unification:** the `race-recorded` arm reflects a genuinely different outcome than a normal commit. The DB has no refund row, no order mutation occurred, and the manager needs an operator-facing message + the Stripe refund ID for manual reconciliation. Forcing this into the same shape as the committed arm would either drop information the manager needs or pad the committed shape with optional reconciliation fields that are confusing in the success case. Two distinct discriminator arms is the type system saying "these are different kinds of things; handle them differently."
+
+**Why fields were preserved alongside the additions:** the existing `AdminOrderListItem` carried `customer_id` and `clover_sync_status` that the proposed redesign omitted. Both stay on `AdminOrderDetail` — `customer_id` is used by admin clients to key follow-up lookups (without it, a UI showing a customer-scoped action panel has to do an extra lookup), and `clover_sync_status` is the Phase 2 hook for the upcoming Clover POS integration. Removing them would have been an unforced wire-format break.
+
+**`customer_name` is nullable on `AdminOrderDetail` even though `Order.customer_id` is `NOT NULL`:** the schema enforces every order has a `customer_id`, but the customer row itself could in principle be hard-deleted (orphaned-order scenario). The codebase doesn't currently DELETE customers, so the null path is dead code under normal operation — but exposing it in the type system makes a future engineer's life better when soft-delete or hard-delete eventually lands. The list path's batched customer lookup also produces `null` when a customer is missing from the batch result; same defensive behaviour.
+
+**Items shape expansion (`unit_price_cents`, modifier `modifierId` + `priceCents`):** the data was always there on `OrderItem.unit_price_cents` and the `OrderItemModifierSnapshot` JSONB shape. The pre-B2 list mapper just dropped these fields. They're useful to admin dashboards rendering line-by-line breakdowns ("$4.50 latte + $0.50 oat milk"), and they're admin-role-gated, so exposing them is a contract expansion rather than a leak.
+
+**Migration plan for `AdminOrderListItem`:** the alias points to `AdminOrderDetail`; the two are identical at the type level. Consumers can rename their imports at any pace. We'll remove the alias once all internal consumers have migrated; external admin clients (the staff dashboard) drive the real timeline.
+
+**Tests:** `apps/api/src/modules/admin/admin-orders.service.spec.ts` and `admin-orders.controller.spec.ts` extend the existing transition tests in place to assert the `AdminOrderDetail` shape (id, customer_id, customer_name, order_status, payment_status, items, scheduled_pickup_at, estimated_ready_at as ISO strings). One new nullable-customer test in the accept describe block covers the orphaned-customer path. The race-recorded refund test is unchanged because that arm wasn't reshaped.
+
+---
+
+## 2026-05-09 — Reload outside the locked transaction for admin transition responses
+
+**Decision:** every admin transition method (`accept`, `progress`, `ready`, `picked-up`, `cancel`, `refund` committed-arm) does the same two-phase pattern:
+
+1. **Inside the locked transaction:** acquire `SELECT FOR UPDATE` on the order, validate via `OrderStateMachine.assertTransition`, mutate, save, insert audit + outbox rows, commit.
+2. **After the transaction commits:** call `loadAdminOrderDetail(orderId)`, which does `orders.findOne({ where: { id }, relations: { items: true } })` + `customers.findOne(...)` + `toAdminOrderDetail(...)`. Return the mapped shape.
+
+The reload runs OUTSIDE the lock. The locked transaction itself never returns a mapped DTO — for non-refund transitions the helper returns `void`, for refund the transaction returns an internal `RefundOutcome` discriminator that the outer method translates to `RefundResult`.
+
+**Why we don't return the in-memory post-transition order:** considered. After `await em.save(order)` inside the locked block, the in-memory `order` has the just-committed state; we could attach freshly-fetched items + customer and skip the reload. Rejected — the in-memory snapshot is THIS request's view, not the DB's current view. If a concurrent transition lands between our commit and our response (microscopic but non-zero window), the in-memory approach would tell the staff member "your action set this to ACCEPTED" while the actual current state is IN_PROGRESS. The reload approach tells them "the order is currently IN_PROGRESS" — which matches what the dashboard will show on the next 5-second list poll anyway. Returning the current DB state is more useful to the staff member's UI than a possibly-stale post-transition snapshot.
+
+**The microscopic race window between commit and reload is acceptable for Phase 1:**
+
+- Phase 1 is single-location with single-digit baristas. Concurrent transitions on the same order are rare in absolute terms.
+- The dashboard's 5-second polling resyncs either way — the response is informational, not authoritative.
+- The audit trail (`order_events`) is always correct because it's written inside the locked transaction. The wire response is best-effort current-state; the durable record is the events table.
+
+**Phase 2 considerations:** if multi-staff or multi-location concurrent operations get heavy, two paths re-open: switch to the in-memory pattern (simpler under load), or take a SHARED lock for the reload. Neither is needed today.
+
+**Lock-contention savings that motivated reloading outside the transaction at all:** holding the `SELECT FOR UPDATE` row lock through an items-relation JOIN + a customers lookup serialises every concurrent admin operation on the same order behind one slow read. Even a 50–100ms read holds the lock long enough to back up several concurrent staff actions. The reshape (lock → mutate → commit → release; then reload) keeps the critical section to the state-machine work alone. The cost is two extra round-trips per transition (one for the order+items reload, one for the customer); for a Phase 1 coffee shop with single-digit transitions per minute, this is invisible.
+
+**Defensive guard against post-commit reload returning null:** `loadAdminOrderDetail` throws `InternalServerErrorException` if the order is missing. This requires a DELETE between commit and reload, and the codebase doesn't issue order DELETEs anywhere. The throw is a "this can never happen" guard rather than an expected branch — preferred over a silent map-to-an-empty-shape that would mask a real bug.
+
+**Tests:** `apps/api/src/modules/admin/admin-orders.service.spec.ts` — every transition test mocks both `txGetOne` (locked SELECT) and `ordersFindOne` (post-commit reload), plus `customersFindOne` (mapper input). The nullable-customer test covers the `customers.findOne → null` defensive path. No test currently exercises the "order disappears between commit and reload" case because it requires bypassing the assumption that orders are never DELETEd; the `InternalServerErrorException` guard is defensive code by design.

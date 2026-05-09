@@ -1,9 +1,10 @@
 import { Test } from '@nestjs/testing';
 import type { Request } from 'express';
 
-import { Order, OrderStatus, Refund, StaffRole } from '../../database/entities';
+import { OrderStatus, Refund, StaffRole } from '../../database/entities';
 import { AdminOrdersController } from './admin-orders.controller';
 import {
+  AdminOrderDetail,
   AdminOrdersService,
   RefundResult,
 } from './admin-orders.service';
@@ -48,8 +49,25 @@ describe('AdminOrdersController.refund', () => {
     controller = moduleRef.get(AdminOrdersController);
   });
 
-  it('committed: returns { status, order, refund } passthrough', async () => {
-    const order = { id: 'order-1', order_status: OrderStatus.REFUNDED } as Order;
+  it('committed: returns { status, order, refund } with mapped AdminOrderDetail', async () => {
+    // Post-B2: the committed arm carries an AdminOrderDetail (the unified
+    // admin response shape) rather than a raw Order entity. The service
+    // does the reload-and-map; the controller just passes it through.
+    const order: AdminOrderDetail = {
+      id: 'order-1',
+      customer_id: 'cust-1',
+      customer_name: 'Refund Customer',
+      order_status: OrderStatus.REFUNDED,
+      payment_status: 'REFUNDED',
+      clover_sync_status: 'NOT_SENT',
+      total_cents: 825,
+      pickup_type: 'ASAP',
+      scheduled_pickup_at: null,
+      estimated_ready_at: null,
+      notes: null,
+      created_at: '2026-05-09T14:00:00.000Z',
+      items: [],
+    };
     const refund = { id: 'refund-1', amount_cents: 825 } as Refund;
     const committed: RefundResult = { status: 'committed', order, refund };
     serviceRefund.mockResolvedValueOnce(committed);
