@@ -27,6 +27,8 @@ The flow from "customer taps Checkout" to "order_status = PAID."
 
 The customer sees confirmation as soon as step 12 commits. Step 13 is async.
 
+**Abandoned-checkout cleanup.** If the customer never confirms in step 9 (closes the app, loses network, walks away), the order stays at `PENDING_PAYMENT` and steps 10–13 never fire. A scheduled task — `PendingPaymentCleanupTask` in `modules/orders/` — runs every 5 minutes and transitions any `PENDING_PAYMENT` order older than 30 minutes to `FAILED` with reason `"abandoned at checkout"`. It best-effort cancels the underlying Stripe PaymentIntent first. No outbox event is emitted: there's nothing to refund and a "your order was cancelled" push to a customer who already abandoned would be confusing. iOS polling discovers the FAILED state on its next request and stops polling. See `docs/decision-log.md` for the why.
+
 **Phase 2** dispatch path will additionally include a real Clover REST call with retries and a "your coffee is ready" push notification on `ORDER_READY`. See the decision log for why those are out of scope today; the staff dashboard handles operational order management in Phase 1.
 
 ## 2. The outbox pattern

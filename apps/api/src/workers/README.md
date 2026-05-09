@@ -6,7 +6,10 @@ Background processes that consume rows from `outbox_events` and dispatch the sid
 
 **Built:**
 - `outbox.worker.ts` — polls `outbox_events` every 1 second, claims `PENDING` rows under `FOR UPDATE SKIP LOCKED`, dispatches each, marks `PROCESSED` or progresses toward `DEAD`. Multi-pod safe.
-- `order.worker.ts` — handles `ORDER_PAID`. Loads the order from the database (payload only carries `orderId`), calls `CloverSyncService.syncOrder()`, updates `customers.last_visit_at`, emits a structured analytics log.
+- `order.worker.ts` — handles `ORDER_PAID`. Loads the order from the database (payload only carries `orderId`), logs the Clover-deferred line, updates `customers.last_visit_at`, emits a structured analytics log.
+
+**Scheduled tasks (live in their owning module, not in `workers/`):**
+- `modules/orders/pending-payment-cleanup.task.ts` — runs every 5 minutes (`@Cron(CronExpression.EVERY_5_MINUTES)`). Reaps orders abandoned at checkout: any `PENDING_PAYMENT` order older than 30 minutes is transitioned to `FAILED` with reason `"abandoned at checkout"`. Best-effort cancels the underlying Stripe PaymentIntent first. Uses the same `FOR UPDATE SKIP LOCKED` claim pattern as the outbox worker and is gated by the same `WORKERS_ENABLED` env var, so it's multi-pod safe and only runs on dedicated worker tasks. No outbox event is emitted — the customer never paid, so there's nothing to refund or notify about.
 
 **Phase 1 stance on Clover:** **DEFERRED TO PHASE 2.** `OrderWorker.handleOrderPaid` does NOT call `CloverSyncService.syncOrder()`. Every Phase 1 order keeps `clover_sync_status = NOT_SENT` from creation through pickup, and that is the expected and correct state. Operational order management lives in the staff dashboard (`POST /admin/orders/:id/{accept,progress,ready,picked-up}`) — staff handle mobile orders directly there in Phase 1, no POS sync required.
 

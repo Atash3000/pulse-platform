@@ -13,7 +13,7 @@ NestJS + TypeScript + TypeORM. Owns Postgres, Redis, Stripe, Clover, push, Teleg
 | `pricing` | Built | All money math. Integer cents. 22/22 unit tests pass. |
 | `payments` | Built | Stripe webhook + atomic outbox transaction (`ORDER_PAID`). |
 | `checkout` | Built | 6-step flow (idempotency → location → items → pricing → atomic txn → response). |
-| `orders` | Built | `GET /orders/:id`, `GET /orders/my` (paginated), `POST /orders/:id/cancel` (DRAFT only). |
+| `orders` | Built | `GET /orders/:id`, `GET /orders/my` (paginated), `POST /orders/:id/cancel` (DRAFT or PENDING_PAYMENT). Also hosts `PendingPaymentCleanupTask` — a `@Cron(EVERY_5_MINUTES)` sweep that transitions abandoned-at-checkout orders (PENDING_PAYMENT > 30 min) to FAILED and best-effort cancels their Stripe PaymentIntent. |
 | `admin` | Built | 14 endpoints across orders/items/ordering/dashboard/feature-flags. RBAC enforced. |
 | `workers` | Built | Outbox poller + order worker. `SELECT FOR UPDATE SKIP LOCKED` for multi-pod safety. Stub Clover/Telegram still in place. |
 | `clover` | Stub | `CloverSyncService.syncOrder()` logs only. Real Clover REST integration is the next module. |

@@ -70,6 +70,10 @@ Without snapshots:
 
 With snapshots, the order row is a complete, durable record of the transaction. The cost is a few hundred bytes per order.
 
+## Abandoned checkouts
+
+If the customer never confirms in the Stripe sheet, the order stays at `PENDING_PAYMENT` and the webhook never fires. The `PendingPaymentCleanupTask` (in `modules/orders/`) reaps these every 5 minutes once they're > 30 minutes old, transitioning them to `FAILED` with reason `"abandoned at checkout"`. The Stripe PaymentIntent is best-effort cancelled before the local transition; if Stripe is unreachable, our DB still flips to FAILED and Stripe's own ~24-hour PI expiry handles the rest. See `docs/decision-log.md` for the threshold/state choice and `docs/troubleshooting.md` for diagnostics when the task isn't reaping.
+
 ## Duplicate idempotency keys
 
 Three cases. All three are handled in `tryReturnCachedResponse()` before any other work runs.

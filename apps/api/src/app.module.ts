@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -22,6 +23,12 @@ import { WorkersModule } from './workers/workers.module';
     ConfigModule.forRoot({ isGlobal: true, cache: true }),
 
     TypeOrmModule.forRoot(dataSourceOptions),
+
+    // Discovers @Cron decorators across all modules. Currently fires:
+    //   - PendingPaymentCleanupTask (every 5 minutes) — modules/orders/
+    // Each task self-gates on WORKERS_ENABLED so API-only ECS replicas skip
+    // the side effect. forRoot() must be called exactly once.
+    ScheduleModule.forRoot(),
 
     // Default short-window throttle. Per-endpoint stricter limits (login 5/min,
     // register 10/min, checkout 3/min, etc.) override this via @Throttle().

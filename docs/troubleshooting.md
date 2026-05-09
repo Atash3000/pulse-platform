@@ -50,6 +50,8 @@ The customer's order is still valid. They paid; we owe them a coffee. Don't undo
 
 **What you'd see:** customer reports "I paid but the app still says processing." `SELECT order_status, payment_status FROM orders WHERE id=…` returns `(PENDING_PAYMENT, REQUIRES_PAYMENT)`.
 
+> **Auto-cleanup expectation:** the `PendingPaymentCleanupTask` (`modules/orders/pending-payment-cleanup.task.ts`) runs every 5 minutes and transitions any `PENDING_PAYMENT` order older than **30 minutes** to `FAILED` with reason `"abandoned at checkout"`. So a stuck-PENDING_PAYMENT row that's <30 min old is the normal-but-still-pre-webhook case below; a row older than 30 min indicates the cleanup task isn't running or is misconfigured.
+
 **Check, in order:**
 
 1. **`payments` table** — is there a row for this order?
@@ -109,6 +111,42 @@ The customer's order is still valid. They paid; we owe them a coffee. Don't undo
 4. `1778273424632-InitialSchema.ts` shows the corrected pattern with explanatory comments — copy that approach.
 
 **Prevention:** always read the generated migration before running it. Treat `migration:generate` as a first draft, never a finished artifact.
+
+---
+
+## Abandoned-checkout cleanup task isn't running
+
+**What you'd see:** `PENDING_PAYMENT` orders older than 30 minutes are accumulating in the database. The task should reap them on a 5-minute cadence; if you see >100 of them, something is wrong.
+
+**Check, in order:**
+
+1. **Is the cleanup running on this pod?**
+   - Look for `[PendingPaymentCleanupTask]` log lines. The task only logs when it actually reaps something (`reaped N abandoned order(s)`) or when there's an error. A silent worker is a worker that found nothing — that's normal during quiet periods.
+   - On startup, if `WORKERS_ENABLED=false`, you'll see `WORKERS_ENABLED=false — pending-payment cleanup cron NOT firing (API-only mode)`. If the pod is supposed to run cleanup, fix the env var.
+
+2. **Are there multiple pods with `WORKERS_ENABLED=true`?**
+   - If yes, that's fine — the SKIP LOCKED claim ensures they don't double-process. But if `WORKERS_ENABLED=true` is set on every API replica plus the worker task, every API request shares CPU with the cron.
+   - Recommended: `WORKERS_ENABLED=true` on exactly one ECS task family (the worker task), `WORKERS_ENABLED=false` on the rest.
+
+3. **Manual force-sweep** (incident response):
+   ```sql
+   UPDATE orders
+   SET order_status = 'FAILED', payment_status = 'FAILED'
+   WHERE order_status = 'PENDING_PAYMENT'
+     AND created_at < NOW() - INTERVAL '30 minutes'
+   RETURNING id;
+
+   INSERT INTO order_events (order_id, from_status, to_status, reason, created_by, metadata)
+   SELECT id, 'PENDING_PAYMENT', 'FAILED', 'abandoned at checkout (manual sweep)', 'system', '{"manual": true}'::jsonb
+   FROM orders WHERE order_status = 'FAILED' AND created_at < NOW() - INTERVAL '30 minutes' AND id NOT IN (
+     SELECT order_id FROM order_events WHERE reason LIKE 'abandoned at checkout%'
+   );
+   ```
+   Run inside a transaction. The `RETURNING` clause tells you how many were affected.
+
+4. **Stripe-side cleanup of orphan PaymentIntents** (cosmetic):
+   - The cleanup task tries to cancel the PI before transitioning. If Stripe was unreachable when the task ran, the order is FAILED in our DB but the PI is still confirmable in Stripe.
+   - Stripe expires the PI on its own ~24 hours after creation; nothing to do unless Stripe-vs-our-ledger reconciliation flags it.
 
 ---
 
