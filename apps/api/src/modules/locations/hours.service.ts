@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -11,6 +8,14 @@ import {
   LocationSettings,
   PickupType,
 } from '../../database/entities';
+import {
+  combineLocalDayAndTime,
+  dayOfWeekInTz,
+  formatTimeInTz,
+  isTimeWithinInTz,
+  resolveTimezone,
+  startOfDayPlusDaysInTz,
+} from './hours-tz';
 
 export type AvailabilityRejectReason =
   | 'MOBILE_ORDERING_PAUSED'
@@ -47,6 +52,8 @@ interface CanAcceptOptions {
 
 @Injectable()
 export class HoursService {
+  private readonly logger = new Logger(HoursService.name);
+
   constructor(
     @InjectRepository(Location) private readonly locations: Repository<Location>,
     @InjectRepository(LocationHours) private readonly hours: Repository<LocationHours>,
@@ -54,7 +61,7 @@ export class HoursService {
   ) {}
 
   /**
-   * Implements Part 5.5 of the spec exactly.
+   * Implements Part 5.5 of the spec, timezone-aware.
    *
    *   1. Mobile ordering paused?              → reject MOBILE_ORDERING_PAUSED
    *   2. is_closed today + ASAP?              → reject CLOSED_TODAY (with nextOpenAt)
@@ -65,6 +72,12 @@ export class HoursService {
    *        scheduledTime outside hours?       → reject SCHEDULED_TIME_OUTSIDE_HOURS
    *        scheduledTime > max_schedule_days? → reject SCHEDULED_TIME_TOO_FAR
    *   → allowed, estimatedReadyAt = now + current_wait_minutes
+   *
+   * All day-of-week and time-of-day reads use `Location.timezone`, NOT
+   * server time. Server can be UTC, store can be in America/New_York or
+   * Asia/Tokyo, all checks behave the same. See `hours-tz.ts` for the
+   * helper module + decision-log entry "Timezone-aware hours and
+   * scheduled pickup validation" for the rationale.
    */
   async canAcceptOrders(
     locationId: string,
@@ -78,6 +91,20 @@ export class HoursService {
       return rejected('LOCATION_INACTIVE', 'This location is not currently accepting orders.');
     }
 
+    // Resolve the timezone ONCE at entry. The helper absorbs three failure
+    // modes (null/empty → default NY; invalid IANA → log warn + fall back
+    // to NY; valid → pass through). All subsequent helper calls use the
+    // resolved `tz`, never server local.
+    const resolved = resolveTimezone(location.timezone);
+    if (resolved.isFallback) {
+      this.logger.warn(
+        `[hours-service] location ${locationId} has invalid timezone ` +
+          `'${resolved.originalTz}'; falling back to '${resolved.tz}'. ` +
+          `Operator should fix the Location row.`,
+      );
+    }
+    const tz = resolved.tz;
+
     const settings = await this.settings.findOne({ where: { location_id: locationId } });
     const waitMinutes = settings?.current_wait_minutes ?? 5;
     const scheduledOrderingEnabled = settings?.scheduled_ordering ?? true;
@@ -89,16 +116,16 @@ export class HoursService {
     }
 
     const now = opts.now ?? new Date();
-    const todayHours = await this.hoursForDate(locationId, now);
+    const todayHours = await this.hoursForDayOfWeek(locationId, dayOfWeekInTz(now, tz));
 
     // 2/3. Closed today
     if (!todayHours || todayHours.is_closed) {
       if (opts.pickupType === PickupType.ASAP) {
-        const nextOpenAt = await this.findNextOpening(locationId, now);
+        const nextOpenAt = await this.findNextOpening(locationId, now, tz);
         return rejected(
           'CLOSED_TODAY',
           nextOpenAt
-            ? `We're closed today. We open at ${formatTime(nextOpenAt)}.`
+            ? `We're closed today. We open at ${formatTimeInTz(nextOpenAt, tz)}.`
             : "We're closed today.",
           nextOpenAt,
         );
@@ -108,12 +135,15 @@ export class HoursService {
 
     if (opts.pickupType === PickupType.ASAP) {
       // 4. Outside hours?
-      if (todayHours && !isTimeWithin(now, todayHours.open_time, todayHours.close_time)) {
-        const nextOpenAt = await this.findNextOpening(locationId, now);
+      if (
+        todayHours &&
+        !isTimeWithinInTz(now, todayHours.open_time, todayHours.close_time, tz)
+      ) {
+        const nextOpenAt = await this.findNextOpening(locationId, now, tz);
         return rejected(
           'OUTSIDE_HOURS',
           nextOpenAt
-            ? `We open at ${formatTime(nextOpenAt)}.`
+            ? `We open at ${formatTimeInTz(nextOpenAt, tz)}.`
             : 'We are not currently open.',
           nextOpenAt,
         );
@@ -144,14 +174,24 @@ export class HoursService {
       );
     }
 
-    const scheduledDayHours = await this.hoursForDate(locationId, scheduled);
+    const scheduledDayHours = await this.hoursForDayOfWeek(
+      locationId,
+      dayOfWeekInTz(scheduled, tz),
+    );
     if (!scheduledDayHours || scheduledDayHours.is_closed) {
       return rejected(
         'SCHEDULED_TIME_OUTSIDE_HOURS',
         "We're closed at that time. Please pick a different pickup time.",
       );
     }
-    if (!isTimeWithin(scheduled, scheduledDayHours.open_time, scheduledDayHours.close_time)) {
+    if (
+      !isTimeWithinInTz(
+        scheduled,
+        scheduledDayHours.open_time,
+        scheduledDayHours.close_time,
+        tz,
+      )
+    ) {
       return rejected(
         'SCHEDULED_TIME_OUTSIDE_HOURS',
         `Please pick a time between ${scheduledDayHours.open_time.slice(0, 5)} and ${scheduledDayHours.close_time.slice(0, 5)}.`,
@@ -163,26 +203,43 @@ export class HoursService {
     return { allowed: true, estimatedReadyAt: scheduled, waitMinutes };
   }
 
-  private async hoursForDate(locationId: string, when: Date): Promise<LocationHours | null> {
-    const dow = when.getDay(); // 0=Sunday, 6=Saturday — matches spec
+  /**
+   * Load the `LocationHours` row for the given day-of-week. Index on
+   * `(location_id, day_of_week)` makes this a single-row lookup.
+   *
+   * Renamed from `hoursForDate(when: Date)` — callers now pass the
+   * day-of-week computed in the location's timezone, not a Date that
+   * implicitly reads server tz.
+   */
+  private async hoursForDayOfWeek(
+    locationId: string,
+    dayOfWeek: number,
+  ): Promise<LocationHours | null> {
     return this.hours.findOne({
-      where: { location_id: locationId, day_of_week: dow },
+      where: { location_id: locationId, day_of_week: dayOfWeek },
     });
   }
 
   /**
-   * Walks forward up to 7 days looking for the next open period. Returns the
-   * concrete Date of the next open time (so iOS can display "We open at 7:00 AM"
-   * with the correct day implied).
+   * Walks forward up to 7 days (in the location's tz) looking for the next
+   * open period. Returns the concrete UTC `Date` instant of the next open
+   * time so iOS can display "We open at 7:00 AM" with the correct day
+   * implied via its own tz-aware formatter.
    */
-  private async findNextOpening(locationId: string, from: Date): Promise<Date | undefined> {
+  private async findNextOpening(
+    locationId: string,
+    from: Date,
+    tz: string,
+  ): Promise<Date | undefined> {
+    const todayDow = dayOfWeekInTz(from, tz);
     for (let offset = 0; offset < 7; offset++) {
-      const day = new Date(from);
-      day.setDate(day.getDate() + offset);
-      const rec = await this.hoursForDate(locationId, day);
+      const dow = (todayDow + offset) % 7;
+      const rec = await this.hoursForDayOfWeek(locationId, dow);
       if (!rec || rec.is_closed) continue;
 
-      const openAt = combineDateAndTime(day, rec.open_time);
+      // Compute the UTC instant of the open-time on (today + offset) in tz.
+      const dayAnchor = startOfDayPlusDaysInTz(from, offset, tz);
+      const openAt = combineLocalDayAndTime(dayAnchor, rec.open_time, tz);
       if (offset === 0 && openAt.getTime() <= from.getTime()) {
         // Already past today's open time — keep walking.
         continue;
@@ -201,42 +258,4 @@ function rejected(
   nextOpenAt?: Date,
 ): AvailabilityRejected {
   return { allowed: false, reason, message, nextOpenAt };
-}
-
-/** "HH:MM:SS" → minutes since midnight. */
-function timeToMinutes(t: string): number {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + (m ?? 0);
-}
-
-function dateToMinutes(d: Date): number {
-  return d.getHours() * 60 + d.getMinutes();
-}
-
-/**
- * Inclusive of open_time, exclusive of close_time. Handles overnight ranges
- * (e.g. open 22:00, close 02:00) — most coffee shops won't, but the data
- * model permits it.
- */
-function isTimeWithin(when: Date, openT: string, closeT: string): boolean {
-  const cur = dateToMinutes(when);
-  const open = timeToMinutes(openT);
-  const close = timeToMinutes(closeT);
-  if (open === close) return false;
-  if (open < close) return cur >= open && cur < close;
-  // overnight
-  return cur >= open || cur < close;
-}
-
-function combineDateAndTime(day: Date, time: string): Date {
-  const [h, m, s] = time.split(':').map(Number);
-  const d = new Date(day);
-  d.setHours(h, m ?? 0, s ?? 0, 0);
-  return d;
-}
-
-function formatTime(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
 }

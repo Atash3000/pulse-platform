@@ -782,3 +782,108 @@ Open question to revisit at that turn: the C3 stub logs `chat_id: 'owner'` as a 
 
 - `apps/api/src/modules/notifications/telegram-formatters.spec.ts` — 17 tests covering the four formatters with edge cases (single-name customers, three-word names, whitespace handling, `formatCents` zero / odd-cents / large values, `formatItemList` quantity-extension, `formatOrderShortId` short / empty UUID inputs).
 - `apps/api/src/modules/notifications/telegram.service.spec.ts` — 12 tests covering: one happy-path per C3 method asserting the rendered Part 9 body string + alert / level / chat_id / orderId fields, a chat_id-null branch test for the `TELEGRAM_OWNER_CHAT_ID`-not-set fallback, a hybrid-log-convention test that asserts every C3 method emits the four canonical fields, and a regression test pinning the legacy `alertDeadOutboxEvent` plain-text format so a future "let's unify" change is explicit.
+
+---
+
+## 2026-05-11 — Timezone-aware hours and scheduled pickup validation
+
+**Decision:** rewrite `HoursService.canAcceptOrders` and every supporting helper to read day-of-week, time-of-day, and DST transitions from the **location's** `IANA timezone` rather than the **server's** local timezone. Adds `date-fns-tz@^3.2.0` + `date-fns@^4.1.0` as production dependencies. Extracts the timezone math into a pure-function helper module (`hours-tz.ts`) so each helper is independently unit-testable without standing up the full service.
+
+**The bug:**
+
+Every helper in the pre-fix `hours.service.ts` read server-local time:
+
+| Line (pre-fix) | Code | What it produced |
+|---|---|---|
+| `:167` | `when.getDay()` (in `hoursForDate`) | Day-of-week 0–6 in **server** tz. |
+| `:213` | `d.getHours() * 60 + d.getMinutes()` (in `dateToMinutes`) | Minute-of-day in **server** tz. |
+| `:230` | `d.setHours(h, m, s)` (in `combineDateAndTime`) | Sets HH:MM:SS in **server** tz on a given calendar day. |
+| `:239`/`:240` | `d.getHours()` / `d.getMinutes()` (in `formatTime`) | Renders HH:MM in **server** tz for the rejection message. |
+
+Deployed on ECS Fargate (server tz = UTC) serving a store in `America/New_York`, the bug surfaced most visibly around server-midnight UTC:
+
+- A store with hours `Mon 09:00–19:00` would report "outside hours" at 6pm New York (22:00 UTC) because the helper read hour `22`, not `18`. Rejected legitimate orders.
+- A Tokyo store at Sunday 5am JST would read Saturday's hours (server tz UTC saw `Saturday 20:00`), looking up the wrong row entirely. Wrong day-of-week.
+- Rejection messages rendered `"We open at 14:00"` (UTC of 09:00 NY) — correct only by coincidence in the server's tz.
+
+Other places in the codebase that read `Date.now()` / `new Date()` were audited and confirmed TZ-safe (they compute relative durations or absolute UTC instants, not calendar parts). **Only `hours.service.ts` was affected.** The full audit table:
+
+| File:line | Use | TZ-affected? |
+|---|---|---|
+| `pending-payment-cleanup.task.ts:236` | `Date.now() - createdAt` for age check | ❌ Relative duration. |
+| `admin-orders.service.ts:316` | `new Date(Date.now() + waitMin*60_000)` for `estimated_ready_at` | ❌ Absolute instant + offset. |
+| `admin-orders.service.ts:374` | `new Date().toISOString()` for `pickedUpAt` | ❌ UTC ISO string. |
+| `admin-orders.service.ts:544` | `Date.now() / 60_000` for refund idempotency key minute-bucket | ❌ Relative. |
+| `admin-items.service.ts:38` | `new Date()` for sold-out timestamp | ❌ Absolute UTC instant. |
+| `hours.service.ts` (entire file) | day-of-week + time-of-day reads | ✅ **The bug surface.** |
+
+This audit table is load-bearing documentation. Future engineers worrying that the fix should ripple to other files can read this table and confirm no — the fix is correctly scoped to one file.
+
+**Library choice: `date-fns-tz`.**
+
+Three options were considered:
+
+| Option | Pros | Cons |
+|---|---|---|
+| **`date-fns-tz`** (~10KB) | Small, focused. `fromZonedTime`, `toZonedTime`, `formatInTimeZone` — exactly what we need. Battle-tested DST handling (spring-forward "2am doesn't exist", fall-back "1am happens twice"). | New dependency. |
+| **`luxon`** (~70KB) | Comprehensive `DateTime` + tz. | Heavier; we'd use ~5% of it. |
+| **Native `Intl.DateTimeFormat`** | Zero deps. | The forward direction (UTC → calendar parts in tz) is easy via `formatToParts`; the **inverse direction** (calendar parts in tz → UTC instant — needed by `combineLocalDayAndTime` for `nextOpenAt`) requires manual offset math with subtle DST edge cases. Possible but error-prone. |
+
+**Chosen: `date-fns-tz`** at v3.2.0 (with `date-fns@^4.1.0` as a peer dep). v3.x renamed the helpers — `zonedTimeToUtc` is now `fromZonedTime`, `utcToZonedTime` is now `toZonedTime`. The fix uses the v3 API.
+
+**Bad-timezone fallback (option `b`):**
+
+`Location.timezone` is `text NOT NULL DEFAULT 'America/New_York'` at the schema level — no `CHECK` constraint validates IANA strings. A typo like `'America/Newyork'` would store and break silently when `new Intl.DateTimeFormat({timeZone: 'America/Newyork'})` throws `RangeError`.
+
+The `resolveTimezone` helper in `hours-tz.ts` absorbs this:
+
+```ts
+export function resolveTimezone(rawTz: string | null | undefined):
+  { tz: string; isFallback: boolean; originalTz?: string } {
+  const candidate = rawTz || 'America/New_York';  // empty/null → default
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: candidate });
+    return { tz: candidate, isFallback: false };
+  } catch (err) {
+    if (err instanceof RangeError) {
+      return { tz: 'America/New_York', isFallback: true, originalTz: candidate };
+    }
+    throw err;
+  }
+}
+```
+
+`HoursService.canAcceptOrders` calls this once at entry and logs a structured WARN with the bad value + `locationId` when `isFallback` is true. The fallback is defensive at read time; the customer-facing flow keeps working with a sensible default while the WARN log surfaces the bad row for an operator to fix.
+
+The `||` pattern (`location.timezone || 'America/New_York'`) handles the empty-string case before `Intl` even tries; matches the existing convention in `admin-dashboard.service.ts:79`. The `try/catch` then handles the invalid-IANA case. Both failure modes converge on the same fallback with the same logging contract.
+
+**Deferred to a follow-up turn — write-time validation (option `c`):**
+
+The read-time fallback prevents customer-facing crashes but doesn't prevent bad data from entering the system. A follow-up turn should add:
+
+1. **Validation at the Location create/update path** (admin endpoint) that rejects bad IANA strings with a 400 response — fail fast at write time.
+2. **Ideally, a Postgres `CHECK` constraint** that enforces IANA validity at the DB level. (Implementation note: PG doesn't natively validate IANA; the practical version is a constraint that checks the value is in `pg_timezone_names`. This is doable but version-dependent.)
+
+The read-time fallback + write-time validation are complementary. Both should exist. Tracked as future work.
+
+**DST handling:**
+
+The library handles US spring-forward / fall-back correctly. The pinned example test (TC5 in `hours.service.spec.ts`): "Saturday March 14 2026 09:00 NY" — one calendar week after the March 8 2026 spring-forward — resolves to `2026-03-14T13:00:00Z` (EDT = UTC-4), not `14:00:00Z` (EST = UTC-5). A separate helper test pins the pre-DST case (March 1 2026 = EST) to confirm both directions of the transition.
+
+**Tokyo / day-rollover edge case:**
+
+The most subtle bug case the pre-fix code shipped: a store in `Asia/Tokyo`, server UTC at Saturday 20:00 UTC = Sunday 05:00 JST. Pre-fix read `when.getDay() = 6` (Saturday) and looked up Saturday's `LocationHours` row, applying Saturday's open/close window to a Sunday morning Tokyo customer. Post-fix reads `dayOfWeekInTz(when, 'Asia/Tokyo') = 0` (Sunday) — correct. Pinned by tests TC3 and TC3 mirror.
+
+**`formatTimeInTz` rendering:**
+
+The rejection message strings (`"We open at 09:00"`) now render the open time in the **location's** tz, not server tz. Pre-fix, an NY store with hours `09:00–19:00` returned `"We open at 14:00"` when the server was UTC and the rejection happened at 4am NY — the message was technically the right UTC instant but useless for the customer. Post-fix, `formatInTimeZone(nextOpenAt, 'America/New_York', 'HH:mm')` renders `"09:00"` — what the customer expects.
+
+**Tests:**
+
+- `apps/api/src/modules/locations/hours-tz.spec.ts` — 31 unit tests for the seven helpers (`resolveTimezone`, `dayOfWeekInTz`, `localMinutesInTz`, `timeStringToMinutes`, `isTimeWithinInTz`, `combineLocalDayAndTime`, `startOfDayPlusDaysInTz`, `formatTimeInTz`). Edge cases: day-rollover (UTC Saturday → Tokyo Sunday), pre-DST vs post-DST NY conversions, overnight hours ranges (open 22, close 02), inclusive-open / exclusive-close boundaries, zero-padding, single-digit hours, empty timezone fallback, invalid-IANA fallback.
+
+- `apps/api/src/modules/locations/hours.service.spec.ts` (new) — 18 integration tests for `canAcceptOrders` covering: TC1 NY 6pm ASAP, TC2 LA 8am ASAP, TC3 Tokyo day-rollover (and its mirror), TC4 SCHEDULED pickup tomorrow LA, TC5 post-DST `nextOpenAt` UTC instant, TC6 server-tz independence (same store result across pre-DST + post-DST UTC instants), plus pre-existing regression (LOCATION_INACTIVE, MOBILE_ORDERING_PAUSED, CLOSED_TODAY with `nextOpenAt`, overnight hours range, SCHEDULED_ORDERING_DISABLED, SCHEDULED_TIME_IN_PAST, SCHEDULED_TIME_TOO_FAR, SCHEDULED_TIME_OUTSIDE_HOURS, SCHEDULED_TIME_REQUIRED), plus bad-timezone fallback (`America/Newyork` typo triggers WARN log + falls back to NY; empty string falls back silently).
+
+**Future work — write-time timezone validation:**
+
+`Location.timezone` needs a write-time validation at the admin endpoint (and ideally a Postgres CHECK constraint or trigger that validates against `pg_timezone_names`) to prevent typos like `'America/Newyork'` from entering the system. The current read-time fallback in `HoursService` is defensive but not preventive. A future turn should add validation at the Location create/update path to fail fast on bad input. The read-time fallback stays as defense-in-depth.

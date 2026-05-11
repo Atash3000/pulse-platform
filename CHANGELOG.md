@@ -12,6 +12,22 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Fixed
+
+- Store hours and scheduled pickup validation now use the location's
+  configured timezone rather than server time. Previously, stores in
+  timezones other than the server's UTC would silently report wrong
+  open/closed status, especially around server-midnight UTC. Scheduled
+  pickup validation similarly reads day-of-week and time-of-day in the
+  location's timezone. Rejection messages render times in the
+  location's timezone (e.g. "We open at 09:00" matching what the
+  customer expects, not a UTC translation that's correct only by
+  coincidence). Bad timezone values on a Location row (e.g. typos like
+  `America/Newyork`) are logged at WARN and fall back to
+  `America/New_York` so the customer-facing flow keeps working while
+  an operator fixes the row. — see decision-log entry *"Timezone-aware
+  hours and scheduled pickup validation"*.
+
 ### Added
 
 - `TelegramService` extended with six event-driven alert methods —
