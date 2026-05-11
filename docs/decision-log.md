@@ -887,3 +887,110 @@ The rejection message strings (`"We open at 09:00"`) now render the open time in
 **Future work — write-time timezone validation:**
 
 `Location.timezone` needs a write-time validation at the admin endpoint (and ideally a Postgres CHECK constraint or trigger that validates against `pg_timezone_names`) to prevent typos like `'America/Newyork'` from entering the system. The current read-time fallback in `HoursService` is defensive but not preventive. A future turn should add validation at the Location create/update path to fail fast on bad input. The read-time fallback stays as defense-in-depth.
+
+---
+
+## 2026-05-11 — markFailedFromWebhook idempotency: stale failure webhook handling against post-payment states
+
+**Decision:** add post-payment race detection to `WebhookOrdersService.markFailedFromWebhook`, mirroring the existing `detectPostPaymentRace` pattern in `markPaidFromWebhook`. When a `payment_intent.payment_failed` webhook arrives for an order that's already past `PENDING_PAYMENT`, log a structured WARN, return 200 to Stripe, and **do not throw** — preventing the 3-day Stripe retry storm the pre-fix code triggered.
+
+**The bug:**
+
+`markFailedFromWebhook` had only one idempotency guard (`order.order_status === FAILED → return`). Every other `order_status` reached `OrderStateMachine.assertTransition(fromStatus, FAILED, 'stripe-webhook')`, which only allows `PENDING_PAYMENT → FAILED` and throws `ConflictException` for everything else.
+
+Real Stripe traffic delivers `payment_intent.payment_failed` events for already-settled orders in several scenarios:
+
+- Stripe re-delivers an earlier failure event after the customer retried with a different payment method and succeeded.
+- Out-of-order delivery: success and failure events for the same PaymentIntent arrive in opposite order.
+- Manager-replays from the Stripe dashboard for testing or audit.
+- Disputes that fire as `payment_failed` after the order has already shipped.
+
+Pre-fix, every one of these returned 5xx to Stripe → retry every few minutes → up to 3 days of retries per event → CloudWatch noise + outbox-worker log spam + potential alert fatigue.
+
+**Three race names — five sub-states collapsed:**
+
+```ts
+private detectPostFailureRace(orderStatus): RaceType | null {
+  switch (orderStatus) {
+    case PAID:
+    case ACCEPTED:
+    case IN_PROGRESS:
+    case READY:
+    case PICKED_UP:
+      return 'stale-failure-after-success';
+    case REFUNDED:   return 'stale-failure-after-refund';
+    case CANCELLED:  return 'stale-failure-after-cancel';
+    default:         return null;  // PENDING_PAYMENT, DRAFT
+  }
+}
+```
+
+The five "downstream of PAID" states collapse under one race name because the operator response is identical for all of them ("ignore the stale failure, the order is fine"). Granular names would multiply documentation without operational value — the operator doesn't care whether the order was ACCEPTED or IN_PROGRESS when the stale failure arrived; they care that no action is required.
+
+The WARN log line **preserves the actual `order_status`** for diagnostic granularity:
+
+```
+payment_failed webhook race detected: order {id} is IN_PROGRESS but
+payment_intent.payment_failed arrived (race=stale-failure-after-success,
+stripe_event=evt_xxx, payment_intent=pi_xxx, payment_status=SUCCEEDED,
+request_id=req-xxx, last_payment_error={...}). Returning 200 to Stripe;
+no action required (order is settled).
+```
+
+No information is lost — the operator can grep by `race=` to filter by category and by the order's actual state for diagnosis.
+
+**DRAFT state — let the assertion throw:**
+
+`DRAFT` returns `null` from the detector and falls through to the existing state-machine assertion, which throws. This is intentional: a `payment_failed` webhook arriving for a DRAFT order means a PaymentIntent exists for an order that's still in DRAFT — which shouldn't happen in normal flow (checkout transitions DRAFT → PENDING_PAYMENT in the same transaction that creates the PI). If it does happen, it's possibly bug #5 territory (orphan PaymentIntent from a checkout transaction rollback). Letting the assertion throw surfaces it as a 5xx so operators see the anomaly. A silent return would mask a real bug.
+
+**No outbox emission — the asymmetry with markPaidFromWebhook:**
+
+`markPaidFromWebhook` emits a `REFUND_CREATED` outbox row for `cancel-after-pay` and `cleanup-after-pay` races (real money sitting in Stripe needs manager reconciliation). `markFailedFromWebhook` emits **nothing**.
+
+Three reasons:
+
+- No money moved. `payment_intent.payment_failed` means the customer's payment method declined; if the order is already settled, the success path already won. No liability.
+- Not actionable. A "stale failure webhook arrived" alert isn't something a manager can or should act on. Unlike money-in-Stripe-limbo, this race is benign.
+- Volume risk. If Stripe ever has a delivery issue and re-delivers failure webhooks for thousands of paid orders, we'd flood the outbox with thousands of useless rows.
+
+The WARN log line is the operational signal. Operators grep CloudWatch for `stale-failure-after-` if patterns emerge.
+
+**Parallel methods, not shared classifier — comparison table:**
+
+The two webhook race-detection systems share the broad pattern (detect → log → return 200) but differ in semantics and response policy. Kept as **two parallel methods** rather than merged into a shared classifier. A one-line cross-reference in `detectPostFailureRace` points to `detectPostPaymentRace` so future readers find the sibling.
+
+| Aspect | `markPaidFromWebhook` | `markFailedFromWebhook` |
+|---|---|---|
+| **Race shape** | Order state changed first, webhook arrived second | Order settled, webhook is late or duplicated |
+| **Money implication** | Money moved at Stripe; some races need manager reconciliation | No money moved |
+| **Outbox emission** | Yes for `cancel-after-pay` + `cleanup-after-pay`; no for `post-refund-success` | None |
+| **Named races** | 3 (`cancel-after-pay`, `cleanup-after-pay`, `post-refund-success`) | 3 (`stale-failure-after-success`, `stale-failure-after-refund`, `stale-failure-after-cancel`) |
+| **Sub-state collapsing** | None — each state has its own race name | Five sub-states under one name (`stale-failure-after-success`) |
+| **Sharing strategy** | Parallel methods + cross-reference comment | Parallel methods + cross-reference comment |
+
+The "Sharing strategy" row exists to preempt the "why don't these share a base class?" question. The answer: the response policies differ (one emits outbox, one doesn't), so a shared classifier would force consumers to switch on caller-context anyway. Parallel methods keep each handler's policy readable in one place; ~15 lines of similar-looking switch logic is the cost of clarity.
+
+**Race detection runs BEFORE the state-machine assertion:**
+
+Matches the `markPaidFromWebhook` structure. The flow inside the locked transaction:
+
+1. `order.order_status === FAILED` → idempotent return (pre-existing).
+2. `detectPostFailureRace(order.order_status)` → if non-null, WARN-log + return 200 (the fix).
+3. `OrderStateMachine.assertTransition(...)` → only reached for `PENDING_PAYMENT` (happy path) or `DRAFT` (anomalous — let it throw).
+
+Running detection before the assertion means we never call `assertTransition` on a known-race state, so the throw simply doesn't happen for the bug's failure modes. This is cleaner than `try/catch`-around-the-assertion which would translate the throw — the detector pattern keeps the assertion as the "unexpected state" signal.
+
+**`payment_status` is NOT mutated:**
+
+When a stale failure webhook arrives for a PAID order, `payment_status` is `SUCCEEDED`. The race branch must NOT touch it — the order's truth is already correct. Similarly for REFUNDED (payment_status=REFUNDED) and CANCELLED (payment_status may be REQUIRES_PAYMENT or SUCCEEDED depending on cancel-during-PENDING vs cancel-after-PAID — either way, the failure event doesn't change it). The race branch leaves `payment_status` alone, leaves `order_status` alone, leaves the order audit trail (`order_events`) alone — no transition occurred, so nothing is written.
+
+**Tests:** `apps/api/src/modules/payments/webhook-orders.service.spec.ts` adds 11 tests in a new `markFailedFromWebhook` describe block (the existing file covered only `markPaidFromWebhook`):
+
+- 1 happy-path: `PENDING_PAYMENT → FAILED` transitions correctly, saves, inserts OrderEvent, logs info.
+- 1 existing idempotency: `FAILED → FAILED` returns early.
+- 5 `stale-failure-after-success` sub-states (PAID, ACCEPTED, IN_PROGRESS, READY, PICKED_UP) — parameterized as 5 it-cases asserting: no throw, single WARN log with the actual sub-state preserved, no order mutation, no outbox row, no order_events row.
+- 1 `stale-failure-after-refund` (REFUNDED).
+- 1 `stale-failure-after-cancel` (CANCELLED).
+- 2 negative-coverage (missing orderId metadata, order not found in DB).
+
+Total test count: 228 → 239 (+11).

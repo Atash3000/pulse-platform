@@ -260,6 +260,35 @@ export class WebhookOrdersService {
    * payment_intent.payment_failed — set the order to FAILED and log the reason.
    * No outbox event for failures in Phase 1 (Telegram alerting comes later;
    * for now we surface the failure via order_events for the support flow).
+   *
+   * Idempotency layers
+   * ------------------
+   * Three guards, in order:
+   *
+   *   1. `order_status === FAILED` → idempotent return. Duplicate webhook
+   *      delivery for the already-failed case.
+   *
+   *   2. Post-payment race detection (via `detectPostFailureRace`) → log
+   *      structured WARN + return 200. The order has moved beyond
+   *      PENDING_PAYMENT (paid + downstream, refunded, or cancelled);
+   *      the failure event is stale. No money moved, no operator action
+   *      needed, no order mutation, no outbox emission. See decision-log
+   *      entry "markFailedFromWebhook idempotency: stale failure webhook
+   *      handling against post-payment states" for the full rationale.
+   *
+   *   3. `OrderStateMachine.assertTransition` → the remaining valid
+   *      transition is `PENDING_PAYMENT → FAILED` for the `stripe-webhook`
+   *      actor. Any other state at this point (currently only `DRAFT`,
+   *      which would be anomalous — a PaymentIntent shouldn't exist for
+   *      a DRAFT order) lets the assertion throw and surfaces as a
+   *      real error.
+   *
+   * Without guard (2) — added by the bug-#3 fix — a stale failure webhook
+   * for any post-payment state would throw `ConflictException`. Stripe
+   * sees 5xx and retries every few minutes for 3 days, creating retry
+   * storms in CloudWatch and the outbox-worker logs. Guard (2) returns
+   * 200 to Stripe with a WARN log so the failed-webhook is observable
+   * without action.
    */
   async markFailedFromWebhook(
     intent: Stripe.PaymentIntent,
@@ -285,7 +314,39 @@ export class WebhookOrdersService {
       }
 
       if (order.order_status === OrderStatus.FAILED) {
-        return; // idempotent
+        return; // idempotent — duplicate webhook for already-failed order.
+      }
+
+      // ---------------------------------------------------------------------
+      // Post-payment race detection — stale failure webhook arrived for an
+      // order that's already moved past PENDING_PAYMENT. The order is
+      // settled; the failure event is informational noise. Log WARN with
+      // full diagnostic detail, return 200, do not throw.
+      //
+      // Three race types collapsed under three names (the operator
+      // response is identical for the five `stale-failure-after-success`
+      // sub-states; the log line retains the actual `order_status` for
+      // diagnostic granularity). See `detectPostFailureRace` and the
+      // decision-log entry.
+      //
+      // Deliberately NOT mutating order_status / payment_status / inserting
+      // an order_events row — the order's truth is already correct;
+      // recording a non-transition would pollute the audit trail.
+      // ---------------------------------------------------------------------
+      const failureRaceType = this.detectPostFailureRace(order.order_status);
+      if (failureRaceType) {
+        const lastPaymentError = intent.last_payment_error
+          ? JSON.parse(JSON.stringify(intent.last_payment_error))
+          : null;
+        this.logger.warn(
+          `payment_failed webhook race detected: order ${order.id} is ${order.order_status} ` +
+            `but payment_intent.payment_failed arrived ` +
+            `(race=${failureRaceType}, stripe_event=${event.id}, payment_intent=${intent.id}, ` +
+            `payment_status=${order.payment_status}, request_id=${requestId}, ` +
+            `last_payment_error=${JSON.stringify(lastPaymentError)}). ` +
+            `Returning 200 to Stripe; no action required (order is settled).`,
+        );
+        return;
       }
 
       const fromStatus = order.order_status;
@@ -317,5 +378,48 @@ export class WebhookOrdersService {
 
       this.logger.log(`order ${order.id} → FAILED (${reason})`);
     });
+  }
+
+  /**
+   * Identifies whether the current `order_status` corresponds to a known
+   * post-payment race when a `payment_intent.payment_failed` webhook
+   * arrives. Returns null for `PENDING_PAYMENT` (the happy path) and for
+   * `DRAFT` (anomalous — a PaymentIntent shouldn't exist for a DRAFT
+   * order; let the state-machine assertion throw so the bug is visible).
+   *
+   * Five "downstream of PAID" states (`PAID`, `ACCEPTED`, `IN_PROGRESS`,
+   * `READY`, `PICKED_UP`) collapse under one race name —
+   * `stale-failure-after-success` — because the operator response is
+   * identical for all of them. The diagnostic granularity (which
+   * specific sub-state) is preserved in the WARN log line.
+   *
+   * See also `detectPostPaymentRace` (the success-direction sibling). The
+   * two are kept as parallel methods rather than merged into a shared
+   * classifier — their response policies differ (markPaidFromWebhook
+   * emits a `REFUND_CREATED` outbox for some races; this one emits
+   * nothing because no money moved). Sharing the classifier would force
+   * consumers to switch on caller-context anyway. See decision-log entry
+   * "markFailedFromWebhook idempotency: stale failure webhook handling
+   * against post-payment states" — comparison table.
+   */
+  private detectPostFailureRace(
+    orderStatus: OrderStatus,
+  ): 'stale-failure-after-success' | 'stale-failure-after-refund' | 'stale-failure-after-cancel' | null {
+    switch (orderStatus) {
+      case OrderStatus.PAID:
+      case OrderStatus.ACCEPTED:
+      case OrderStatus.IN_PROGRESS:
+      case OrderStatus.READY:
+      case OrderStatus.PICKED_UP:
+        return 'stale-failure-after-success';
+      case OrderStatus.REFUNDED:
+        return 'stale-failure-after-refund';
+      case OrderStatus.CANCELLED:
+        return 'stale-failure-after-cancel';
+      default:
+        // PENDING_PAYMENT (happy path) and DRAFT (anomalous — should never
+        // reach this handler with a PI) fall through.
+        return null;
+    }
   }
 }

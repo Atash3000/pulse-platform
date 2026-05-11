@@ -14,6 +14,22 @@ by entry title — search the log for the quoted title.
 
 ### Fixed
 
+- Stale `payment_intent.payment_failed` webhooks for orders that have
+  already moved past `PENDING_PAYMENT` no longer trigger Stripe retry
+  storms. Previously, a failure event arriving for a PAID / ACCEPTED /
+  IN_PROGRESS / READY / PICKED_UP / REFUNDED / CANCELLED order hit the
+  state-machine assertion, threw `ConflictException`, returned 5xx to
+  Stripe, and Stripe retried every few minutes for 3 days. The handler
+  now detects three post-payment race types (`stale-failure-after-success`,
+  `stale-failure-after-refund`, `stale-failure-after-cancel`) before the
+  state-machine assertion, logs a structured WARN with the stripe event
+  ID + the actual `order_status` for diagnostic correlation, and returns
+  200 to Stripe. No outbox emission (no money moved, no operator action
+  needed); no order mutation; no audit-row pollution. Mirrors the
+  existing `markPaidFromWebhook` race-detection pattern. — see
+  decision-log entry *"markFailedFromWebhook idempotency: stale failure
+  webhook handling against post-payment states"*.
+
 - Store hours and scheduled pickup validation now use the location's
   configured timezone rather than server time. Previously, stores in
   timezones other than the server's UTC would silently report wrong
