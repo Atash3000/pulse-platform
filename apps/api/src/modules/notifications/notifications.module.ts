@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { Customer, MenuItem, Order } from '../../database/entities';
+import { Customer, Location, MenuItem, Order } from '../../database/entities';
 import { NotificationsService } from './notifications.service';
 import { PushNotificationService } from './push-notification.service';
 import { TelegramService } from './telegram.service';
@@ -20,8 +20,10 @@ import { TelegramService } from './telegram.service';
     ConfigModule,
     // Repositories required by NotificationsService handlers. MenuItem is
     // for the ITEM_OUT_OF_STOCK handler, which loads the menu item by id to
-    // surface the canonical name in the alert message.
-    TypeOrmModule.forFeature([Order, Customer, MenuItem]),
+    // surface the canonical name in the alert message. Location was added
+    // in C5 for handleOrderPaidNotification — the Telegram "NEW ORDER"
+    // message body includes the location's display name.
+    TypeOrmModule.forFeature([Order, Customer, MenuItem, Location]),
   ],
   providers: [NotificationsService, PushNotificationService, TelegramService],
   exports: [NotificationsService, PushNotificationService, TelegramService],

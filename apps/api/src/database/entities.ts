@@ -69,6 +69,16 @@ export enum LoyaltyTier {
 
 export enum OutboxEventType {
   ORDER_PAID = 'ORDER_PAID',
+  /**
+   * Companion to `ORDER_PAID`, emitted atomically with it in the same
+   * webhook transaction. Routes to `NotificationsService` for the manager
+   * "NEW ORDER" Telegram alert. Each retries independently so a transient
+   * failure in the alert path doesn't cause the analytics handler
+   * (`orderWorker.handleOrderPaid`) to re-run, and vice versa. See
+   * decision-log entry "ORDER_PAID split-event design: analytics +
+   * notification retry independently" (C5).
+   */
+  ORDER_PAID_NOTIFICATION = 'ORDER_PAID_NOTIFICATION',
   ORDER_CANCELLED = 'ORDER_CANCELLED',
   ORDER_READY = 'ORDER_READY',
   ORDER_PICKED_UP = 'ORDER_PICKED_UP',

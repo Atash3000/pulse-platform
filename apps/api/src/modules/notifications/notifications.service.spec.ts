@@ -3,11 +3,13 @@ import { Test } from '@nestjs/testing';
 
 import {
   Customer,
+  Location,
   MenuItem,
   Order,
   OutboxEventType,
 } from '../../database/entities';
 import { NotificationsService } from './notifications.service';
+import { TelegramService } from './telegram.service';
 
 // =============================================================================
 // NotificationsService — router with stubbed handlers (C1).
@@ -35,6 +37,9 @@ describe('NotificationsService', () => {
   let ordersFindOne: jest.Mock;
   let customersFindOne: jest.Mock;
   let menuItemsFindOne: jest.Mock;
+  // C5: locations + telegram added for handleOrderPaidNotification.
+  let locationsFindOne: jest.Mock;
+  let telegramNewOrder: jest.Mock;
   let logSpy: jest.SpyInstance;
   let warnSpy: jest.SpyInstance;
 
@@ -42,6 +47,8 @@ describe('NotificationsService', () => {
     ordersFindOne = jest.fn();
     customersFindOne = jest.fn();
     menuItemsFindOne = jest.fn();
+    locationsFindOne = jest.fn();
+    telegramNewOrder = jest.fn().mockResolvedValue(undefined);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -49,6 +56,21 @@ describe('NotificationsService', () => {
         { provide: getRepositoryToken(Order), useValue: { findOne: ordersFindOne } },
         { provide: getRepositoryToken(Customer), useValue: { findOne: customersFindOne } },
         { provide: getRepositoryToken(MenuItem), useValue: { findOne: menuItemsFindOne } },
+        { provide: getRepositoryToken(Location), useValue: { findOne: locationsFindOne } },
+        {
+          provide: TelegramService,
+          useValue: {
+            newOrder: telegramNewOrder,
+            // Stub the other methods so any future cross-method tests don't
+            // break the mock — they're not called by handleOrderPaidNotification.
+            paymentFailed: jest.fn(),
+            itemSoldOut: jest.fn(),
+            orderingPaused: jest.fn(),
+            orderCancelledByStaff: jest.fn(),
+            refundIssued: jest.fn(),
+            alertDeadOutboxEvent: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -85,11 +107,28 @@ describe('NotificationsService', () => {
   // ===========================================================================
 
   describe('dispatch()', () => {
-    it('routes ORDER_PAID to handleOrderPaid', async () => {
+    it('ORDER_PAID is a defensive no-op (orderWorker is the routing authority for analytics)', async () => {
+      // Post-C5: NotificationsService no longer handles ORDER_PAID — that
+      // event is routed to orderWorker.handleOrderPaid by outbox.worker
+      // for the analytics side effect. The case stays in the switch for
+      // exhaustiveness-check compatibility (ORDER_PAID is still an
+      // OutboxEventType member). If outbox.worker ever routes ORDER_PAID
+      // here by mistake, this case silently returns — no throw, no work,
+      // no telegram call.
+      const newOrderSpy = telegramNewOrder; // alias for clarity
+      await expect(
+        service.dispatch(OutboxEventType.ORDER_PAID, { orderId: 'o-1' }),
+      ).resolves.toBeUndefined();
+      expect(newOrderSpy).not.toHaveBeenCalled();
+      expect(ordersFindOne).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('routes ORDER_PAID_NOTIFICATION to handleOrderPaidNotification', async () => {
       const spy = jest
-        .spyOn(service, 'handleOrderPaid')
+        .spyOn(service, 'handleOrderPaidNotification')
         .mockResolvedValue(undefined);
-      await service.dispatch(OutboxEventType.ORDER_PAID, { orderId: 'o-1' });
+      await service.dispatch(OutboxEventType.ORDER_PAID_NOTIFICATION, { orderId: 'o-1' });
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy).toHaveBeenCalledWith({ orderId: 'o-1' });
     });
@@ -156,55 +195,99 @@ describe('NotificationsService', () => {
   // structured info.
   // ===========================================================================
 
-  describe('handleOrderPaid', () => {
-    it('loads order + customer and logs ORDER_PAID context with the manager target', async () => {
+  describe('handleOrderPaidNotification (post-C5: calls telegramService.newOrder)', () => {
+    it('loads order with items + customer + location, calls telegram.newOrder with mapped scalars', async () => {
       const order = makeOrder({
         id: 'o-paid-1',
         customer_id: 'cust-1',
         location_id: 'loc-1',
-        total_cents: 825,
+        total_cents: 1000,
         pickup_type: 'ASAP',
       });
+      // The handler loads Order with `relations: { items: true }`. Attach
+      // an items array directly to the makeOrder result so the mock
+      // resolves with the full shape.
+      (order as Record<string, unknown>).items = [
+        { id: 'oi-1', item_name: 'Oat Latte', quantity: 1 },
+        { id: 'oi-2', item_name: 'Muffin', quantity: 2 },
+      ];
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Alice' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Alice Mitchell' });
+      locationsFindOne.mockResolvedValueOnce({ id: 'loc-1', name: 'Main St' });
 
-      await service.handleOrderPaid({
+      await service.handleOrderPaidNotification({
         orderId: 'o-paid-1',
         customerId: 'cust-1',
         locationId: 'loc-1',
-        totalCents: 825,
+        totalCents: 1000,
       });
 
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const logged = logSpy.mock.calls[0]![0] as string;
-      expect(logged).toMatch(/ORDER_PAID/);
-      expect(logged).toMatch(/"target_audience":"manager"/);
-      expect(logged).toMatch(/"order_id":"o-paid-1"/);
-      expect(logged).toMatch(/"customer_name":"Alice"/);
-      expect(logged).toMatch(/"total_cents":825/);
+      // TelegramService.newOrder was called with pre-formatted scalars.
+      // Pre-formatting (`formatCustomerName` etc.) happens inside
+      // TelegramService — we just pass raw strings.
+      expect(telegramNewOrder).toHaveBeenCalledTimes(1);
+      expect(telegramNewOrder).toHaveBeenCalledWith({
+        orderId: 'o-paid-1',
+        customerName: 'Alice Mitchell',
+        items: [
+          { name: 'Oat Latte', quantity: 1 },
+          { name: 'Muffin', quantity: 2 },
+        ],
+        totalCents: 1000,
+        locationName: 'Main St',
+      });
     });
 
-    it('warns and does NOT throw when order is not found in DB', async () => {
+    it('falls back to empty-string customerName when customer row is missing', async () => {
+      const order = makeOrder({ id: 'o-paid-1', customer_id: 'cust-missing', location_id: 'loc-1' });
+      (order as Record<string, unknown>).items = [];
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null); // orphaned-customer scenario
+      locationsFindOne.mockResolvedValueOnce({ id: 'loc-1', name: 'Main St' });
+
+      await service.handleOrderPaidNotification({ orderId: 'o-paid-1' });
+
+      expect(telegramNewOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ customerName: '' }),
+      );
+    });
+
+    it('falls back to empty-string locationName when location row is missing', async () => {
+      const order = makeOrder({ id: 'o-paid-1' });
+      (order as Record<string, unknown>).items = [];
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Alice' });
+      locationsFindOne.mockResolvedValueOnce(null);
+
+      await service.handleOrderPaidNotification({ orderId: 'o-paid-1' });
+
+      expect(telegramNewOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ locationName: '' }),
+      );
+    });
+
+    it('warns and does NOT throw when order is not found in DB; does NOT call telegram', async () => {
       ordersFindOne.mockResolvedValueOnce(null);
 
       await expect(
-        service.handleOrderPaid({ orderId: 'o-gone' }),
+        service.handleOrderPaidNotification({ orderId: 'o-gone' }),
       ).resolves.toBeUndefined();
 
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0]![0]).toMatch(/order o-gone not found/);
-      // No structured log emitted — we returned before reaching it.
-      expect(logSpy).not.toHaveBeenCalled();
-      // Customer lookup never ran — the order-missing check short-circuited.
+      // Customer + location lookups never ran — short-circuited.
       expect(customersFindOne).not.toHaveBeenCalled();
+      expect(locationsFindOne).not.toHaveBeenCalled();
+      // Telegram never fired.
+      expect(telegramNewOrder).not.toHaveBeenCalled();
     });
 
     it('THROWS on malformed payload (missing orderId) — programming error', async () => {
-      // No mocks needed; the throw happens BEFORE any DB call.
       await expect(
-        service.handleOrderPaid({ /* no orderId */ }),
+        service.handleOrderPaidNotification({ /* no orderId */ }),
       ).rejects.toThrow(/missing required string field 'orderId'/);
       expect(ordersFindOne).not.toHaveBeenCalled();
+      expect(telegramNewOrder).not.toHaveBeenCalled();
     });
   });
 

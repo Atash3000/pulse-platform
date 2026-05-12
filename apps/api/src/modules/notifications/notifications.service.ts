@@ -2,7 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Customer, MenuItem, Order, OutboxEventType } from '../../database/entities';
+import {
+  Customer,
+  Location,
+  MenuItem,
+  Order,
+  OutboxEventType,
+} from '../../database/entities';
+import { TelegramService } from './telegram.service';
 
 /**
  * Notifications router with stubbed handlers (C1).
@@ -12,10 +19,16 @@ import { Customer, MenuItem, Order, OutboxEventType } from '../../database/entit
  * Centralised dispatch from outbox event type → side-effect handler. The
  * outbox worker (apps/api/src/workers/outbox.worker.ts) currently routes
  * five of the six event types through a no-op WARN log; in C4 those five
- * cases collapse to a single `await this.notifications.dispatch(...)` call,
- * and ORDER_PAID gets a fan-out via a split-event design (see decision-log
- * entry "Notifications service: router pattern with stubbed handlers" for
- * the C4 wiring plan).
+ * cases collapse to a single `await this.notifications.dispatch(...)` call.
+ *
+ * ORDER_PAID is split between two services post-C5: orderWorker handles
+ * the analytics side (`ORDER_PAID` → `handleOrderPaid` →
+ * `last_visit_at` + structured log), NotificationsService handles the
+ * alert side (`ORDER_PAID_NOTIFICATION` → `handleOrderPaidNotification`
+ * → `telegramService.newOrder`). Both events are emitted atomically in
+ * the same webhook transaction and retry independently — see
+ * decision-log entry "ORDER_PAID split-event design: analytics +
+ * notification retry independently" for the rationale.
  *
  * What this does NOT own (yet)
  * ----------------------------
@@ -63,6 +76,16 @@ export class NotificationsService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(Customer) private readonly customers: Repository<Customer>,
     @InjectRepository(MenuItem) private readonly menuItems: Repository<MenuItem>,
+    // C5: Location repo needed by handleOrderPaidNotification to resolve
+    // the location's display name for the Telegram "NEW ORDER — {customer} — ...
+    // — {locationName}" message body.
+    @InjectRepository(Location) private readonly locations: Repository<Location>,
+    // C5: TelegramService for the manager "NEW ORDER" alert. C3 added the
+    // six alert methods as stubs; C5 wires `newOrder` into the
+    // ORDER_PAID_NOTIFICATION handler. Real Bot API delivery is still
+    // stubbed — the [telegram-stub] log line confirms the right data is
+    // being passed through.
+    private readonly telegram: TelegramService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -91,7 +114,20 @@ export class NotificationsService {
   ): Promise<void> {
     switch (eventType) {
       case OutboxEventType.ORDER_PAID:
-        await this.handleOrderPaid(payload);
+        // Defensive: orderWorker is the routing authority for ORDER_PAID
+        // (analytics — last_visit_at + structured log). NotificationsService
+        // handles ORDER_PAID_NOTIFICATION (Telegram alert). If outbox.worker
+        // ever routes ORDER_PAID here by mistake, silently return rather
+        // than throw — analytics will have run via orderWorker. See C5
+        // decision-log entry "ORDER_PAID split-event design: analytics +
+        // notification retry independently".
+        //
+        // The case is kept (rather than removed) so the `_exhaustive: never`
+        // check below still compiles — ORDER_PAID remains in the
+        // OutboxEventType enum.
+        return;
+      case OutboxEventType.ORDER_PAID_NOTIFICATION:
+        await this.handleOrderPaidNotification(payload);
         return;
       case OutboxEventType.ORDER_READY:
         await this.handleOrderReady(payload);
@@ -122,45 +158,65 @@ export class NotificationsService {
   }
 
   // ---------------------------------------------------------------------------
-  // ORDER_PAID — manager "NEW ORDER" alert (Spec Part 9).
+  // ORDER_PAID_NOTIFICATION — manager "NEW ORDER" Telegram alert (Spec Part 9).
   //
-  // NOT REACHABLE IN PRODUCTION UNTIL C4.
+  // C5 wired this handler to call `telegramService.newOrder(...)` with the
+  // pre-formatted scalars TelegramService expects. Loads:
   //
-  // Today's outbox.worker dispatch routes ORDER_PAID directly to
-  // orderWorker.handleOrderPaid (analytics + last_visit_at). The notifications
-  // dispatch is a separate concern that requires the C4 split-event design
-  // (ORDER_PAID + ORDER_PAID_NOTIFICATION) before it can land — see
-  // decision-log entry "Notifications service: router pattern with stubbed
-  // handlers" Future C4 wiring subsection. Until C4 lands, this handler is
-  // exercised only by the C1 unit tests; the Telegram alert does NOT fire
-  // on real paid orders even after C3 adds real Telegram delivery.
+  //   - Order with `relations: { items: true }` for the item summary.
+  //   - Customer for the displayed name.
+  //   - Location for the displayed name.
   //
-  // Payload shape (single emit site — webhook-orders.service.ts
-  // markPaidFromWebhook outbox row): { orderId, customerId, locationId,
-  // totalCents, stripePaymentId }.
+  // Missing customer / location fall back to empty string (TelegramService
+  // signatures require non-nullable strings; `formatCustomerName('')`
+  // returns empty, gracefully producing a message body with a missing slot
+  // rather than crashing).
+  //
+  // NOT REACHABLE IN PRODUCTION UNTIL C4 wires
+  // outbox.worker → notifications.dispatch. Until then this handler is
+  // exercised only by tests.
+  //
+  // Payload shape (one of two emit sites — webhook-orders.service.ts
+  // markPaidFromWebhook ORDER_PAID_NOTIFICATION row, identical to the
+  // sibling ORDER_PAID row): { orderId, customerId, locationId,
+  // totalCents, stripePaymentId }. Payload is a pointer — Order is the
+  // source of truth, the handler resolves the live state.
   // ---------------------------------------------------------------------------
 
-  async handleOrderPaid(payload: Record<string, unknown>): Promise<void> {
-    const orderId = this.extractOrderId(payload, 'ORDER_PAID');
-    const order = await this.orders.findOne({ where: { id: orderId } });
+  async handleOrderPaidNotification(payload: Record<string, unknown>): Promise<void> {
+    const orderId = this.extractOrderId(payload, 'ORDER_PAID_NOTIFICATION');
+    const order = await this.orders.findOne({
+      where: { id: orderId },
+      // Load items eagerly — TelegramService.newOrder needs the per-line
+      // {name, quantity} for the message body's item summary
+      // ("Oat Latte + Muffin"). The OrderItem entity stores `item_name` as
+      // a frozen snapshot at order time (per the spec), so the displayed
+      // name matches what the customer saw at checkout.
+      relations: { items: true },
+    });
     if (!order) {
-      // Row not found — warn-and-return per the warn-not-throw contract.
       this.logger.warn(
-        `[notifications] ORDER_PAID order ${orderId} not found in DB — skipping`,
+        `[notifications] ORDER_PAID_NOTIFICATION order ${orderId} not found in DB — skipping`,
       );
       return;
     }
     const customer = await this.customers.findOne({ where: { id: order.customer_id } });
-    this.logStubMessage('ORDER_PAID', {
-      event_type: 'ORDER_PAID',
-      target_audience: 'manager',
-      order_id: order.id,
-      customer_id: order.customer_id,
-      customer_name: customer?.full_name ?? null,
-      location_id: order.location_id,
-      total_cents: order.total_cents,
-      pickup_type: order.pickup_type,
-      scheduled_pickup_at: order.scheduled_pickup_at?.toISOString() ?? null,
+    const location = await this.locations.findOne({ where: { id: order.location_id } });
+
+    // Call TelegramService.newOrder with pre-formatted scalars. The
+    // formatters live in telegram-formatters.ts; TelegramService applies
+    // them to assemble the Spec Part 9 message body. Missing
+    // customer/location fall back to empty strings — `formatCustomerName`
+    // and the body template degrade gracefully.
+    await this.telegram.newOrder({
+      orderId: order.id,
+      customerName: customer?.full_name ?? '',
+      items: (order.items ?? []).map((it) => ({
+        name: it.item_name,
+        quantity: it.quantity,
+      })),
+      totalCents: order.total_cents,
+      locationName: location?.name ?? '',
     });
   }
 

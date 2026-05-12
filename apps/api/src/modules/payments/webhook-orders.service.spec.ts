@@ -266,6 +266,140 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
 });
 
 // =============================================================================
+// WebhookOrdersService — markPaidFromWebhook happy-path (C5 split-event).
+//
+// Pins the C5 split-event design: every successful PENDING_PAYMENT → PAID
+// transition emits TWO outbox rows atomically inside the same locked
+// transaction:
+//
+//   ORDER_PAID              → orderWorker.handleOrderPaid (analytics)
+//   ORDER_PAID_NOTIFICATION → notifications.dispatch → handleOrderPaidNotification
+//                              → telegramService.newOrder (manager alert)
+//
+// Both rows share an identical pointer payload (orderId, customerId,
+// locationId, totalCents, stripePaymentId). Each retries independently at
+// the outbox-worker level — see decision-log entry "ORDER_PAID split-event
+// design: analytics + notification retry independently".
+// =============================================================================
+
+describe('WebhookOrdersService — markPaidFromWebhook happy path (C5 split-event)', () => {
+  let service: WebhookOrdersService;
+  let txGetOne: jest.Mock;
+  let mockSave: jest.Mock;
+  let mockInsert: jest.Mock;
+  let mockQbInsertExecute: jest.Mock;
+  let logSpy: jest.SpyInstance;
+
+  beforeEach(async () => {
+    txGetOne = jest.fn();
+    mockSave = jest.fn().mockImplementation(async (entity) => entity);
+    mockInsert = jest.fn().mockResolvedValue(undefined);
+    mockQbInsertExecute = jest.fn().mockResolvedValue({ identifiers: [{}] });
+
+    const fakeQbSelect = {
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: txGetOne,
+    };
+    const fakeQbInsert = {
+      insert: jest.fn().mockReturnThis(),
+      into: jest.fn().mockReturnThis(),
+      values: jest.fn().mockReturnThis(),
+      orIgnore: jest.fn().mockReturnThis(),
+      execute: mockQbInsertExecute,
+    };
+    const fakeEm = {
+      createQueryBuilder: jest.fn().mockImplementation((arg?: unknown) =>
+        arg === Order ? fakeQbSelect : fakeQbInsert,
+      ),
+      save: mockSave,
+      insert: mockInsert,
+    };
+    const fakeDs = {
+      transaction: jest.fn().mockImplementation(async (cb: (em: typeof fakeEm) => unknown) => cb(fakeEm)),
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        WebhookOrdersService,
+        { provide: getDataSourceToken(), useValue: fakeDs },
+      ],
+    }).compile();
+    service = moduleRef.get(WebhookOrdersService);
+
+    logSpy = jest
+      .spyOn((service as unknown as { logger: { log: (m: string) => void } }).logger, 'log')
+      .mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+  });
+
+  it('emits BOTH ORDER_PAID and ORDER_PAID_NOTIFICATION outbox rows with identical payloads', async () => {
+    const pendingOrder = makeOrder({
+      order_status: OrderStatus.PENDING_PAYMENT,
+      payment_status: PaymentStatus.REQUIRES_PAYMENT,
+    });
+    txGetOne.mockResolvedValueOnce(pendingOrder);
+
+    await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-split');
+
+    // Order mutated to PAID + SUCCEEDED.
+    expect(pendingOrder.order_status).toBe(OrderStatus.PAID);
+    expect(pendingOrder.payment_status).toBe(PaymentStatus.SUCCEEDED);
+
+    // Two OutboxEvent inserts: ORDER_PAID + ORDER_PAID_NOTIFICATION.
+    const outboxCalls = mockInsert.mock.calls.filter((c) => c[0] === OutboxEvent);
+    expect(outboxCalls).toHaveLength(2);
+
+    const orderPaidCall = outboxCalls.find(
+      (c) => c[1].event_type === OutboxEventType.ORDER_PAID,
+    );
+    const notificationCall = outboxCalls.find(
+      (c) => c[1].event_type === OutboxEventType.ORDER_PAID_NOTIFICATION,
+    );
+
+    expect(orderPaidCall).toBeDefined();
+    expect(notificationCall).toBeDefined();
+
+    // Payloads identical — both events are pointers to the same order.
+    expect(orderPaidCall![1].payload).toEqual(notificationCall![1].payload);
+    expect(orderPaidCall![1].payload).toMatchObject({
+      orderId: pendingOrder.id,
+      customerId: pendingOrder.customer_id,
+      locationId: pendingOrder.location_id,
+      totalCents: pendingOrder.total_cents,
+    });
+
+    // Both rows go in as PENDING — outbox worker picks them up independently.
+    expect(orderPaidCall![1].status).toBe(OutboxStatus.PENDING);
+    expect(notificationCall![1].status).toBe(OutboxStatus.PENDING);
+  });
+
+  it('atomic emission: both inserts happen inside the same transaction callback', async () => {
+    // The transaction stub passes the same `em` to the callback for the
+    // entire body; both inserts use that em. Mocking is enough to verify
+    // they share the EM instance — both insert calls are on the same
+    // mockInsert function bound to the same em.
+    const pendingOrder = makeOrder({
+      order_status: OrderStatus.PENDING_PAYMENT,
+      payment_status: PaymentStatus.REQUIRES_PAYMENT,
+    });
+    txGetOne.mockResolvedValueOnce(pendingOrder);
+
+    await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-atomic');
+
+    const outboxCalls = mockInsert.mock.calls.filter((c) => c[0] === OutboxEvent);
+    expect(outboxCalls).toHaveLength(2);
+    // Both inserts used the SAME mockInsert function (proxy for em.insert).
+    // If the second insert were emitted outside the transaction, it would
+    // use a different em.insert reference (we'd see calls on a different
+    // mock). Test passes because mockInsert captured both.
+  });
+});
+
+// =============================================================================
 // WebhookOrdersService — markFailedFromWebhook idempotency tests.
 //
 // Three guards layered in order:

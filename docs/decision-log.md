@@ -1083,3 +1083,78 @@ Test count: 239 → 255 (+16). Build clean.
 - Audit item #8 (inventory race no row lock) — separate turn, would also touch `validateCartItems` adjacent code but for a different concern.
 - Audit item #5 (orphan PaymentIntent on transaction rollback) — separate turn, Step 5 transaction structure.
 - Full `CheckoutService` test coverage (idempotency cache paths, HoursService rejection passthrough, Stripe error paths) — incrementally added as `test(checkout): ...` commits when each is needed.
+
+---
+
+## 2026-05-11 — ORDER_PAID split-event design: analytics + notification retry independently
+
+**Decision:** every successful `markPaidFromWebhook` transaction now emits **two** outbox events atomically — `ORDER_PAID` (routes to `orderWorker.handleOrderPaid` for analytics: `last_visit_at` + structured log) and `ORDER_PAID_NOTIFICATION` (routes to `NotificationsService.dispatch` → `handleOrderPaidNotification` → `telegramService.newOrder` for the manager "NEW ORDER" Telegram alert). Both rows are inserted in the same webhook transaction so they either both commit or both roll back, but they retry independently at the outbox-worker level.
+
+**The bug this prevents — duplicate Telegram alerts under transient failure:**
+
+The C1 decision-log entry's "Future C4 wiring" subsection flagged this risk explicitly. Naive single-event fan-out would route `ORDER_PAID` to BOTH `orderWorker.handleOrderPaid` (analytics) AND `notifications.dispatch` (alert) from a single outbox-worker dispatch tick. Any transient failure in the second handler causes the outbox to retry the whole event — the first handler's idempotent re-run is fine (`last_visit_at = now` written twice is harmless), but the second handler's external side effect (Telegram message) fires **twice**. Owner gets duplicate "NEW ORDER" alerts every time a transient blip hits the analytics side.
+
+Splitting the event at the emit site means each outbox row tracks its own dispatch state. `ORDER_PAID` retries are bounded to the analytics handler; `ORDER_PAID_NOTIFICATION` retries are bounded to the alert handler. Cross-contamination eliminated.
+
+**Atomicity of the emit:**
+
+Both rows go in the same `ds.transaction(async (em) => { ... })` block in `markPaidFromWebhook`, after the order's `UPDATE` to `PAID` + the Payment row insert. If anything throws between the two inserts (extremely unlikely — they're back-to-back `em.insert(OutboxEvent, ...)` calls with no intermediate logic), the transaction rolls back and neither row is committed. Either both events ship or none does. The webhook idempotency layer (the `payment_status === SUCCEEDED` early-return at the top of `markPaidFromWebhook`) ensures Stripe retries don't re-emit the pair.
+
+**Payload-as-pointer design:**
+
+Both events share an identical payload: `{orderId, customerId, locationId, totalCents, stripePaymentId}`. The handlers load the live `Order` from the database via the `orderId`; the rest of the payload is operational context for the dispatch (currently unused by handlers, retained for future log correlation).
+
+Alternative considered — **payload contains a full snapshot** (orderId + items + customerName + locationName + totalCents inline). Rejected for three reasons:
+
+- **Payload size grows with order item count.** A 30-item catering order would write a 5–10KB JSON blob to `outbox_events.payload`. Unbounded in principle.
+- **Snapshot can diverge from live entity state.** If the order is amended between emit and dispatch (refund, partial refund, status correction, item-name snapshot correction at `OrderItem.item_name`), the snapshot in the payload is stale. The handler would surface wrong data in the Telegram alert.
+- **Order.items already exists in the DB.** Duplicating it in the payload is denormalization with two sources of truth — the canonical place for "what items did this order have" is `order_items` joined on `order_id`.
+
+The pointer design — payload as a stable reference, handler resolves live state — is the canonical event-sourcing pattern. It matches `orderWorker.handleOrderPaid`'s existing approach (the analytics side already loads `Order` from DB via `orderId`; it ignores the rest of the payload).
+
+**`handleOrderPaid` → `handleOrderPaidNotification` rename:**
+
+Pre-C5, `NotificationsService.handleOrderPaid` was a C1 stub that fired on the `ORDER_PAID` enum case. Post-C5:
+
+- `ORDER_PAID` is **not** a NotificationsService concern — analytics is `orderWorker`'s job. The dispatch switch keeps `case ORDER_PAID:` as a defensive no-op (`return`), retained for compile-time exhaustiveness check compatibility (ORDER_PAID is still in the enum).
+- `ORDER_PAID_NOTIFICATION` is NotificationsService's concern — the new alert event. The handler `handleOrderPaidNotification` lives at the case label.
+
+The rename makes the method name match what NotificationsService does for the event, not which enum value triggered it. Cleaner contract. The C1 spec's "handleOrderPaid logs the would-be Telegram payload" stub became "handleOrderPaidNotification calls telegramService.newOrder with the loaded scalars" — the spec evolved alongside the method's responsibility.
+
+**Defensive `case ORDER_PAID: return;` rationale:**
+
+A load-bearing inline comment in the switch documents this case so a future engineer doesn't:
+
+- **Delete it** — the `_exhaustive: never` check (added in the post-C2 cleanup) requires every enum member to have a case. Deleting this case fails the build.
+- **Add logic to it** — analytics belongs in `orderWorker`; adding work here would re-introduce the duplicate-alert bug we just split events to prevent.
+
+The comment names both pitfalls and points to this decision-log entry.
+
+**Migration — `AddOrderPaidNotificationEnumValue` (timestamp 1778625600000):**
+
+- **`up()`**: single `ALTER TYPE "public"."outbox_event_type_enum" ADD VALUE 'ORDER_PAID_NOTIFICATION'`. PG 12+ permits this inside a transaction so long as the new value isn't used in the same transaction; we don't, so we're safe. Spec deployment is PG 15.
+
+- **`down()`**: real rollback (not a defensive throw) because the codebase is not yet deployed to production — no live `ORDER_PAID_NOTIFICATION` rows can exist outside local dev. The 5-step pattern:
+  1. `DELETE FROM outbox_events WHERE event_type = 'ORDER_PAID_NOTIFICATION'` (safety net; should be a no-op in clean local DBs).
+  2. `CREATE TYPE outbox_event_type_enum_new AS ENUM(...without ORDER_PAID_NOTIFICATION...)`.
+  3. `ALTER TABLE outbox_events ALTER COLUMN event_type TYPE outbox_event_type_enum_new USING event_type::text::outbox_event_type_enum_new`.
+  4. `DROP TYPE outbox_event_type_enum`.
+  5. `ALTER TYPE outbox_event_type_enum_new RENAME TO outbox_event_type_enum`.
+
+  A `WARNING` comment in `down()` explicitly tells future engineers running this rollback in production to FIRST audit `outbox_events.event_type` and decide whether to migrate rows to another event type before the DELETE. The DELETE assumes local-dev semantics.
+
+  If `outbox_events.event_type` ever grows a `DEFAULT` or `CHECK` constraint in a future migration, the `down()` will need to drop and re-add those around step 3. Currently the column is bare `NOT NULL` with no default (verified against initial-schema migration line 61).
+
+**C4 timing — what's still missing:**
+
+After C5, `ORDER_PAID_NOTIFICATION` rows are being emitted but **not yet routed** by `outbox.worker`. The existing dispatch switch at `outbox.worker.ts:206-222` collapses five event types (now six counting `ORDER_PAID_NOTIFICATION`) into the warn-and-return-PROCESSED fallback. C4 will replace that fallback with `await this.notifications.dispatch(event.event_type, event.payload)` and flip the `NotificationsService.dispatch` default from warn-and-return to throw (matches `outbox.worker.ts:227`'s existing throw-on-unknown pattern, per the C1 decision-log).
+
+Until C4 lands, the Telegram alert does **not** fire on real paid orders. The `handleOrderPaidNotification` handler exists and is exercised by the C5 unit tests; production traffic just doesn't reach it yet.
+
+**Module wiring — `Location` added to `NotificationsModule.forFeature`:**
+
+The handler loads `Location` to resolve the display name for the Telegram message body (`NEW ORDER — ... — Main St`). `NotificationsService` constructor now takes `@InjectRepository(Location)` alongside the existing `Order` / `Customer` / `MenuItem` repos, plus `TelegramService` from the same module. `app.module.ts` is unchanged.
+
+**Tests:** `apps/api/src/modules/payments/webhook-orders.service.spec.ts` adds 2 tests in a new `markPaidFromWebhook happy path (C5 split-event)` describe block — one asserts BOTH outbox rows are inserted with identical payloads, one asserts the inserts happen inside the same transaction callback (both calls go through the same mocked `em.insert`, proving atomicity). `apps/api/src/modules/notifications/notifications.service.spec.ts` renames + restructures the `handleOrderPaid` describe block: 5 tests cover the load → call-telegram happy path, fallback-empty-string for missing customer, fallback-empty-string for missing location, warn-and-return when order is missing (no telegram call), and throw on malformed payload. Plus a new dispatch test asserting `ORDER_PAID` reaching NotificationsService is a defensive no-op (no handler invoked).
+
+Total test count: 255 → 260 (+5 net, +7 new minus -2 renamed-and-restructured).

@@ -12,6 +12,27 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Added
+
+- New `ORDER_PAID_NOTIFICATION` outbox event type, emitted atomically
+  alongside the existing `ORDER_PAID` event from
+  `markPaidFromWebhook`'s success transaction. The split-event design
+  routes analytics (`orderWorker.handleOrderPaid` —
+  `customer.last_visit_at` update + structured log) and the manager
+  Telegram "NEW ORDER" alert
+  (`NotificationsService.handleOrderPaidNotification` →
+  `telegramService.newOrder`) through independent outbox dispatch
+  paths. Each retries independently — a transient failure in the
+  alert side no longer causes the analytics handler to re-run (which
+  would have re-sent the Telegram message, producing duplicate alerts
+  on every transient blip). The Postgres `outbox_event_type_enum` is
+  extended via a new migration (`1778625600000-AddOrderPaidNotificationEnumValue`).
+  The alert is not yet wired into the outbox-worker dispatch — that's
+  C4 — so production traffic doesn't yet trigger Telegram messages on
+  paid orders. The C5 handler exists and is exercised by tests. —
+  see decision-log entry *"ORDER_PAID split-event design: analytics +
+  notification retry independently"*. Bundle C5.
+
 ### Fixed
 
 - Checkout modifier validation now enforces three previously-silent

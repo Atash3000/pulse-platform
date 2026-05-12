@@ -205,22 +205,50 @@ export class WebhookOrdersService {
         .orIgnore()
         .execute();
 
-      // 4. Outbox row — atomic with the order update. Workers pick this up.
+      // 4. Outbox rows — atomic with the order update. Two events emitted
+      // in the same transaction (C5 split-event design):
+      //
+      //   ORDER_PAID              → orderWorker.handleOrderPaid (analytics:
+      //                              last_visit_at + structured log)
+      //   ORDER_PAID_NOTIFICATION → notifications.dispatch → handleOrderPaidNotification
+      //                              → telegramService.newOrder (manager alert)
+      //
+      // Each retries independently at the outbox-worker level. A transient
+      // failure in the alert dispatch doesn't cause the analytics handler
+      // to re-run; a transient failure in analytics doesn't cause duplicate
+      // Telegram messages. Prevents the duplicate-alert bug that naive
+      // single-event fan-out would produce — see decision-log entry
+      // "ORDER_PAID split-event design: analytics + notification retry
+      // independently" for the full rationale.
+      //
+      // Payload-as-pointer for both: the orderId resolves to the live row
+      // in the handler. No snapshot in payload — `Order` is the source of
+      // truth, the payload is a stable reference.
+      const outboxPayload = {
+        orderId: order.id,
+        customerId: order.customer_id,
+        locationId: order.location_id,
+        totalCents: order.total_cents,
+        stripePaymentId: intent.id,
+      };
+
       await em.insert(OutboxEvent, {
         event_type: OutboxEventType.ORDER_PAID,
         status: OutboxStatus.PENDING,
         attempts: 0,
-        payload: {
-          orderId: order.id,
-          customerId: order.customer_id,
-          locationId: order.location_id,
-          totalCents: order.total_cents,
-          stripePaymentId: intent.id,
-        },
+        payload: outboxPayload,
+      });
+
+      await em.insert(OutboxEvent, {
+        event_type: OutboxEventType.ORDER_PAID_NOTIFICATION,
+        status: OutboxStatus.PENDING,
+        attempts: 0,
+        payload: outboxPayload,
       });
 
       this.logger.log(
-        `order ${order.id} → PAID (stripe_event=${event.id}, request_id=${requestId})`,
+        `order ${order.id} → PAID (stripe_event=${event.id}, request_id=${requestId}); ` +
+          `emitted ORDER_PAID + ORDER_PAID_NOTIFICATION outbox rows`,
       );
     });
   }
