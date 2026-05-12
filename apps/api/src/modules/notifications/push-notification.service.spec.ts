@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test } from '@nestjs/testing';
 
@@ -5,229 +6,514 @@ import { Customer } from '../../database/entities';
 import { PushNotificationService } from './push-notification.service';
 
 // =============================================================================
-// PushNotificationService — APNs stub (C2).
+// PushNotificationService — C8 dual-mode (real @parse/node-apn + stub).
 //
-// Pinned invariants:
+// Uncovered surfaces (deferred):
+//   - HTTP/2 connection-pool behaviour and re-use across many sends
+//   - JWT auto-refresh timing inside the library (library owns this)
+//   - Sandbox/production credential rotation testing (Provider is built
+//     at boot and never rebuilt mid-process today)
 //
-//   - Validator/finder split: empty customerId / title / body THROWS.
-//     row-not-found WARNS-and-returns. Other DB errors propagate.
-//   - Three log shapes by case:
-//       [push-stub] — token present, would-send context as JSON
-//       [push-skip] — token absent, customer has no push enabled
-//       [push]      — warn-and-skip on missing customer (or other warning)
-//   - Push token value NEVER appears in any log line — security invariant.
+// The apn module is mocked so the suite runs with no real keys/network.
 // =============================================================================
+
+// Mock @parse/node-apn before importing the service. Jest hoists
+// jest.mock calls, so the variable used inside the factory must be
+// referenced after the factory closes over it. We use a global handle
+// the tests can manipulate.
+
+const apnSendMock = jest.fn();
+const apnShutdownMock = jest.fn().mockResolvedValue(undefined);
+const apnProviderInstance = {
+  send: apnSendMock,
+  shutdown: apnShutdownMock,
+};
+let apnProviderConstructorMock: jest.Mock = jest.fn(() => apnProviderInstance);
+let apnProviderConstructorOptions: unknown = null;
+
+jest.mock('@parse/node-apn', () => {
+  // Use an indirection so individual tests can replace
+  // apnProviderConstructorMock between cases.
+  return {
+    __esModule: true,
+    Provider: jest.fn().mockImplementation(function (this: unknown, options: unknown) {
+      apnProviderConstructorOptions = options;
+      return apnProviderConstructorMock(options);
+    }),
+    Notification: jest.fn().mockImplementation(function (this: { topic?: string; alert?: unknown; payload?: unknown; expiry?: number }) {
+      this.topic = undefined;
+      this.alert = undefined;
+      this.payload = undefined;
+      this.expiry = undefined;
+      return this;
+    }),
+  };
+});
 
 const PUSH_TOKEN_VALUE =
   'ed5f44b51e9bdc5c7e5cef7afe05d9c9b1a6f0c2c0e1b04ff1234567890abcdef';
 
-describe('PushNotificationService', () => {
-  let service: PushNotificationService;
-  let customersFindOne: jest.Mock;
-  let logSpy: jest.SpyInstance;
-  let warnSpy: jest.SpyInstance;
+const FULL_APNS_CONFIG = {
+  APNS_KEY_ID: 'KEY123',
+  APNS_TEAM_ID: 'TEAM456',
+  APNS_BUNDLE_ID: 'com.pulscoffee.app',
+  APNS_PRIVATE_KEY_PATH: '/fake/path/AuthKey.p8',
+  APNS_USE_SANDBOX: 'true',
+};
 
-  beforeEach(async () => {
-    customersFindOne = jest.fn();
+async function buildService(
+  configOverrides: Record<string, string | undefined> = {},
+  customersFindOne: jest.Mock = jest.fn(),
+): Promise<{
+  service: PushNotificationService;
+  customersFindOne: jest.Mock;
+  log: jest.SpyInstance;
+  warn: jest.SpyInstance;
+  error: jest.SpyInstance;
+}> {
+  const cfg = { ...configOverrides };
+  const moduleRef = await Test.createTestingModule({
+    providers: [
+      PushNotificationService,
+      {
+        provide: getRepositoryToken(Customer),
+        useValue: { findOne: customersFindOne },
+      },
+      {
+        provide: ConfigService,
+        useValue: { get: (k: string) => cfg[k] },
+      },
+    ],
+  }).compile();
+  const service = moduleRef.get(PushNotificationService);
+  const logger = (service as unknown as {
+    logger: { log: jest.Mock; warn: jest.Mock; error: jest.Mock };
+  }).logger;
+  const log = jest.spyOn(logger, 'log').mockImplementation(() => {});
+  const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+  const error = jest.spyOn(logger, 'error').mockImplementation(() => {});
+  return { service, customersFindOne, log, warn, error };
+}
 
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        PushNotificationService,
+beforeEach(() => {
+  apnSendMock.mockReset();
+  apnShutdownMock.mockClear();
+  apnProviderConstructorMock = jest.fn(() => apnProviderInstance);
+  apnProviderConstructorOptions = null;
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// Input validation — throws on malformed input. No DB call should happen.
+// ---------------------------------------------------------------------------
+
+describe('input validation', () => {
+  it('throws when customerId is empty', async () => {
+    const findOne = jest.fn();
+    const { service } = await buildService({}, findOne);
+    await expect(service.send('', 'Title', 'Body')).rejects.toThrow(
+      /required field 'customerId'/,
+    );
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('throws when title is empty', async () => {
+    const findOne = jest.fn();
+    const { service } = await buildService({}, findOne);
+    await expect(service.send('cust-1', '', 'Body')).rejects.toThrow(
+      /required field 'title'/,
+    );
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('throws when body is empty', async () => {
+    const findOne = jest.fn();
+    const { service } = await buildService({}, findOne);
+    await expect(service.send('cust-1', 'Title', '')).rejects.toThrow(
+      /required field 'body'/,
+    );
+    expect(findOne).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Customer lookup — warn on missing, propagate DB errors.
+// ---------------------------------------------------------------------------
+
+describe('customer lookup', () => {
+  it('warns [push] missing-customer and returns when row not found', async () => {
+    const findOne = jest.fn().mockResolvedValueOnce(null);
+    const { service, warn, log } = await buildService({}, findOne);
+
+    await expect(
+      service.send('cust-gone', 'Title', 'Body'),
+    ).resolves.toBeUndefined();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatch(/^\[push\] missing-customer:/);
+    expect(warn.mock.calls[0]![0]).toMatch(/cust-gone not found/);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('propagates DB errors from findOne — does NOT warn-and-swallow', async () => {
+    const findOne = jest.fn().mockRejectedValueOnce(new Error('ECONNRESET on customers query'));
+    const { service } = await buildService({}, findOne);
+
+    await expect(service.send('cust-1', 'Title', 'Body')).rejects.toThrow(
+      /ECONNRESET on customers query/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// No-token path — [push-skip] PRESERVED unchanged from C2.
+// ---------------------------------------------------------------------------
+
+describe('customer has no push_token', () => {
+  it('logs [push-skip] (PRESERVED prefix) and returns; no dispatch line', async () => {
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-no-token',
+      push_token: null,
+      full_name: 'Pushless Pete',
+    });
+    const { service, log, warn } = await buildService({}, findOne);
+
+    await service.send('cust-no-token', 'Order Ready', 'Your latte is ready');
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const logged = log.mock.calls[0]![0] as string;
+    expect(logged).toMatch(/^\[push-skip\] /);
+    expect(logged).toMatch(/"push_token_present":false/);
+    expect(logged).toMatch(/"customer_id":"cust-no-token"/);
+    expect(logged).toMatch(/"reason":"customer has no push token registered"/);
+    expect(logged).not.toMatch(/\[push\]/); // dispatch prefix shouldn't appear
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Token-present path — [push] dispatch prefix (renamed from [push-stub]).
+// ---------------------------------------------------------------------------
+
+describe('customer has push_token (stub-only mode)', () => {
+  it('logs [push] dispatch with title/body/customer_id/push_token_present:true', async () => {
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service, log } = await buildService({}, findOne);
+
+    await service.send('cust-1', 'Order Ready', 'Your latte is ready');
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const logged = log.mock.calls[0]![0] as string;
+    expect(logged).toMatch(/^\[push\] \{/);
+    expect(logged).toMatch(/"customer_id":"cust-1"/);
+    expect(logged).toMatch(/"push_token_present":true/);
+    expect(logged).toMatch(/"title":"Order Ready"/);
+    expect(logged).toMatch(/"body":"Your latte is ready"/);
+    expect(logged).toMatch(/"data":null/);
+    // No fetch / APNs send in stub-only mode.
+    expect(apnSendMock).not.toHaveBeenCalled();
+  });
+
+  it('includes the data payload as JSON when provided', async () => {
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service, log } = await buildService({}, findOne);
+
+    await service.send('cust-1', 'Order Ready', 'Your latte is ready', {
+      orderId: 'order-42',
+      deepLink: 'pulse://orders/order-42',
+    });
+
+    const logged = log.mock.calls[0]![0] as string;
+    expect(logged).toMatch(
+      /"data":\{"orderId":"order-42","deepLink":"pulse:\/\/orders\/order-42"\}/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security invariant — token value NEVER appears in any log line.
+// ---------------------------------------------------------------------------
+
+describe('security invariant — push token value never logged', () => {
+  it('token value absent on the [push] dispatch path', async () => {
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service, log, warn, error } = await buildService({}, findOne);
+
+    await service.send('cust-1', 'Title', 'Body');
+
+    const allLogged = [
+      ...log.mock.calls.flat(),
+      ...warn.mock.calls.flat(),
+      ...error.mock.calls.flat(),
+    ].join('\n');
+    expect(allLogged).not.toContain(PUSH_TOKEN_VALUE);
+  });
+
+  it('token value absent on the [push-skip] path', async () => {
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: null,
+    });
+    const { service, log, warn, error } = await buildService({}, findOne);
+
+    await service.send('cust-1', 'Title', 'Body');
+
+    const allLogged = [
+      ...log.mock.calls.flat(),
+      ...warn.mock.calls.flat(),
+      ...error.mock.calls.flat(),
+    ].join('\n');
+    expect(allLogged).not.toContain(PUSH_TOKEN_VALUE);
+  });
+});
+
+// =============================================================================
+// C8 NEW — Provider construction guard
+// =============================================================================
+
+describe('Provider construction', () => {
+  it('stub-only mode when APNS env is missing (no Provider constructed)', async () => {
+    const findOne = jest.fn();
+    await buildService({}, findOne);
+    // Constructor mock should not have run because env values are absent.
+    // The jest.mock factory's Provider constructor only fires when called
+    // by the service; here it should NOT be called.
+    expect(apnProviderConstructorOptions).toBeNull();
+  });
+
+  it('builds Provider when all APNS env is present', async () => {
+    const findOne = jest.fn();
+    await buildService(FULL_APNS_CONFIG, findOne);
+    expect(apnProviderConstructorOptions).toEqual(
+      expect.objectContaining({
+        token: {
+          key: '/fake/path/AuthKey.p8',
+          keyId: 'KEY123',
+          teamId: 'TEAM456',
+        },
+        production: false, // sandbox=true → production=false
+        requestTimeout: 5000,
+      }),
+    );
+  });
+
+  it('APNS_USE_SANDBOX=true → production: false (sandbox endpoint)', async () => {
+    await buildService({ ...FULL_APNS_CONFIG, APNS_USE_SANDBOX: 'true' }, jest.fn());
+    expect((apnProviderConstructorOptions as { production: boolean }).production).toBe(false);
+  });
+
+  it('APNS_USE_SANDBOX=false → production: true (production endpoint)', async () => {
+    await buildService({ ...FULL_APNS_CONFIG, APNS_USE_SANDBOX: 'false' }, jest.fn());
+    expect((apnProviderConstructorOptions as { production: boolean }).production).toBe(true);
+  });
+
+  it('falls back to stub-only when Provider constructor throws (missing .p8 file)', async () => {
+    apnProviderConstructorMock = jest.fn(() => {
+      throw new Error('ENOENT: no such file');
+    });
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service, log, error } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    // Boot-time error log (this fires DURING constructor, BEFORE the
+    // logger spy is attached; so we just assert that a subsequent send
+    // works in stub-only mode without calling APNs).
+    expect(error).not.toHaveBeenCalled(); // spy attached after constructor
+
+    await service.send('cust-1', 'Title', 'Body');
+
+    expect(apnSendMock).not.toHaveBeenCalled();
+    // The [push] dispatch line still fires.
+    expect(log.mock.calls.some((c) => /^\[push\] \{/.test(c[0] as string))).toBe(true);
+  });
+});
+
+// =============================================================================
+// C8 NEW — real APNs send paths
+// =============================================================================
+
+describe('configured mode — real APNs send', () => {
+  it('calls provider.send with the customer push_token on happy path', async () => {
+    apnSendMock.mockResolvedValueOnce({ sent: [{ device: PUSH_TOKEN_VALUE }], failed: [] });
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    await service.send('cust-1', 'Order Ready', 'Your latte is ready');
+
+    expect(apnSendMock).toHaveBeenCalledTimes(1);
+    const [notification, recipient] = apnSendMock.mock.calls[0]!;
+    expect(recipient).toBe(PUSH_TOKEN_VALUE);
+    expect(notification.topic).toBe('com.pulscoffee.app');
+    expect(notification.alert).toEqual({ title: 'Order Ready', body: 'Your latte is ready' });
+  });
+
+  it('BadDeviceToken in failed[] → permanent, swallows', async () => {
+    apnSendMock.mockResolvedValueOnce({
+      sent: [],
+      failed: [
         {
-          provide: getRepositoryToken(Customer),
-          useValue: { findOne: customersFindOne },
+          device: PUSH_TOKEN_VALUE,
+          status: 400,
+          response: { reason: 'BadDeviceToken' },
         },
       ],
-    }).compile();
+    });
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service, warn } = await buildService(FULL_APNS_CONFIG, findOne);
 
-    service = moduleRef.get(PushNotificationService);
-
-    logSpy = jest
-      .spyOn(
-        (service as unknown as { logger: { log: (msg: string) => void } }).logger,
-        'log',
-      )
-      .mockImplementation(() => {});
-    warnSpy = jest
-      .spyOn(
-        (service as unknown as { logger: { warn: (msg: string) => void } }).logger,
-        'warn',
-      )
-      .mockImplementation(() => {});
+    await expect(service.send('cust-1', 'T', 'B')).resolves.toBeUndefined();
+    expect(warn.mock.calls.some((c) => /permanent-send-error/.test(c[0] as string))).toBe(true);
   });
 
-  afterEach(() => {
-    logSpy.mockRestore();
-    warnSpy.mockRestore();
+  it('Unregistered in failed[] → permanent, swallows', async () => {
+    apnSendMock.mockResolvedValueOnce({
+      sent: [],
+      failed: [
+        {
+          device: PUSH_TOKEN_VALUE,
+          status: 410,
+          response: { reason: 'Unregistered' },
+        },
+      ],
+    });
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    await expect(service.send('cust-1', 'T', 'B')).resolves.toBeUndefined();
   });
 
-  // ---------------------------------------------------------------------------
-  // Validator path — throws on malformed input. No DB call should happen.
-  // ---------------------------------------------------------------------------
-
-  describe('input validation', () => {
-    it('throws when customerId is empty', async () => {
-      await expect(
-        service.send('', 'Title', 'Body'),
-      ).rejects.toThrow(/required field 'customerId' must be a non-empty string/);
-      expect(customersFindOne).not.toHaveBeenCalled();
+  it('status 410 with empty reason → permanent (Unregistered shorthand)', async () => {
+    apnSendMock.mockResolvedValueOnce({
+      sent: [],
+      failed: [{ device: PUSH_TOKEN_VALUE, status: 410, response: { reason: '' } }],
     });
-
-    it('throws when title is empty', async () => {
-      await expect(
-        service.send('cust-1', '', 'Body'),
-      ).rejects.toThrow(/required field 'title' must be a non-empty string/);
-      expect(customersFindOne).not.toHaveBeenCalled();
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
     });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
 
-    it('throws when body is empty', async () => {
-      await expect(
-        service.send('cust-1', 'Title', ''),
-      ).rejects.toThrow(/required field 'body' must be a non-empty string/);
-      expect(customersFindOne).not.toHaveBeenCalled();
-    });
+    await expect(service.send('cust-1', 'T', 'B')).resolves.toBeUndefined();
   });
 
-  // ---------------------------------------------------------------------------
-  // Finder path — warn-and-return on missing row, propagate other errors.
-  // ---------------------------------------------------------------------------
-
-  describe('customer lookup', () => {
-    it('warns and returns when customer is not found', async () => {
-      customersFindOne.mockResolvedValueOnce(null);
-
-      await expect(
-        service.send('cust-gone', 'Title', 'Body'),
-      ).resolves.toBeUndefined();
-
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/customer cust-gone not found/);
-      expect(logSpy).not.toHaveBeenCalled();
+  it('DeviceTokenNotForTopic → permanent, swallows', async () => {
+    apnSendMock.mockResolvedValueOnce({
+      sent: [],
+      failed: [
+        {
+          device: PUSH_TOKEN_VALUE,
+          status: 400,
+          response: { reason: 'DeviceTokenNotForTopic' },
+        },
+      ],
     });
-
-    it('propagates DB errors from findOne — does NOT warn-and-swallow', async () => {
-      // Connection drops, query syntax errors, etc. should bubble up so the
-      // outbox retries the event. This test pins that contract — a regression
-      // that wraps the body in try/catch would silently lose pushes on
-      // transient DB issues.
-      customersFindOne.mockRejectedValueOnce(new Error('ECONNRESET on customers query'));
-
-      await expect(
-        service.send('cust-1', 'Title', 'Body'),
-      ).rejects.toThrow(/ECONNRESET on customers query/);
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
     });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    await expect(service.send('cust-1', 'T', 'B')).resolves.toBeUndefined();
   });
 
-  // ---------------------------------------------------------------------------
-  // No-token path — INFO-level skip with the [push-skip] discriminator.
-  // ---------------------------------------------------------------------------
-
-  describe('customer has no push_token', () => {
-    it('logs [push-skip] at INFO level and returns; does NOT log a [push-stub] line', async () => {
-      customersFindOne.mockResolvedValueOnce({
-        id: 'cust-no-token',
-        push_token: null,
-        full_name: 'Pushless Pete',
-      });
-
-      await service.send('cust-no-token', 'Order Ready', 'Your latte is ready');
-
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const logged = logSpy.mock.calls[0]![0] as string;
-      expect(logged).toMatch(/^\[push-skip\] /);
-      expect(logged).toMatch(/"push_token_present":false/);
-      expect(logged).toMatch(/"customer_id":"cust-no-token"/);
-      expect(logged).toMatch(/"reason":"customer has no push token registered"/);
-      // No would-send line emitted on this path.
-      expect(logged).not.toMatch(/\[push-stub\]/);
-      // No warn either — no-token is an expected, common case.
-      expect(warnSpy).not.toHaveBeenCalled();
+  it('TooManyRequests → transient, throws', async () => {
+    apnSendMock.mockResolvedValueOnce({
+      sent: [],
+      failed: [
+        {
+          device: PUSH_TOKEN_VALUE,
+          status: 429,
+          response: { reason: 'TooManyRequests' },
+        },
+      ],
     });
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
+    });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    await expect(service.send('cust-1', 'T', 'B')).rejects.toThrow(/transient send error/);
   });
 
-  // ---------------------------------------------------------------------------
-  // Token-present path — INFO-level [push-stub] with the would-send fields.
-  // ---------------------------------------------------------------------------
-
-  describe('customer has push_token', () => {
-    it('logs [push-stub] with title/body/customer_id/push_token_present:true', async () => {
-      customersFindOne.mockResolvedValueOnce({
-        id: 'cust-1',
-        push_token: PUSH_TOKEN_VALUE,
-        full_name: 'Token Tina',
-      });
-
-      await service.send('cust-1', 'Order Ready', 'Your latte is ready');
-
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const logged = logSpy.mock.calls[0]![0] as string;
-      expect(logged).toMatch(/^\[push-stub\] /);
-      expect(logged).toMatch(/"customer_id":"cust-1"/);
-      expect(logged).toMatch(/"push_token_present":true/);
-      expect(logged).toMatch(/"title":"Order Ready"/);
-      expect(logged).toMatch(/"body":"Your latte is ready"/);
-      expect(logged).toMatch(/"data":null/); // no data passed
+  it('ServiceUnavailable → transient, throws', async () => {
+    apnSendMock.mockResolvedValueOnce({
+      sent: [],
+      failed: [
+        {
+          device: PUSH_TOKEN_VALUE,
+          status: 503,
+          response: { reason: 'ServiceUnavailable' },
+        },
+      ],
     });
-
-    it('includes the data payload as JSON when provided', async () => {
-      customersFindOne.mockResolvedValueOnce({
-        id: 'cust-1',
-        push_token: PUSH_TOKEN_VALUE,
-      });
-
-      await service.send('cust-1', 'Order Ready', 'Your latte is ready', {
-        orderId: 'order-42',
-        deepLink: 'pulse://orders/order-42',
-      });
-
-      const logged = logSpy.mock.calls[0]![0] as string;
-      expect(logged).toMatch(/"data":\{"orderId":"order-42","deepLink":"pulse:\/\/orders\/order-42"\}/);
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
     });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    await expect(service.send('cust-1', 'T', 'B')).rejects.toThrow(/transient send error/);
   });
 
-  // ---------------------------------------------------------------------------
-  // Security regression guard — the push token value MUST NEVER appear in
-  // any log line, regardless of which path the call took. Asserts across
-  // all three log paths (warn, push-skip, push-stub) that the token value
-  // is not serialised. A regression that adds the token to the log shape
-  // for "easier debugging" gets caught here.
-  // ---------------------------------------------------------------------------
-
-  describe('security invariant — push token value is never logged', () => {
-    it('does NOT log the push_token value on the [push-stub] path', async () => {
-      customersFindOne.mockResolvedValueOnce({
-        id: 'cust-1',
-        push_token: PUSH_TOKEN_VALUE,
-      });
-
-      await service.send('cust-1', 'Title', 'Body');
-
-      // Concatenate every log + warn call argument. The token value must
-      // not appear anywhere across all of them.
-      const allLogged = [
-        ...logSpy.mock.calls.flat(),
-        ...warnSpy.mock.calls.flat(),
-      ].join('\n');
-      expect(allLogged).not.toContain(PUSH_TOKEN_VALUE);
+  it('provider.send rejection (library-level error) → throws as dispatch-failed', async () => {
+    apnSendMock.mockRejectedValueOnce(new Error('HTTP/2 stream failure'));
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
     });
+    const { service } = await buildService(FULL_APNS_CONFIG, findOne);
 
-    it('does NOT log the push_token value on the [push-skip] path (defensive — token is null here, but pin the invariant)', async () => {
-      // The push-skip path triggers when push_token is null, so the token
-      // value can't leak in this case by definition. Still, pin the
-      // invariant — a future change that, say, falls back to a "default
-      // token" or some such regression would surface here.
-      customersFindOne.mockResolvedValueOnce({
-        id: 'cust-1',
-        push_token: null,
-      });
+    await expect(service.send('cust-1', 'T', 'B')).rejects.toThrow(/dispatch-failed/);
+  });
 
-      await service.send('cust-1', 'Title', 'Body');
-
-      const allLogged = [
-        ...logSpy.mock.calls.flat(),
-        ...warnSpy.mock.calls.flat(),
-      ].join('\n');
-      expect(allLogged).not.toContain(PUSH_TOKEN_VALUE);
+  it('still logs [push] dispatch line on the real-send happy path (operators need CloudWatch record)', async () => {
+    apnSendMock.mockResolvedValueOnce({ sent: [{ device: PUSH_TOKEN_VALUE }], failed: [] });
+    const findOne = jest.fn().mockResolvedValueOnce({
+      id: 'cust-1',
+      push_token: PUSH_TOKEN_VALUE,
     });
+    const { service, log } = await buildService(FULL_APNS_CONFIG, findOne);
+
+    await service.send('cust-1', 'Title', 'Body');
+
+    expect(log.mock.calls.some((c) => /^\[push\] \{/.test(c[0] as string))).toBe(true);
+  });
+});
+
+describe('onModuleDestroy', () => {
+  it('calls provider.shutdown when Provider is configured', async () => {
+    const { service } = await buildService(FULL_APNS_CONFIG, jest.fn());
+    await service.onModuleDestroy();
+    expect(apnShutdownMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('is safe to call in stub-only mode (no Provider to close)', async () => {
+    const { service } = await buildService({}, jest.fn());
+    await expect(service.onModuleDestroy()).resolves.toBeUndefined();
+    expect(apnShutdownMock).not.toHaveBeenCalled();
   });
 });

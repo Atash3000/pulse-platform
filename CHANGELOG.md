@@ -12,7 +12,70 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Added
+
+- Real Telegram Bot API delivery in `TelegramService`. When
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_CHAT_ID` are both set, the
+  six event-driven dispatch methods (`newOrder`, `paymentFailed`,
+  `itemSoldOut`, `orderingPaused`, `orderCancelledByStaff`,
+  `refundIssued`) and `alertDeadOutboxEvent` POST to
+  `api.telegram.org/sendMessage` in addition to emitting the
+  structured log line. Permanent errors (400/401/403/404) are logged
+  and swallowed; transient errors (429/5xx/network/timeout) throw so
+  the outbox retries. Every fetch is bounded by
+  `AbortSignal.timeout(5000)` to cap the outbox-worker lock-hold
+  window. — see decision-log entry *"Real Telegram Bot API + APNs
+  delivery (C8)"*.
+
+- Real APNs delivery in `PushNotificationService` via
+  `@parse/node-apn` (v8.1.0). When all four `APNS_*` env vars are set
+  and the `.p8` key file is readable, the service constructs an apn
+  Provider (sandbox/production selected via `APNS_USE_SANDBOX`) and
+  `send()` performs a real APNs request alongside the structured
+  `[push]` log line. Provider construction is wrapped in try/catch:
+  on failure (missing/unreadable .p8) the service logs
+  `[push] provider-init-failed` and falls back to stub-only mode
+  rather than crashing app boot. `onModuleDestroy` calls
+  `provider.shutdown()` to release HTTP/2 connections cleanly.
+
+- `notification-error-classifier.ts`: pure-function helpers
+  `isPermanentTelegramStatus(status, description?)` and
+  `isPermanentApnsResponse(reason, status?)` codify the
+  permanent-vs-transient split. The APNs classifier treats status
+  410 as permanent regardless of reason value (Apple's Unregistered
+  signal sometimes ships with empty reason).
+
+- `.env.example`: inline documentation describing the empty-env →
+  stub-only graceful-degradation pattern for both Telegram and APNs.
+
+- `apps/api/package.json` declares `engines.node >= 18` to pin native
+  `fetch` availability for production builds.
+
+- `.gitignore`: `apps/api/secrets/` directory added (belt-and-
+  suspenders with the existing `*.p8` glob — catches the conventional
+  key-file location even if a future engineer renames the extension).
+
 ### Changed
+
+- `[telegram-stub]` log prefix renamed to `[telegram]` on the six
+  dispatch methods. The renamed prefix reflects that the log line now
+  represents a real (or stub-fallback) dispatch ATTEMPT, not stub-
+  only-by-design. `alertDeadOutboxEvent` intentionally KEEPS the
+  `[telegram-stub]` prefix per the C3 decision-log entry's stance on
+  not migrating its plain-text format. The asymmetry is documented
+  inline.
+
+- `[push-stub]` log prefix renamed to `[push]` on the dispatch path.
+  `[push-skip]` is PRESERVED (operationally meaningful: "how many
+  users don't have push enabled"). The customer-not-found warn line
+  is now `[push] missing-customer:` to avoid prefix collision with the
+  dispatch line at the same `[push]` root.
+
+- `TelegramService.alertDeadOutboxEvent` truncates the message body to
+  4000 chars before send (Telegram's hard cap is 4096; the safety
+  margin accommodates the appended truncation suffix). Truncated
+  bodies append `... (truncated, see CloudWatch [telegram] dead-event-
+  alert-failed for full payload)`.
 
 - Outbox worker now dispatches the six event-driven event types
   (`ORDER_PAID_NOTIFICATION`, `ORDER_CANCELLED`, `ORDER_READY`,

@@ -18,6 +18,12 @@ coverage/
 *.p8
 *.key
 
+# APNs secrets directory — conventional location for the .p8 file
+# (APNS_PRIVATE_KEY_PATH=apps/api/secrets/AuthKey_<KeyID>.p8). Belt-and-
+# suspenders with the *.p8 glob above: catches the directory even if a
+# future file is renamed without the extension.
+apps/api/secrets/
+
 # AWS / cloud credentials accidentally dropped in the tree
 .aws/
 credentials.json

@@ -1258,3 +1258,149 @@ Top-of-file comment lists deliberately-uncovered surfaces (polling loop, SKIP LO
 `apps/api/src/modules/notifications/notifications.service.spec.ts` — 1 inverted test: the existing "logs a warning and does NOT throw on an unknown event type" inverts to "THROWS on an unknown event type." Forced-cast pattern stays; the assertion flips from `resolves.toBeUndefined()` + `warnSpy.toHaveBeenCalled()` to `rejects.toThrow(/no handler registered for event type/)`.
 
 Total test count: 260 → 270 (+10 net: +10 new worker tests + 0 net on notifications since one test inverted).
+
+---
+
+## 2026-05-12 — Real Telegram Bot API + APNs delivery (C8)
+
+**Decision:** wire `TelegramService` to perform real `sendMessage` POSTs to `api.telegram.org` when credentials are configured, and wire `PushNotificationService` to dispatch via `@parse/node-apn` when the four `APNS_*` env vars are set and the `.p8` key file is readable. Both services preserve their structured log lines on every dispatch attempt and degrade gracefully to stub-only mode when credentials are absent (intentional pattern for local dev and pre-Apple-verification production states).
+
+**Library choices:**
+
+| Service | Chosen | Rejected | Reason |
+|---|---|---|---|
+| Telegram | Native `fetch` (Node ≥ 18) | `axios` | Bot API is a single POST to `/sendMessage`. `fetch` + JSON body covers it. Adding a dependency just to send one POST inflates the install footprint with no behavioural gain. |
+| Telegram | Native `fetch` (Node ≥ 18) | `node-fetch@3` | Node ≥ 18 has fetch built in. The new `engines.node: ">=18"` field in `apps/api/package.json` pins this; production builds on older Node will refuse to install. |
+| APNs | `@parse/node-apn@^8.1.0` | `apns2` | `@parse/node-apn` is the actively maintained Parse-foundation fork with the broader production install base. `apns2` is well-regarded but smaller community. Library is interchangeable behind the service interface if a future incident forces a swap. |
+| APNs | `@parse/node-apn` | Hand-rolled HTTP/2 + JWT | APNs uses HTTP/2 with a per-request JWT signed by a `.p8` key, plus stream multiplexing and connection re-use. The wire protocol has subtle quirks (token expiry every 1h, stream limits, GOAWAY handling) that the library covers. Hand-rolling is a maintenance liability for negligible upside. |
+
+**Failure-handling classification:**
+
+Telegram (HTTP status → permanent/transient):
+
+| Status | Verdict | Reason |
+|---|---|---|
+| 200–299 | success | normal happy path |
+| 400 | permanent | malformed body / unknown parse mode / chat-not-found |
+| 401 | permanent | bot token revoked or wrong |
+| 403 | permanent | bot blocked by the user / kicked from the chat |
+| 404 | permanent | chat ID does not resolve to a real chat |
+| 429 | transient | rate limited; outbox retries on its own cadence (no Retry-After honour today — deferred) |
+| 5xx | transient | Telegram-side outage |
+| network / `AbortError` | transient | DNS failure, connection drop, 5s timeout |
+
+APNs (reason field + status fallback):
+
+| Signal | Verdict | Reason |
+|---|---|---|
+| `BadDeviceToken`, `Unregistered`, `DeviceTokenNotForTopic` | permanent | token is dead or for the wrong bundle |
+| `BadCertificate`, `BadCertificateEnvironment` | permanent | bundle/sandbox mismatch (would need a fresh deploy to fix) |
+| `ExpiredProviderToken`, `InvalidProviderToken`, `MissingProviderToken` | permanent for this call | library auto-refreshes; if it failed the call is dead |
+| `BadTopic`, `TopicDisallowed`, `MissingDeviceToken`, `PayloadTooLarge` | permanent | call-site bug |
+| `BadMessageId`, `BadExpirationDate`, `BadPriority`, `BadCollapseId`, `IdleTimeout` | permanent | request shape issue |
+| status 410 (any reason, including empty) | permanent | Apple's canonical Unregistered signal; older payloads ship 410 with empty reason — classifier handles both |
+| `TooManyRequests`, `ServiceUnavailable`, `InternalServerError`, `Shutdown` | transient | Apple-side or rate-limit issue |
+| library-level throw (HTTP/2 stream, JWT sign failure, etc.) | transient | the outbox retries |
+| unrecognised reason | transient (fail-open to retry) | allow-list classifier; missing a notification is worse than wasting a retry |
+
+The classifier lives in `apps/api/src/modules/notifications/notification-error-classifier.ts` with the signatures `isPermanentTelegramStatus(status, description?)` and `isPermanentApnsResponse(reason, status?)`. Both are pure functions with no I/O. The 410-with-empty-reason case is the only nontrivial branch and is unit-tested with three input shapes (empty string, undefined, null).
+
+**Outbox-lock decision (deferral, not solution):**
+
+Going with bounded timeouts, NOT the claim-then-process refactor that `outbox.worker.ts:42-48` and the decision-log entry **"Outbox dispatch happens INSIDE the SKIP LOCKED transaction (Phase 1 trade-off)"** name as the long-term fix for going external.
+
+Reasoning:
+- Phase 1 traffic ceiling is ~50 orders/day. A 5-second worst-case lock hold caps at ~12 events/minute per pod, still far above the ceiling.
+- Claim-then-process is a substantial refactor with its own risk surface (mid-claim crash recovery, claim-staleness sweeper, second-transaction PROCESSED transition). Adding it to C8 doubles the change footprint.
+- Bounded timeouts solve the immediate "stuck worker" risk while leaving the established lock-hold pattern documented and intact.
+
+Bounded-timeout implementation:
+- Every Telegram `fetch` uses `AbortSignal.timeout(5000)`. `AbortError` is caught and rethrown as a transient send error.
+- The APNs Provider is constructed with `requestTimeout: 5000`. The library handles the abort internally and surfaces an error to the `send()` promise.
+- Worst-case per-event dispatch: ~5s. Worst-case lock hold per row: ~5s. At 50 orders/day this is invisible to the system.
+
+The pre-existing entry **"Outbox dispatch happens INSIDE the SKIP LOCKED transaction (Phase 1 trade-off)"** remains the canonical reference for the Phase 2 claim-then-process refactor. C8 explicitly defers it.
+
+**APNs Provider construction guard:**
+
+`@parse/node-apn`'s `Provider` constructor reads the `.p8` key file synchronously. If the path is set but the file is missing or unreadable (the manager's exact early-Apple-verification scenario: paste `APNS_PRIVATE_KEY_PATH` before the file lands on disk), the constructor throws. Without a guard, this throw propagates out of `PushNotificationService`'s constructor and prevents the entire NestJS app from booting.
+
+C8 wraps the constructor in try/catch:
+- Success → store provider, `stubOnly = false`.
+- Throw → log `[push] provider-init-failed: <error>`, set provider to null, `stubOnly = true`. The service runs in fallback mode and a backend restart with a valid path activates real delivery without code change.
+
+This pattern matches the empty-env fallback: real delivery requires both env values AND a usable Provider; anything else is stub-only. The pattern composes — operators get one clear failure mode regardless of whether the gap is config absence or file absence.
+
+**Log-prefix rename:**
+
+C3 used `[telegram-stub]` and `[push-stub]` to signal "no real delivery, this log line IS the entire dispatch." Post-C8 the same log line represents a real dispatch ATTEMPT (or a stub fallback when credentials are absent). The `-stub` suffix is now misleading. C8 renames:
+
+- `[telegram-stub]` → `[telegram]` on the six dispatch methods. The legacy `alertDeadOutboxEvent` plain-text format KEEPS its `[telegram-stub]` prefix per the C3 decision-log entry's stance on not migrating it. The asymmetry is intentional and documented in `telegram.service.ts`.
+- `[push-stub]` → `[push]` on the dispatch path. `[push-skip]` is PRESERVED — it's operationally meaningful for "how many customers have push disabled" CloudWatch queries. The customer-not-found warn line is renamed `[push] missing-customer:` to avoid colliding with the dispatch prefix.
+
+**`alertDeadOutboxEvent` body truncation:**
+
+Telegram's `sendMessage` text cap is 4096 chars. A DEAD event whose `payload` JSON is large (e.g., a REFUND_CREATED with many embedded refund objects) could exceed this and return permanent 400. C8 truncates to 4000 chars before send, appending `... (truncated, see CloudWatch [telegram] dead-event-alert-failed for full payload)`. The truncated body fits inside the 4096 cap with safety margin. CloudWatch retains the full message (the `logger.warn` line is unaffected by the truncation).
+
+**`alertDeadOutboxEvent` catch-all — defense in depth, not load-bearing safety:**
+
+C8 catches any error from `sendToTelegram` inside `alertDeadOutboxEvent` and emits a `[telegram] dead-event-alert-failed` marker. This is belt-and-suspenders: the OUTER catch at [outbox.worker.ts:302](apps/api/src/workers/outbox.worker.ts:302) already wraps the call site and prevents a failed Telegram alert from rolling back the DEAD transition. The inner catch is so the method can be tested independently (the spec asserts non-propagation directly) and so a future direct caller (an admin tool, a manual replay script) gets safe semantics without re-deriving the cascade reasoning.
+
+The earlier instruction-draft language claiming the inner catch as "critical safety preventing failure-loop cascade" was misleading; the outer catch already provides that. C8's commit message and this decision-log entry call it belt-and-suspenders honestly.
+
+**Idempotency — accept-duplicates for Phase 1:**
+
+If a Telegram send succeeds but the outbox transaction fails to commit (rare: DB connection drops between dispatch return and PROCESSED update), a retry would resend. Three reasons to defer dedup table to a follow-up:
+1. Low operational impact: owner gets a duplicate "NEW ORDER" once-in-a-blue-moon, not a real complaint.
+2. Infrastructure cost (an extra table + lookup per send) is disproportionate to the duplicate frequency.
+3. Probability is low: the outbox worker holds the row lock during dispatch, so the window for "succeeded but didn't commit" is the post-fetch-return-pre-COMMIT slice — milliseconds.
+
+The C1 decision-log entry's warn-not-throw subsection accepts the same idempotency stance for the load-the-entities side. C8 inherits it on the send side.
+
+**Graceful degradation — empty env → stub-only:**
+
+The same pattern across both services:
+
+- Telegram: if `TELEGRAM_BOT_TOKEN` OR `TELEGRAM_OWNER_CHAT_ID` is empty, the service skips fetch and only logs.
+- APNs: if any of the four required env vars is empty, OR the Provider constructor throws, the service skips `provider.send()` and only logs.
+
+This is the right pattern for two reasons. (1) Local dev: developers run the service without any credentials and still get the structured log line for verification that the call-site contract is correct. (2) Pre-credential production: the manager's current state has Telegram credentials but APNs still in Apple verification — Telegram alerts work, APNs falls back to stub. When Apple verifies, populating the env vars + restart activates real delivery with no code change.
+
+**`BadDeviceToken`/`Unregistered` writeback deferral:**
+
+When APNs returns BadDeviceToken or Unregistered, the customer's stored `push_token` is dead. The clean fix is to write `customer.push_token = null` so future sends skip the dead token entirely. C8 defers this writeback as post-launch tech debt:
+- Operational cost of not fixing: one wasted send per uninstalled-device customer per future notification. Negligible at Phase 1 volume.
+- The fix touches the customer entity and the send() method's transaction boundary, expanding C8's scope.
+- The C8 commit is already large; adding writeback would make the diff and review surface harder to reason about.
+
+A future turn (likely the same one that wires `pushNotifications.send()` into `handleOrderReady` and friends) can add the writeback as a focused change.
+
+**Push service has no live call sites — honest about this:**
+
+`PushNotificationService.send()` is currently exercised only by its own unit tests. No `NotificationsService` handler injects or calls it. C1 / C2 explicitly deferred wiring to a future turn (C3 was supposed to wire both Telegram and Push; only Telegram was wired in C5 for the ORDER_PAID_NOTIFICATION path).
+
+C8 enables real APNs delivery for any future caller. When `handleOrderReady` / `handleOrderPickedUp` / `handleRefundCreated` (etc.) are wired to call `pushNotifications.send(...)`, real APNs delivery starts working without any code change here — just env + restart.
+
+**`Provider.shutdown()` on app destroy:**
+
+`@parse/node-apn`'s Provider holds persistent HTTP/2 sockets. Without an explicit `.shutdown()` call, the Node process can hang on exit (most visible in CI: jest reports "open handles" and forces a `--forceExit`). `PushNotificationService` now implements `OnModuleDestroy`, which Nest calls during shutdown; the hook calls `this.provider?.shutdown()`. Safe to call when the service is in stub-only mode (provider is null).
+
+**`engines.node >= 18` added to `apps/api/package.json`:**
+
+The project previously had no `engines` declaration. C8 depends on native `fetch`, available in Node ≥ 18. Pinning the engine field prevents a production-build regression on an older Node from silently breaking Telegram delivery (the build would still succeed, but `fetch` would be undefined at runtime, throwing on the first send). With `engines`, the `npm install` step on Node < 18 will warn (or fail with `--engine-strict`).
+
+**`.env.example` and `.gitignore` additions:**
+
+The pre-existing `.env.example` already had `APNS_*` and `TELEGRAM_*` placeholders. C8 updates it IN PLACE — never copies from the manager's `.env`, which now contains real Telegram credentials — adding inline comments that explain the empty-env → stub-only graceful-degradation pattern.
+
+The `.gitignore` already covered `*.p8`, `*.pem`, `*.key`, `.env`, `.env.*`. C8 adds one line: `apps/api/secrets/`. The conventional location for the .p8 file is `apps/api/secrets/AuthKey_<KeyID>.p8`; the directory-level entry is belt-and-suspenders with the existing `*.p8` glob and protects against a future engineer naming the file without the `.p8` extension.
+
+**Tests:**
+
+- `apps/api/src/modules/notifications/notification-error-classifier.spec.ts` (NEW) — 21 tests covering each error-code branch for both classifiers, plus the 410-with-empty-reason edge case (three input shapes: empty string, undefined, null).
+- `apps/api/src/modules/notifications/telegram.service.spec.ts` — rebuilt for the prefix rename and the new fetch-mocked dispatch paths. 26 tests covering: every dispatch method emits the `[telegram]` shape; configured-mode fetch is performed with the right URL + JSON body; unconfigured mode skips fetch; each permanent status (400/401/403/404) swallows; each transient status (429/500/502) throws; network errors and AbortError throw; non-JSON error responses are still classified by status; `alertDeadOutboxEvent` KEEPS `[telegram-stub]` prefix in both modes; its inner catch swallows network errors and HTTP 5xx without cascade; oversized payload is truncated to ≤4096 chars.
+- `apps/api/src/modules/notifications/push-notification.service.spec.ts` — rebuilt for the prefix rename, new env-driven Provider construction, and apn-mocked send paths. 26 tests covering: input validation throws; missing-customer warn now emits `[push] missing-customer:`; `[push-skip]` PRESERVED; `[push]` dispatch line shape; security regression (token value absent from every log path); Provider construction skipped when env is incomplete; Provider constructed with the right `token`/`production`/`requestTimeout` options when env is complete; sandbox flag inversion (true → production: false); Provider constructor throw triggers stubOnly fallback; real apn `send()` happy path + each permanent reason (BadDeviceToken, Unregistered, 410-with-empty-reason, DeviceTokenNotForTopic) swallows; each transient reason (TooManyRequests, ServiceUnavailable, library-level throw) throws; `[push]` dispatch line emitted alongside real send; `onModuleDestroy` calls `provider.shutdown()` and is safe in stub-only mode.
+
+Top-of-file comments name uncovered surfaces (HTTP/2 connection-pool behaviour under sustained load, JWT auto-refresh timing inside the library, sandbox/production credential rotation, Retry-After-aware backoff for 429s) for future work.
+
+Total test count: 270 → 324 (+54 net: +21 classifier + +17 telegram + +16 push). The earlier instruction-draft number of "~300 expected" was a rough estimate; the actual delta is larger because the C8 spec rebuilds add coverage for the dual-mode paths (real-send happy-path, each permanent code, each transient code) that the pre-C8 stub specs did not exercise.

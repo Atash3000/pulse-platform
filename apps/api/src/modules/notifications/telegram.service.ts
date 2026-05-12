@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type { OutboxEvent } from '../../database/entities';
+import { isPermanentTelegramStatus } from './notification-error-classifier';
 import {
   formatCents,
   formatCustomerName,
@@ -10,62 +11,81 @@ import {
 } from './telegram-formatters';
 
 /**
- * Telegram alert service — STUB until real Bot API delivery lands.
+ * Telegram alert service — real Bot API delivery (C8) with stub fallback.
  *
- * Public surface (extended in C3):
+ * Dual-mode behaviour
+ * -------------------
+ * When BOTH `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_CHAT_ID` are set,
+ * `sendOrLog` posts a real `sendMessage` to `api.telegram.org` AND emits
+ * the `[telegram] {...}` structured log line. When either env var is
+ * empty, the service skips the fetch entirely and only emits the log
+ * line — the same shape the C3 stub had. This graceful degradation is
+ * the intentional pattern for local dev and pre-credential states.
  *
- *   - `alertDeadOutboxEvent` — DEAD outbox event, original method (C0).
- *     Logs at WARN with a multi-line plain-text body. Out of scope to
- *     migrate to the new hybrid format below; will be revisited when real
- *     Bot API delivery lands.
+ * Log prefix rename (C8): the six dispatch methods now emit
+ * `[telegram] {...}` (was `[telegram-stub]`). The `alertDeadOutboxEvent`
+ * legacy plain-text format intentionally KEEPS the `[telegram-stub]`
+ * prefix per the C3 decision-log entry's stance on not migrating that
+ * format. Both prefixes are correct for their respective contexts; the
+ * asymmetry is documented at the method.
  *
- *   - Six event-driven alert methods (C3):
+ * Bounded timeouts
+ * ----------------
+ * Every fetch uses `AbortSignal.timeout(FETCH_TIMEOUT_MS)`. The outbox
+ * worker's `processOne` is called inside a SKIP-LOCKED transaction; an
+ * unbounded fetch would hold the row lock indefinitely and block the
+ * worker's poll loop on this pod. 5 seconds is the agreed upper bound
+ * — see the C8 decision-log entry "Real Telegram Bot API + APNs
+ * delivery (C8)" for the trade-off vs. the deferred claim-then-process
+ * refactor.
+ *
+ * Public surface
+ * --------------
+ *
+ *   - `alertDeadOutboxEvent` — DEAD outbox event alert. Uses a low-level
+ *     real send (when configured) plus a [telegram-stub] log line.
+ *     Inner catch-all swallows any send error; the OUTER catch in
+ *     `outbox.worker.processOne` already prevents the DEAD-event
+ *     transaction from rolling back, so this inner catch is defense-
+ *     in-depth — see the C8 decision-log entry.
+ *
+ *   - Six event-driven alert methods (C3, C8 wires them to real send):
  *       newOrder                — Spec Part 9 "NEW ORDER" alert
  *       paymentFailed           — Spec Part 9 "PAYMENT FAILED" alert
  *       itemSoldOut             — Spec Part 9 "OAT MILK SOLD OUT" alert
  *       orderingPaused          — Spec Part 9 "MOBILE ORDERING PAUSED"
- *       orderCancelledByStaff   — Architectural extension beyond Part 9;
- *                                 covers C1's ORDER_CANCELLED outbox event.
- *       refundIssued            — Architectural extension beyond Part 9;
- *                                 covers C1's REFUND_CREATED outbox event.
+ *       orderCancelledByStaff   — Architectural extension (ORDER_CANCELLED)
+ *       refundIssued            — Architectural extension (REFUND_CREATED)
  *
- *     Each new method takes a typed object literal of pre-formatted
- *     scalars (the caller is responsible for loading entities, calling
- *     the formatters in `telegram-formatters.ts`, and passing strings) —
- *     keeps `TelegramService` decoupled from TypeORM and easy to test.
+ *     Each method:
+ *       1. Composes a Spec Part 9 message body.
+ *       2. Emits `[telegram] {...}` via `sendOrLog`.
+ *       3. When configured, additionally POSTs to api.telegram.org and
+ *          classifies any non-2xx response via the classifier. Permanent
+ *          errors log+return; transient errors throw (outbox retries).
  *
- *     Each method logs:
+ *     The structured payload preserves the rendered Part 9 string in
+ *     `body` and adds an `alert` discriminator + log `level` + `chat_id`
+ *     label.
  *
- *         [telegram-stub] ${JSON.stringify({
- *           alert,    // discriminator: 'newOrder' | 'paymentFailed' | ...
- *           chat_id,  // resolved chat target ('owner' or null in dev)
- *           level,    // 'info' | 'warn' — matches the logger method used
- *           body,     // rendered Spec Part 9 message string
- *         })}
- *
- *     The hybrid format gives CloudWatch Logs Insights a structured
- *     payload to filter on AND preserves the rendered Spec Part 9 string
- *     as a `body` field for visual confirmation of message correctness.
- *     See decision-log entry "Telegram service extension: six alert
- *     methods for notification handlers" for the full rationale (the
- *     `alertDeadOutboxEvent` plain-text format is intentionally NOT
- *     migrated in C3).
- *
- *     Log levels:
- *       INFO (logger.log)  — newOrder, itemSoldOut, refundIssued
- *       WARN (logger.warn) — paymentFailed, orderingPaused,
- *                            orderCancelledByStaff
- *     Reasoning: WARN for operator-action signals (financial impact,
- *     manager-initiated cancellation, paused ordering); INFO for routine
- *     business alerts.
- *
- *     `chat_id` is the target Telegram chat. When `TELEGRAM_OWNER_CHAT_ID`
- *     is configured, this resolves to `'owner'` (we log a label rather
- *     than the raw chat ID — defense-in-depth, and the chat ID is
- *     non-credential so this is preference rather than necessity). When
- *     unconfigured (dev, tests), `chat_id` is `null` and the stub log
- *     itself is the entire alert delivery.
+ * Why dispatch methods throw on transient but alertDeadOutboxEvent does not
+ * ----------------------------------------------------------------------
+ * Dispatch methods are called from `NotificationsService` handlers
+ * inside the outbox worker; a thrown transient error lets the outbox
+ * retry the event and eventually DEAD it. `alertDeadOutboxEvent` is
+ * called FROM the DEAD transition itself — a throw there would cascade
+ * (a failed DEAD alert would trigger another DEAD, etc.) The outbox
+ * worker already catches that throw at the call site; the inner catch
+ * here is belt-and-suspenders and makes the method independently
+ * testable.
  */
+const TELEGRAM_API_BASE = 'https://api.telegram.org';
+const FETCH_TIMEOUT_MS = 5_000;
+// Telegram's hard cap on sendMessage text is 4096. We truncate to 4000
+// to leave room for the appended "... (truncated, ...)" suffix on the
+// DEAD-event alert path.
+const TELEGRAM_TEXT_SAFE_MAX = 4_000;
+
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
@@ -77,21 +97,47 @@ export class TelegramService {
     this.ownerChatId = config.get<string>('TELEGRAM_OWNER_CHAT_ID') || undefined;
   }
 
+  // ---------------------------------------------------------------------------
+  // alertDeadOutboxEvent — legacy plain-text format, [telegram-stub] prefix.
+  //
+  // Intentionally NOT migrated to the [telegram] {...} JSON format per the
+  // C3 decision-log entry. The plain-text multi-line body is designed to
+  // be human-readable directly in CloudWatch when an operator greps for
+  // DEAD events. C8 adds the real send call but the log format and prefix
+  // stay.
+  //
+  // Catch-all defense in depth: the OUTER catch in outbox.worker.processOne
+  // (the call site) already prevents this method from rolling back the
+  // DEAD transition. The inner catch here is so the method can be unit-
+  // tested independently and so a direct caller (future admin tool, etc.)
+  // gets safe semantics. See the C8 decision-log entry.
+  // ---------------------------------------------------------------------------
+
   async alertDeadOutboxEvent(event: OutboxEvent, lastError: string): Promise<void> {
     const message = this.formatDeadEvent(event, lastError);
 
     if (!this.botToken || !this.ownerChatId) {
-      // Local dev / staging without a bot configured — log loudly. Real
-      // implementation will retain this fallback as the catch-all when
-      // Telegram itself is unreachable.
+      // Stub-only path. Same shape as the pre-C8 stub.
       this.logger.warn(`[telegram-stub] would alert owner:\n${message}`);
       return;
     }
 
-    // Real send will go here. Keeping the stub log so the message is visible
-    // even in environments that have a token configured (until we trust
-    // delivery).
-    this.logger.warn(`[telegram-stub] alert (real send not yet implemented):\n${message}`);
+    // Real send + log. The log line uses the legacy [telegram-stub] prefix
+    // intentionally (see method comment); a future "unify the prefix"
+    // refactor is an explicit decision.
+    this.logger.warn(`[telegram-stub] alert owner:\n${message}`);
+    try {
+      const safeText = this.truncateForTelegram(message);
+      await this.sendToTelegram(this.botToken, this.ownerChatId, safeText);
+    } catch (err) {
+      // Critical marker: a DEAD-event alert failure is now findable only
+      // via CloudWatch grep for this exact string. The trade-off (no
+      // further Telegram cascade) is documented in the C8 decision-log
+      // entry.
+      this.logger.error(
+        `[telegram] dead-event-alert-failed: ${(err as Error).message}`,
+      );
+    }
   }
 
   private formatDeadEvent(event: OutboxEvent, lastError: string): string {
@@ -106,45 +152,37 @@ export class TelegramService {
     ].join('\n');
   }
 
+  private truncateForTelegram(text: string): string {
+    if (text.length <= TELEGRAM_TEXT_SAFE_MAX) return text;
+    return (
+      text.slice(0, TELEGRAM_TEXT_SAFE_MAX) +
+      '\n... (truncated, see CloudWatch [telegram] dead-event-alert-failed for full payload)'
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // C3 alert methods — six event-driven Telegram alerts.
   //
-  // Each method has the same shape:
-  //   1. Compose the Spec Part 9 message body using the formatters.
-  //   2. Build the structured stub payload.
-  //   3. Log via `emitStub` (chooses logger.log / logger.warn by level).
+  // C8 wires sendOrLog to also perform a real Bot API send when the bot
+  // token + chat ID env vars are configured. The log line shape is
+  // unchanged from C3 (the JSON payload is identical) — only the prefix
+  // is renamed from [telegram-stub] to [telegram] to reflect that this is
+  // a real dispatch attempt, not stub-only.
   //
-  // First-caller status (dead-code awareness for future engineers):
-  //   newOrder                — first caller: C5 (handleOrderPaid wiring,
-  //                              after the ORDER_PAID_NOTIFICATION split).
-  //   itemSoldOut             — first caller: C4 (handleItemOutOfStock).
-  //   orderCancelledByStaff   — first caller: C4 (handleOrderCancelled).
-  //   refundIssued            — first caller: C4 (handleRefundCreated).
-  //   paymentFailed           — NO CURRENT CALLER. Lands as dead code in
-  //                              C3 because no outbox event exists for
-  //                              payment failures yet (the
-  //                              `markFailedFromWebhook` decision-log entry
-  //                              explicitly defers this). When a future
-  //                              turn adds a `PAYMENT_FAILED` outbox event
-  //                              + handler, this method becomes reachable.
-  //   orderingPaused          — NO CURRENT CALLER. No admin endpoint emits
-  //                              an outbox event when ordering is paused
-  //                              today. When a future turn adds the
-  //                              pause/resume admin endpoint with an
-  //                              outbox emit, this method becomes reachable.
+  // First-caller status (unchanged from C3):
+  //   newOrder                — wired via C5 (handleOrderPaidNotification)
+  //   itemSoldOut             — wired via C4 (handleItemOutOfStock)
+  //   orderCancelledByStaff   — wired via C4 (handleOrderCancelled)
+  //   refundIssued            — wired via C4 (handleRefundCreated)
+  //   paymentFailed           — NO LIVE CALLER. PAYMENT_FAILED outbox
+  //                              event not yet added.
+  //   orderingPaused          — NO LIVE CALLER. No pause/resume admin
+  //                              endpoint yet.
   // ---------------------------------------------------------------------------
 
-  /**
-   * "NEW ORDER — Sarah M. — Oat Latte + Muffin — $10.00 — Main St"
-   *
-   * Logged at INFO level. First caller will be C5's
-   * `handleOrderPaid` once the `ORDER_PAID_NOTIFICATION` split-event
-   * lands (see decision-log "Notifications service: router pattern with
-   * stubbed handlers" — Future C4 wiring subsection).
-   */
   async newOrder(args: {
     orderId: string;
-    customerName: string; // pre-formatted via formatCustomerName at call site
+    customerName: string;
     items: ReadonlyArray<{ name: string; quantity: number }>;
     totalCents: number;
     locationName: string;
@@ -152,16 +190,9 @@ export class TelegramService {
     const body = `NEW ORDER — ${formatCustomerName(args.customerName)} — ${formatItemList(
       args.items,
     )} — ${formatCents(args.totalCents)} — ${args.locationName}`;
-    this.emitStub('newOrder', 'info', body, { orderId: args.orderId });
+    await this.sendOrLog('newOrder', 'info', body, { orderId: args.orderId });
   }
 
-  /**
-   * "PAYMENT FAILED — Order #abc12345 — $8.50 — Customer: Mike K."
-   *
-   * Logged at WARN — failed payments are operator-action signals. Dead
-   * code in C3; first caller lands when a `PAYMENT_FAILED` outbox event
-   * is added.
-   */
   async paymentFailed(args: {
     orderId: string;
     totalCents: number;
@@ -170,55 +201,26 @@ export class TelegramService {
     const body = `PAYMENT FAILED — Order ${formatOrderShortId(args.orderId)} — ${formatCents(
       args.totalCents,
     )} — Customer: ${formatCustomerName(args.customerName)}`;
-    this.emitStub('paymentFailed', 'warn', body, { orderId: args.orderId });
+    await this.sendOrLog('paymentFailed', 'warn', body, { orderId: args.orderId });
   }
 
-  /**
-   * "OAT MILK SOLD OUT — Auto-hidden from app — Main St"
-   *
-   * Item name is uppercased to match the Spec Part 9 example literal
-   * ("OAT MILK"). The same item appears mixed-case in the `newOrder`
-   * example ("Oat Latte"), so this is `itemSoldOut`-specific
-   * banner-style formatting rather than a system-wide convention.
-   *
-   * Logged at INFO — sold-out alerts are routine inventory signals, not
-   * operator-action emergencies.
-   */
   async itemSoldOut(args: {
     itemId: string;
     itemName: string;
     locationName: string;
   }): Promise<void> {
     const body = `${args.itemName.toUpperCase()} SOLD OUT — Auto-hidden from app — ${args.locationName}`;
-    this.emitStub('itemSoldOut', 'info', body, { itemId: args.itemId });
+    await this.sendOrLog('itemSoldOut', 'info', body, { itemId: args.itemId });
   }
 
-  /**
-   * "MOBILE ORDERING PAUSED — Main St — by: Manager Jane"
-   *
-   * Logged at WARN — paused ordering is operator-action-required (the
-   * owner / regional manager probably wants to know one of their
-   * locations is offline for new orders). Dead code in C3; first caller
-   * lands when a pause/resume admin endpoint emits an outbox event.
-   */
   async orderingPaused(args: {
     locationName: string;
-    staffDisplayName: string; // e.g. "Manager Jane" — pre-composed at call site
+    staffDisplayName: string;
   }): Promise<void> {
     const body = `MOBILE ORDERING PAUSED — ${args.locationName} — by: ${args.staffDisplayName}`;
-    this.emitStub('orderingPaused', 'warn', body, { locationName: args.locationName });
+    await this.sendOrLog('orderingPaused', 'warn', body, { locationName: args.locationName });
   }
 
-  /**
-   * "ORDER CANCELLED — Order #abc12345 — $10.00 — Customer: Sarah M.
-   *  — by: Manager Jane — Reason: spilled drink"
-   *
-   * Architectural extension beyond Part 9 — covers C1's
-   * `ORDER_CANCELLED` outbox event when the cancellation comes from a
-   * manager's `POST /admin/orders/:id/cancel` action. Logged at WARN
-   * (manager-initiated cancellation of a paid order has financial impact;
-   * the owner wants visibility).
-   */
   async orderCancelledByStaff(args: {
     orderId: string;
     totalCents: number;
@@ -231,19 +233,9 @@ export class TelegramService {
       `${formatCents(args.totalCents)} — ` +
       `Customer: ${formatCustomerName(args.customerName)} — ` +
       `by: ${args.staffDisplayName} — Reason: ${args.reason}`;
-    this.emitStub('orderCancelledByStaff', 'warn', body, { orderId: args.orderId });
+    await this.sendOrLog('orderCancelledByStaff', 'warn', body, { orderId: args.orderId });
   }
 
-  /**
-   * "REFUND ISSUED — Order #abc12345 — $5.00 — Customer: Sarah M.
-   *  — by: Manager Jane"
-   *
-   * Architectural extension beyond Part 9 — covers C1's `REFUND_CREATED`
-   * outbox event. Logged at INFO for the routine commit case; the C1
-   * handler's race-recorded variant (Phase 3 race) will continue to use
-   * its own warn-level path with `actionRequired` set, separate from
-   * this method.
-   */
   async refundIssued(args: {
     orderId: string;
     refundAmountCents: number;
@@ -255,24 +247,37 @@ export class TelegramService {
       `${formatCents(args.refundAmountCents)} — ` +
       `Customer: ${formatCustomerName(args.customerName)} — ` +
       `by: ${args.staffDisplayName}`;
-    this.emitStub('refundIssued', 'info', body, { orderId: args.orderId });
+    await this.sendOrLog('refundIssued', 'info', body, { orderId: args.orderId });
   }
 
   // ---------------------------------------------------------------------------
-  // Stub emit — the single point that builds the JSON wrapper and chooses
-  // the log level. Keeps the six methods one-liner-shaped.
+  // sendOrLog — dual-mode dispatch.
+  //
+  //   1. ALWAYS emit the [telegram] {...} structured log line. Operators
+  //      need a CloudWatch record of every dispatch attempt regardless of
+  //      whether the real send is configured.
+  //
+  //   2. When the bot is configured (TELEGRAM_BOT_TOKEN and
+  //      TELEGRAM_OWNER_CHAT_ID both non-empty), POST to api.telegram.org.
+  //      - 2xx response → success, return.
+  //      - 4xx permanent (400, 401, 403, 404) → log warn, return.
+  //      - 4xx transient (429) / 5xx / network error → THROW so the
+  //        outbox retries the event.
+  //
+  //   3. When unconfigured, the log line is the entire dispatch. No fetch.
+  //
+  // Permanent errors are absorbed because retrying won't fix them; the
+  // log line still shows what was attempted. Transient errors propagate
+  // up through the handler to the outbox worker, which increments
+  // attempts and eventually marks the row DEAD.
   // ---------------------------------------------------------------------------
 
-  private emitStub(
+  private async sendOrLog(
     alert: string,
     level: 'info' | 'warn',
     body: string,
     extra: Record<string, unknown>,
-  ): void {
-    // chat_id resolves to a label ('owner') when configured. We avoid
-    // logging the raw chat ID — it's not a credential by itself, but
-    // defense-in-depth. The label is enough to confirm targeting at
-    // future-bot-wiring time.
+  ): Promise<void> {
     const chat_id = this.ownerChatId ? 'owner' : null;
     const payload = {
       alert,
@@ -281,11 +286,80 @@ export class TelegramService {
       body,
       ...extra,
     };
-    const line = `[telegram-stub] ${JSON.stringify(payload)}`;
+    const line = `[telegram] ${JSON.stringify(payload)}`;
     if (level === 'warn') {
       this.logger.warn(line);
     } else {
       this.logger.log(line);
     }
+
+    if (!this.botToken || !this.ownerChatId) {
+      // Stub-only fallback. The log line above IS the entire delivery
+      // in this mode. No fetch is performed.
+      return;
+    }
+
+    await this.sendToTelegram(this.botToken, this.ownerChatId, body);
+  }
+
+  /**
+   * Low-level Telegram Bot API send. Throws on transient errors so the
+   * caller (the outbox via the handler) retries. Returns silently on 2xx
+   * and on permanent 4xx errors (after a warn log).
+   *
+   * Uses AbortSignal.timeout for bounded latency — see class JSDoc.
+   */
+  private async sendToTelegram(
+    botToken: string,
+    chatId: string,
+    text: string,
+  ): Promise<void> {
+    const url = `${TELEGRAM_API_BASE}/bot${botToken}/sendMessage`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Network error, DNS failure, AbortError (timeout), etc. All
+      // transient by default — throw so the outbox retries.
+      throw new Error(
+        `[telegram] network error sending to chat: ${(err as Error).message}`,
+      );
+    }
+
+    if (response.ok) return;
+
+    // Best-effort: read description for log enrichment. Some Telegram
+    // error responses are JSON {ok:false, error_code, description}.
+    let description: string | undefined;
+    try {
+      const parsed = (await response.json()) as { description?: unknown };
+      if (typeof parsed?.description === 'string') {
+        description = parsed.description;
+      }
+    } catch {
+      // body wasn't JSON; ignore — status code alone classifies.
+    }
+
+    if (isPermanentTelegramStatus(response.status, description)) {
+      // Permanent — log warn and swallow. Retrying won't help.
+      this.logger.warn(
+        `[telegram] permanent send error (status ${response.status}): ${
+          description ?? '(no description)'
+        }`,
+      );
+      return;
+    }
+
+    // Transient — throw so the outbox retries the event.
+    throw new Error(
+      `[telegram] transient send error (status ${response.status}): ${
+        description ?? '(no description)'
+      }`,
+    );
   }
 }

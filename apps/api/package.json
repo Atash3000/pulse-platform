@@ -4,6 +4,9 @@
   "private": true,
   "description": "Puls Coffee backend API — NestJS + TypeORM + PostgreSQL",
   "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -33,6 +36,7 @@
     "@nestjs/swagger": "^7.4.2",
     "@nestjs/throttler": "^5.2.0",
     "@nestjs/typeorm": "^10.0.2",
+    "@parse/node-apn": "^8.1.0",
     "@sentry/node": "^8.26.0",
     "@sentry/profiling-node": "^8.26.0",
     "bcrypt": "^5.1.1",
