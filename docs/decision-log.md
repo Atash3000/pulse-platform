@@ -1158,3 +1158,103 @@ The handler loads `Location` to resolve the display name for the Telegram messag
 **Tests:** `apps/api/src/modules/payments/webhook-orders.service.spec.ts` adds 2 tests in a new `markPaidFromWebhook happy path (C5 split-event)` describe block — one asserts BOTH outbox rows are inserted with identical payloads, one asserts the inserts happen inside the same transaction callback (both calls go through the same mocked `em.insert`, proving atomicity). `apps/api/src/modules/notifications/notifications.service.spec.ts` renames + restructures the `handleOrderPaid` describe block: 5 tests cover the load → call-telegram happy path, fallback-empty-string for missing customer, fallback-empty-string for missing location, warn-and-return when order is missing (no telegram call), and throw on malformed payload. Plus a new dispatch test asserting `ORDER_PAID` reaching NotificationsService is a defensive no-op (no handler invoked).
 
 Total test count: 255 → 260 (+5 net, +7 new minus -2 renamed-and-restructured).
+
+---
+
+## 2026-05-11 — Notifications dispatch wiring (C4) + outbox-worker README update (C7)
+
+**Decision:** wire `outbox.worker.ts`'s dispatch switch to call `NotificationsService.dispatch` for the six event-driven event types (`ORDER_PAID_NOTIFICATION` + the five non-PAID types previously no-op'd). Flip `NotificationsService.dispatch`'s `default` branch from warn-and-return to throw. After C4, the full dispatch chain is live end-to-end — real paid order → outbox row → worker pickup → notifications.dispatch → handleX → stub-logged alert (real Bot API + APNs delivery is C8).
+
+**The dispatch routing change:**
+
+Pre-C4 (`outbox.worker.ts:200-228`):
+
+```ts
+case ORDER_PAID:                 → orderWorker.handleOrderPaid
+case ORDER_CANCELLED:        ┐
+case ORDER_READY:            │
+case ORDER_PICKED_UP:        ├── logger.warn('no handler') → return (marks PROCESSED)
+case REFUND_CREATED:         │
+case ITEM_OUT_OF_STOCK:      ┘
+default:                         → throw new Error('Unknown outbox event type')
+```
+
+Post-C4:
+
+```ts
+case ORDER_PAID:                 → orderWorker.handleOrderPaid
+case ORDER_PAID_NOTIFICATION: ┐
+case ORDER_CANCELLED:         │
+case ORDER_READY:             ├── await this.notifications.dispatch(eventType, payload)
+case ORDER_PICKED_UP:         │
+case REFUND_CREATED:          │
+case ITEM_OUT_OF_STOCK:       ┘
+default:                         → throw new Error('Unknown outbox event type')
+```
+
+The five non-PAID cases collapsed from "warn-and-skip" to "actually dispatch." The new `ORDER_PAID_NOTIFICATION` (added by C5) sits alongside them — same routing destination, different handler inside `NotificationsService`.
+
+**The default-branch flip (warn → throw) — operational rationale:**
+
+Pre-C4, `NotificationsService.dispatch`'s default was a warn-and-return — defensive, but harmless because no production code path called it. Post-C4, `outbox.worker → notifications.dispatch` runs on every event. A warn-and-return on an unknown runtime event type (e.g., a corrupted DB enum value or a stale outbox row whose event type was removed in a later migration) would mark the row as PROCESSED and silently drop the notification.
+
+The throw flip changes the failure mode: an unknown event type now propagates up to `outbox.worker.processOne`'s try/catch → increments `attempts` → after 5 attempts the row transitions to DEAD → `TelegramService.alertDeadOutboxEvent` fires with the original payload. Operator gets a Telegram alert containing the bad event type + full payload — exactly the diagnostic they need.
+
+The compile-time `_exhaustive: never` check stays as a complementary guard for the static case. Pre-C4 it was the only line of defense; post-C4 it's the first line, the throw is the second.
+
+The C1 unit test that asserted `dispatch` warns on unknown event type is inverted to assert it throws. Single-test update.
+
+**Operational behavior change — `[telegram-stub]` logs on every paid order:**
+
+After C4 deploys, every successful Stripe webhook will produce a `[telegram-stub] {alert: 'newOrder', chat_id: 'owner', level: 'info', body: 'NEW ORDER — ...'}` log line in CloudWatch — via the `ORDER_PAID_NOTIFICATION` dispatch chain. This is the operational signal that the wiring works end-to-end. No real Telegram messages fire yet (`TelegramService.newOrder` is still in stub-log mode) — that's C8's job.
+
+Similarly, every `ORDER_READY`, `ORDER_CANCELLED`, `ORDER_PICKED_UP`, `REFUND_CREATED`, `ITEM_OUT_OF_STOCK` outbox event produces a `[notifications-stub] ...` log line. These confirm the routing chain for the customer-facing events even though no real APNs push fires yet.
+
+If the `[telegram-stub]` and `[notifications-stub]` log lines DON'T appear in CloudWatch on a paid order, the dispatch chain is broken — operator should grep CloudWatch for the absence as the regression signal.
+
+**Transaction-boundary discussion — handler reads vs worker's locked transaction:**
+
+The outbox worker dispatches inside a `SELECT FOR UPDATE SKIP LOCKED` transaction on the `outbox_events` row (see decision-log entry **"Outbox dispatch happens INSIDE the SKIP LOCKED transaction (Phase 1 trade-off)"** for the full pattern + the Phase 2 escape hatch). C4 introduces a new pattern in this picture: `NotificationsService.dispatch` and its downstream handlers (`handleOrderPaidNotification`, `handleOrderReady`, etc.) perform meaningful entity reads — `Order` with `items` relation, `Customer`, `Location`, `MenuItem`.
+
+**Important:** these reads use the injected repositories (`@InjectRepository(Order)`, etc.), which go through the **global DataSource**, NOT the worker's locked transaction's `EntityManager`. The handler sees the database state OUTSIDE the worker's lock — there's no shared transaction context across the boundary.
+
+Why this is acceptable for Phase 1:
+
+- Dispatch latency is sub-second (in-process repository call → indexed by-id query → return). The window for concurrent entity mutation between the worker's pickup and the handler's read is microseconds.
+- The handlers are read-only against `Order`/`Customer`/`Location`/`MenuItem` — they don't mutate. So even if they read a slightly-newer state than the worker's snapshot, no write-write conflict can occur.
+- Notifications are best-effort. The C1 decision-log entry's warn-not-throw asymmetry already accepts that "the order moved between the outbox-write and the dispatch" is a benign condition — the handler logs what it sees and returns; the message reflects current state.
+
+Why this becomes a concern in Phase 2 (cross-reference for future engineers):
+
+- When dispatch goes external (Clover sync, real APNs network call, real Telegram Bot API), the worker's row lock is held for the duration of network I/O. This serializes outbox processing per row and risks timeout-induced rollback under load.
+- The Phase 2 escape hatch is **claim-then-process**: lock the row, update its status to `CLAIMED`, commit. Dispatch runs OUTSIDE the lock. Mark `PROCESSED` in a second short transaction. The `processing_started_at` column already supports stuck-row recovery for this pattern.
+- See the existing decision-log entry **"Outbox dispatch happens INSIDE the SKIP LOCKED transaction (Phase 1 trade-off)"** for the full design and the trade-offs that led to the Phase 1 in-lock pattern.
+
+Future engineers reading "after C4 the handler loads entities outside the worker's lock" can find the answer here in one click instead of re-deriving it from scratch.
+
+**C8 timing — what's still missing:**
+
+After C4, the full event-driven dispatch chain is live but stub-logged:
+
+- `ORDER_PAID_NOTIFICATION` → `TelegramService.newOrder` → `[telegram-stub]` log line. Real Telegram Bot API send: **C8**.
+- `ORDER_READY`, `ORDER_CANCELLED`, `ORDER_PICKED_UP`, `REFUND_CREATED`, `ITEM_OUT_OF_STOCK` → `NotificationsService.handleX` → `[notifications-stub]` log line. Real APNs push + Telegram routing: **C8**.
+
+C8 is the consolidated turn that swaps the stub logs for real network calls. The dispatch chain stays unchanged; only the inner send-method bodies (and their idempotency mechanics) change.
+
+**C7 — workers/README.md updates:**
+
+The intro paragraph for `outbox.worker.ts` ("for unimplemented event types the worker logs a warning and marks the row PROCESSED") is replaced with the explicit routing description (ORDER_PAID → orderWorker; six events → notifications.dispatch; unknown → throw). The "What's not active yet" table is rewritten — every row that previously said "Marked PROCESSED with no side effect. Becomes active when notifications module ships" is updated to say "Routes to NotificationsService.handleX (stub-logged). Becomes active when C8 ships real delivery." A new row for `ORDER_PAID_NOTIFICATION` is added. The "Future siblings (not yet built)" subsection is removed — the notifications module DID ship, and the past-tense replacement section describes the current wiring + the C8 gap.
+
+**Tests:**
+
+`apps/api/src/workers/outbox.worker.spec.ts` (NEW) — 10 tests covering the C4 dispatch surface:
+- 1 ORDER_PAID → orderWorker routing test (regression guard).
+- 6 parameterized notifications.dispatch routing tests (one per event type).
+- 1 unknown-event-type throws test.
+- 2 error-propagation tests (notifications.dispatch errors propagate; orderWorker errors propagate).
+
+Top-of-file comment lists deliberately-uncovered surfaces (polling loop, SKIP LOCKED, batch processing, attempts lifecycle, DEAD transition, processing_started_at recovery, retryDead operator escape, WORKERS_ENABLED gate, graceful shutdown) for follow-up test-coverage turns. Same scope-narrowing pattern used in `checkout.service.spec.ts` (audit item #10 partial fix).
+
+`apps/api/src/modules/notifications/notifications.service.spec.ts` — 1 inverted test: the existing "logs a warning and does NOT throw on an unknown event type" inverts to "THROWS on an unknown event type." Forced-cast pattern stays; the assertion flips from `resolves.toBeUndefined()` + `warnSpy.toHaveBeenCalled()` to `rejects.toThrow(/no handler registered for event type/)`.
+
+Total test count: 260 → 270 (+10 net: +10 new worker tests + 0 net on notifications since one test inverted).

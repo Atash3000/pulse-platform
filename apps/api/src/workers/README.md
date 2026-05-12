@@ -85,15 +85,13 @@ If you forget the gates and run two API replicas with both `WORKERS_ENABLED=true
 
 ### `outbox.worker.ts`
 
-The poller. Doesn't know about Clover, push, or Telegram — it knows about `outbox_events` rows and the `OrderWorker` (and, eventually, sibling workers). The dispatch switch lives here.
+The poller. Doesn't know about Clover, push, or Telegram — it knows about `outbox_events` rows and routes each event type to the right handler:
 
-For unimplemented event types the worker logs a warning and marks the row `PROCESSED`:
+  - **`ORDER_PAID`** → `orderWorker.handleOrderPaid` (analytics: `last_visit_at` + structured log).
+  - **`ORDER_PAID_NOTIFICATION`** + **`ORDER_CANCELLED`** + **`ORDER_READY`** + **`ORDER_PICKED_UP`** + **`REFUND_CREATED`** + **`ITEM_OUT_OF_STOCK`** → `NotificationsService.dispatch`, which routes by event type to the matching handler in the notifications module.
+  - **Unknown event type** → throws. The outbox event retries up to 5 times and then transitions to DEAD; `TelegramService.alertDeadOutboxEvent` fires for operator attention.
 
-```
-no handler registered for event type ORDER_READY; marking PROCESSED (event_id=…)
-```
-
-This matters operationally for `ORDER_READY` specifically — see "What's not active yet" below.
+Post-C4, the dispatch chain is fully wired end-to-end. Real Telegram delivery is still stub-logged via `[telegram-stub]` — that's the remaining gap for C8 to close.
 
 ### `order.worker.ts`
 
@@ -106,24 +104,27 @@ Phase 1 side effects:
 
 Phase 2 will add the real `CloverSyncService.syncOrder()` call as step 1, replacing the deferral log.
 
-### Future siblings (not yet built)
+### Notifications wiring (post-C4)
 
-When the notifications module ships, it'll register handlers for `ORDER_READY`, `ORDER_CANCELLED`, `REFUND_CREATED`, `ITEM_OUT_OF_STOCK` directly in the dispatch switch (or via a registry pattern). Same `outbox_events` table, same worker, additional `case` branches.
+Every event type except `ORDER_PAID` routes through `NotificationsService.dispatch`. The notifications module has six handler methods — one per event type — each loading the relevant entity (Order / MenuItem / Customer / Location) and logging the would-be alert payload via a structured `[notifications-stub]` (or `[telegram-stub]` for the Telegram-bound `ORDER_PAID_NOTIFICATION` path) log line.
+
+Real Telegram Bot API delivery and real iOS APNs delivery are the remaining stub-vs-real gaps. C8 ships those.
 
 ## What's not active yet
 
-These outbox events fire correctly (rows land in the table with `status=PENDING`) but their downstream side effect doesn't happen until the relevant module ships:
+These outbox events all fire correctly AND dispatch to a handler. The remaining gap is stub-vs-real delivery for Telegram and APNs:
 
 | Event | Currently | Becomes active when |
 |---|---|---|
-| `ORDER_PAID` | Customer's `last_visit_at` is updated. Analytics log emitted. **No Clover call** — Clover deferred to Phase 2. | Phase 2 starts → real Clover order created. |
-| `ORDER_CANCELLED` | Marked `PROCESSED` with no side effect. | Notifications module ships → push + Telegram. |
-| `ORDER_READY` | Marked `PROCESSED` with no side effect. **Customers do not get a "your coffee is ready" push.** They learn via polling `GET /orders/:id`. | Notifications module ships → APNs push. |
-| `ORDER_PICKED_UP` | Marked `PROCESSED` with no side effect. | Analytics module — close-of-loop event for retention metrics. |
-| `REFUND_CREATED` | Marked `PROCESSED` with no side effect. | Notifications module → confirmation push + Telegram. |
-| `ITEM_OUT_OF_STOCK` | Marked `PROCESSED` with no side effect. (The menu cache is invalidated synchronously by the admin endpoint that toggled the item — this outbox event is for the future Telegram alert.) | Notifications module → Telegram. |
+| `ORDER_PAID` | Customer's `last_visit_at` is updated. Analytics log emitted. **No Clover call** — Clover deferred to Phase 2. The sibling `ORDER_PAID_NOTIFICATION` event handles the manager alert side. | Phase 2 starts → real Clover order created. |
+| `ORDER_PAID_NOTIFICATION` | Routes to `NotificationsService.handleOrderPaidNotification` → `TelegramService.newOrder` (stub-logged via `[telegram-stub]`). Owner does NOT yet receive a real Telegram message on paid orders. | C8 ships → real Telegram Bot API delivery. |
+| `ORDER_CANCELLED` | Routes to `NotificationsService.handleOrderCancelled`, which loads the order + customer and logs the alert via `[notifications-stub]`. No real push or Telegram fires. | C8 ships → real Telegram + APNs delivery. |
+| `ORDER_READY` | Routes to `NotificationsService.handleOrderReady` (stub-logged). **Customers still don't get a real "your coffee is ready" push.** They learn via polling `GET /orders/:id` until C8. | C8 ships → real APNs delivery. |
+| `ORDER_PICKED_UP` | Routes to `NotificationsService.handleOrderPickedUp` (stub-logged). Close-of-loop event for retention analytics. | Analytics module wires up the consumer (separate Phase 2 turn). |
+| `REFUND_CREATED` | Routes to `NotificationsService.handleRefundCreated` (stub-logged). The race-recorded variants log at WARN level (the `actionRequired` field is present) to surface for operator attention even pre-C8. | C8 ships → real customer push + manager Telegram. |
+| `ITEM_OUT_OF_STOCK` | Routes to `NotificationsService.handleItemOutOfStock` (stub-logged). The menu cache is invalidated synchronously by the admin endpoint — this outbox event is for the future Telegram alert to the owner. | C8 ships → real Telegram. |
 
-**The most operationally visible gap is `ORDER_READY`**: today's flow tells the barista to mark the order ready, the outbox row lands, the worker marks it processed, and the customer keeps polling. Once the notifications module exists, the same flow ends with a push.
+**The most operationally visible remaining gap is `ORDER_READY`**: today's flow tells the barista to mark the order ready, the outbox row lands, the worker dispatches to `NotificationsService.handleOrderReady`, the handler logs a structured stub line — and the customer still polls `GET /orders/:id` to find out. The structured stub log appears in CloudWatch on every transition, so the chain is verifiable end-to-end; C8 just swaps the stub log for a real APNs push.
 
 ## Retry sequence and DEAD
 

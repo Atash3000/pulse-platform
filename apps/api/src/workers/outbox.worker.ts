@@ -13,6 +13,7 @@ import {
   OutboxEventType,
   OutboxStatus,
 } from '../database/entities';
+import { NotificationsService } from '../modules/notifications/notifications.service';
 import { TelegramService } from '../modules/notifications/telegram.service';
 import { OrderWorker } from './order.worker';
 
@@ -83,6 +84,11 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     private readonly outboxRepo: Repository<OutboxEvent>,
     private readonly orderWorker: OrderWorker,
     private readonly telegram: TelegramService,
+    // C4: NotificationsService for the six event-driven event types
+    // (ORDER_PAID_NOTIFICATION + five non-PAID). ORDER_PAID stays on
+    // orderWorker for analytics — see decision-log entry "Notifications
+    // dispatch wiring (C4) + outbox-worker README update (C7)".
+    private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -194,7 +200,38 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   // ---------------------------------------------------------------------------
-  // Dispatch — route by event_type. Unimplemented types are no-ops, NOT errors.
+  // Dispatch — route by event_type. Two destinations:
+  //
+  //   ORDER_PAID                  → orderWorker.handleOrderPaid (analytics:
+  //                                  last_visit_at + structured log)
+  //
+  //   ORDER_PAID_NOTIFICATION  ┐
+  //   ORDER_CANCELLED          │
+  //   ORDER_READY              ├── notifications.dispatch(...) routes by
+  //   ORDER_PICKED_UP          │   eventType to the matching handler in
+  //   REFUND_CREATED           │   NotificationsService. Real Telegram/APNs
+  //   ITEM_OUT_OF_STOCK        ┘   delivery is still stub-logged (C8 ships
+  //                                that).
+  //
+  // C4 changed this from the previous warn-and-mark-PROCESSED fallback for
+  // the five non-PAID events. After C4 the full dispatch chain is live:
+  //
+  //   real paid order → markPaidFromWebhook emits ORDER_PAID +
+  //   ORDER_PAID_NOTIFICATION → worker tick picks them up → ORDER_PAID
+  //   routes to orderWorker (last_visit_at), ORDER_PAID_NOTIFICATION
+  //   routes to notifications.dispatch → handleOrderPaidNotification →
+  //   telegramService.newOrder → [telegram-stub] log line in CloudWatch.
+  //
+  // Transaction-boundary note: NotificationsService handlers load entities
+  // via injected repositories that use the global DataSource, NOT this
+  // worker's locked transaction's EntityManager. Their reads see the
+  // database state OUTSIDE this worker's lock. This is acceptable for
+  // Phase 1 (sub-second dispatch latency, concurrent entity mutations
+  // are vanishingly rare). When dispatch goes external (Phase 2 Clover/
+  // APNs with real network I/O), claim-then-process moves dispatch
+  // outside the worker's lock entirely. See decision-log entry "Outbox
+  // dispatch happens INSIDE the SKIP LOCKED transaction (Phase 1
+  // trade-off)" for the established pattern + the Phase 2 escape hatch.
   // ---------------------------------------------------------------------------
 
   private async dispatch(event: OutboxEvent): Promise<void> {
@@ -203,22 +240,13 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
         await this.orderWorker.handleOrderPaid(event.payload);
         return;
 
+      case OutboxEventType.ORDER_PAID_NOTIFICATION:
       case OutboxEventType.ORDER_CANCELLED:
       case OutboxEventType.ORDER_READY:
       case OutboxEventType.ORDER_PICKED_UP:
       case OutboxEventType.REFUND_CREATED:
       case OutboxEventType.ITEM_OUT_OF_STOCK:
-        // No handler yet for these event types. Mark PROCESSED so they don't
-        // pile up. When the relevant module is built (notifications, refunds,
-        // etc.) it'll register a handler.
-        //
-        // Operational note: ORDER_READY is the most visible of these — when
-        // staff press Ready, the customer "your coffee is ready" push DOES
-        // NOT fire yet. The event lands here and gets marked PROCESSED. Push
-        // delivery is wired up when the notifications module ships.
-        this.logger.warn(
-          `no handler registered for event type ${event.event_type}; marking PROCESSED (event_id=${event.id})`,
-        );
+        await this.notifications.dispatch(event.event_type, event.payload);
         return;
 
       default:

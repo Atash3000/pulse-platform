@@ -17,9 +17,12 @@ import { TelegramService } from './telegram.service';
  * What this owns
  * --------------
  * Centralised dispatch from outbox event type → side-effect handler. The
- * outbox worker (apps/api/src/workers/outbox.worker.ts) currently routes
- * five of the six event types through a no-op WARN log; in C4 those five
- * cases collapse to a single `await this.notifications.dispatch(...)` call.
+ * outbox worker (apps/api/src/workers/outbox.worker.ts) routes six event
+ * types here (`ORDER_PAID_NOTIFICATION`, `ORDER_CANCELLED`, `ORDER_READY`,
+ * `ORDER_PICKED_UP`, `REFUND_CREATED`, `ITEM_OUT_OF_STOCK`) — post-C4 the
+ * full dispatch chain is wired. `ORDER_PAID` stays on `orderWorker` for
+ * analytics; this service handles `ORDER_PAID_NOTIFICATION` for the
+ * Telegram alert side.
  *
  * ORDER_PAID is split between two services post-C5: orderWorker handles
  * the analytics side (`ORDER_PAID` → `handleOrderPaid` →
@@ -149,9 +152,18 @@ export class NotificationsService {
         // `OutboxEventType` without a corresponding `case` above, the
         // following assignment fails to compile because `eventType` is no
         // longer narrowed to `never` here.
+        //
+        // Runtime: C4 flipped this branch from warn-and-return to throw.
+        // The default now only fires for corrupted runtime values that
+        // bypass the type system (e.g., a stale outbox row with an
+        // enum string that was removed from `OutboxEventType`). Throwing
+        // propagates up to `outbox.worker.processOne`, which catches and
+        // increments `attempts` — the row eventually transitions to DEAD
+        // and `TelegramService.alertDeadOutboxEvent` fires for operator
+        // attention. Better than silent skip-and-mark-PROCESSED.
         const _exhaustive: never = eventType;
-        this.logger.warn(
-          `[notifications] no handler registered for event type ${String(_exhaustive)}; skipping`,
+        throw new Error(
+          `[notifications] no handler registered for event type ${String(_exhaustive)}`,
         );
       }
     }
@@ -172,9 +184,11 @@ export class NotificationsService {
   // returns empty, gracefully producing a message body with a missing slot
   // rather than crashing).
   //
-  // NOT REACHABLE IN PRODUCTION UNTIL C4 wires
-  // outbox.worker → notifications.dispatch. Until then this handler is
-  // exercised only by tests.
+  // Post-C4: REACHABLE via outbox.worker → notifications.dispatch routing.
+  // Every successful payment emits ORDER_PAID_NOTIFICATION, the worker
+  // dispatches it here, this handler loads the entities and calls
+  // telegramService.newOrder (still stub-logged via [telegram-stub] until
+  // C8 ships real Bot API delivery).
   //
   // Payload shape (one of two emit sites — webhook-orders.service.ts
   // markPaidFromWebhook ORDER_PAID_NOTIFICATION row, identical to the

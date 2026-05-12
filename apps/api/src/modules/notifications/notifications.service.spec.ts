@@ -173,18 +173,21 @@ describe('NotificationsService', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
-    it('logs a warning and does NOT throw on an unknown event type', async () => {
-      // Cast a plainly-fake string into the enum slot to simulate a future
-      // enum value that isn't yet wired here.
+    it('THROWS on an unknown event type (C4 flip — propagates to outbox.worker → retry → DEAD)', async () => {
+      // Cast a plainly-fake string into the enum slot to simulate a
+      // corrupted runtime value (e.g., a stale outbox row whose enum
+      // string was removed from `OutboxEventType` in a later migration).
+      // C4 flipped the dispatch default from warn-and-return to throw so
+      // these surface as DEAD events for operator attention rather than
+      // being silently marked PROCESSED.
       await expect(
         service.dispatch(
           'TOTALLY_FAKE_EVENT' as unknown as OutboxEventType,
           { foo: 'bar' },
         ),
-      ).resolves.toBeUndefined();
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy.mock.calls[0]![0]).toMatch(/no handler registered/);
-      // None of the actual handlers ran.
+      ).rejects.toThrow(/no handler registered for event type TOTALLY_FAKE_EVENT/);
+      // None of the actual handlers ran — throw happened in the default
+      // branch before any case executed.
       expect(ordersFindOne).not.toHaveBeenCalled();
       expect(menuItemsFindOne).not.toHaveBeenCalled();
     });

@@ -12,6 +12,32 @@ by entry title — search the log for the quoted title.
 
 ## [Unreleased]
 
+### Changed
+
+- Outbox worker now dispatches the six event-driven event types
+  (`ORDER_PAID_NOTIFICATION`, `ORDER_CANCELLED`, `ORDER_READY`,
+  `ORDER_PICKED_UP`, `REFUND_CREATED`, `ITEM_OUT_OF_STOCK`) to
+  `NotificationsService.dispatch` instead of warning-and-marking-PROCESSED.
+  The full dispatch chain is now wired end-to-end: real paid order →
+  outbox row → worker pickup → notifications.dispatch → handler →
+  stub-logged alert payload. Operationally, every paid order now
+  produces a `[telegram-stub]` log line in CloudWatch; every status
+  transition produces a `[notifications-stub]` log line. **No real
+  Telegram messages or iOS APNs pushes are sent yet** — the actual
+  network delivery is C8's scope. `ORDER_PAID` continues to route to
+  `orderWorker.handleOrderPaid` for analytics, unchanged.
+
+- `NotificationsService.dispatch`'s default branch now **throws** on an
+  unknown event type instead of warning-and-returning. A corrupted
+  runtime event type (e.g., a stale outbox row whose enum string was
+  removed in a later migration) now retries up to 5 times and
+  transitions to DEAD, triggering `TelegramService.alertDeadOutboxEvent`
+  for operator attention. Previously these were silently marked
+  PROCESSED, dropping the notification. The compile-time
+  `_exhaustive: never` check stays as a complementary guard for the
+  static case. — see decision-log entry *"Notifications dispatch
+  wiring (C4) + outbox-worker README update (C7)"*. Bundle C4+C7.
+
 ### Added
 
 - New `ORDER_PAID_NOTIFICATION` outbox event type, emitted atomically
