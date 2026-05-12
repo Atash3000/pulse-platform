@@ -4,7 +4,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   Inventory,
   MenuItem,
-  Modifier,
   Order,
   OrderEvent,
   OrderItem,
@@ -18,7 +17,7 @@ import { CheckoutService } from './checkout.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, OrderEvent, MenuItem, Modifier, Inventory]),
+    TypeOrmModule.forFeature([Order, OrderItem, OrderEvent, MenuItem, Inventory]),
     AuthModule,         // for JwtStrategy / AuthGuard('jwt')
     LocationsModule,    // for HoursService.canAcceptOrders()
     PricingModule,      // for PricingService

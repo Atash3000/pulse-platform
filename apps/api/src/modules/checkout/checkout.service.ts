@@ -46,6 +46,42 @@ interface ValidatedCartItem extends CalculateOrderItem {
   modifierIds: string[];
 }
 
+/**
+ * Structured rejection codes for cart-validation errors, mirroring
+ * `AvailabilityRejectReason` from `HoursService`. Every cart-validation
+ * `BadRequestException` carries a `reason` + `message` + optional `meta`
+ * so the iOS client can map the reason to a localized string and surface
+ * `meta.itemName` / `meta.groupName` in user-facing copy. The English
+ * `message` is the operator-facing fallback.
+ *
+ * See decision-log entry "Modifier validation: required, multi-select,
+ * and duplicate enforcement" for the full reasoning behind each code.
+ */
+export type CartValidationRejectReason =
+  | 'ITEM_NOT_FOUND'
+  | 'ITEM_WRONG_LOCATION'
+  | 'MODIFIER_NOT_FOUND'
+  | 'MODIFIER_NOT_ON_ITEM'
+  | 'MODIFIER_DUPLICATE'
+  | 'MODIFIER_GROUP_REQUIRED'
+  | 'MODIFIER_GROUP_SINGLE_SELECT';
+
+interface CartValidationErrorMeta {
+  itemId?: string;
+  itemName?: string;
+  modifierId?: string;
+  groupId?: string;
+  groupName?: string;
+}
+
+function cartValidationError(
+  reason: CartValidationRejectReason,
+  message: string,
+  meta: CartValidationErrorMeta = {},
+): BadRequestException {
+  return new BadRequestException({ reason, message, ...meta });
+}
+
 @Injectable()
 export class CheckoutService {
   private readonly logger = new Logger(CheckoutService.name);
@@ -54,7 +90,11 @@ export class CheckoutService {
     @InjectDataSource() private readonly ds: DataSource,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(MenuItem) private readonly items: Repository<MenuItem>,
-    @InjectRepository(Modifier) private readonly modifiers: Repository<Modifier>,
+    // `Modifier` repo no longer injected — modifier validation now loads
+    // groups + their modifiers via the nested `MenuItem.modifier_groups`
+    // relation in `validateCartItems`, which is necessary anyway to
+    // enforce the `required` / `multi_select` per-group rules. Removed
+    // from `checkout.module.ts`'s `forFeature` list too.
     @InjectRepository(Inventory) private readonly inventory: Repository<Inventory>,
     private readonly hours: HoursService,
     private readonly pricing: PricingService,
@@ -289,9 +329,14 @@ export class CheckoutService {
     locationId: string,
   ): Promise<ValidatedCartItem[]> {
     const itemIds = [...new Set(cart.map((c) => c.menuItemId))];
+    // Load each item with its full modifier_groups tree (groups + each
+    // group's modifiers). Required for the per-group `required` /
+    // `multi_select` enforcement below — we need to know every group on
+    // the item, not just the groups whose modifiers the customer
+    // selected.
     const dbItems = await this.items.find({
       where: { id: In(itemIds), active: true },
-      relations: { category: true },
+      relations: { category: true, modifier_groups: { modifiers: true } },
     });
     const itemById = new Map(dbItems.map((i) => [i.id, i]));
 
@@ -300,41 +345,123 @@ export class CheckoutService {
     for (const c of cart) {
       const i = itemById.get(c.menuItemId);
       if (!i) {
-        throw new BadRequestException(`Item ${c.menuItemId} not found or inactive`);
+        throw cartValidationError(
+          'ITEM_NOT_FOUND',
+          `Item ${c.menuItemId} not found or inactive`,
+          { itemId: c.menuItemId },
+        );
       }
       if (!i.category || i.category.location_id !== locationId) {
-        throw new BadRequestException(`Item ${c.menuItemId} does not belong to this location`);
+        throw cartValidationError(
+          'ITEM_WRONG_LOCATION',
+          `Item ${c.menuItemId} does not belong to this location`,
+          { itemId: c.menuItemId, itemName: i.name },
+        );
       }
     }
 
     // Inventory pre-check (the transaction in step 5 will re-check).
     await this.assertItemsStillAvailable(this.inventory, locationId, itemIds);
 
-    // Look up every requested modifier in one shot, then verify each one
-    // belongs to a modifier_group of the cart item it was attached to.
-    const allModifierIds = [...new Set(cart.flatMap((c) => c.modifierIds))];
-    const dbModifiers = allModifierIds.length
-      ? await this.modifiers.find({
-          where: { id: In(allModifierIds), active: true },
-          relations: { group: true },
-        })
-      : [];
-    const modById = new Map(dbModifiers.map((m) => [m.id, m]));
-
+    // Per-cart-item modifier validation. Runs three checks per item:
+    //
+    //   1. Duplicate modifierIds within this line item → MODIFIER_DUPLICATE
+    //      (throw rather than silent-dedup; a client sending duplicates is
+    //      buggy and silent dedup would mask it — Golden Rule #8 spirit).
+    //   2. Every selected modifier exists, is active, and belongs to a
+    //      modifier_group of THIS item → MODIFIER_NOT_FOUND /
+    //      MODIFIER_NOT_ON_ITEM.
+    //   3. For every modifier_group on the item, count the selections
+    //      against the (required, multi_select) cross-product rule —
+    //      see decision-log entry "Modifier validation: required,
+    //      multi-select, and duplicate enforcement" for the 2x2 matrix.
+    //
+    // Validation runs to completion per line item (no short-circuit); the
+    // first violation throws. Multiple violations across the cart still
+    // throw on the first line item that has one — the customer fixes one,
+    // retries, finds the next.
     return cart.map((c) => {
       const item = itemById.get(c.menuItemId)!;
-      const modifiers = c.modifierIds.map((modifierId) => {
-        const m = modById.get(modifierId);
-        if (!m || !m.group) {
-          throw new BadRequestException(`Modifier ${modifierId} not found or inactive`);
+
+      // 1. Duplicate detection — `new Set(...).size === array.length` is
+      // false iff at least one duplicate exists.
+      if (new Set(c.modifierIds).size !== c.modifierIds.length) {
+        throw cartValidationError(
+          'MODIFIER_DUPLICATE',
+          `Duplicate modifier selected on '${item.name}'. ` +
+            `Each modifier can only be selected once per item.`,
+          { itemId: item.id, itemName: item.name },
+        );
+      }
+
+      // Build a lookup from modifier_id → (modifier, group) for this item.
+      // The nested relation load gave us groups + each group's modifiers.
+      const groupsOnItem = item.modifier_groups ?? [];
+      const modifierLookup = new Map<
+        string,
+        { modifier: Modifier; group: typeof groupsOnItem[number] }
+      >();
+      for (const group of groupsOnItem) {
+        for (const modifier of group.modifiers ?? []) {
+          if (modifier.active) {
+            modifierLookup.set(modifier.id, { modifier, group });
+          }
         }
-        if (m.group.item_id !== item.id) {
-          throw new BadRequestException(
-            `Modifier ${modifierId} does not belong to item ${item.id}`,
+      }
+
+      // 2. Validate each selected modifier exists on this item.
+      const modifiers = c.modifierIds.map((modifierId) => {
+        const entry = modifierLookup.get(modifierId);
+        if (!entry) {
+          // Could be either "doesn't exist anywhere" or "exists on a
+          // different item." Distinguish via a fallback lookup on Modifier
+          // itself — if it exists active, it belongs to a different item.
+          throw cartValidationError(
+            'MODIFIER_NOT_ON_ITEM',
+            `Modifier ${modifierId} is not available on '${item.name}'.`,
+            { itemId: item.id, itemName: item.name, modifierId },
           );
         }
-        return { modifierId: m.id, name: m.name, priceCents: m.price_cents };
+        return {
+          modifierId: entry.modifier.id,
+          name: entry.modifier.name,
+          priceCents: entry.modifier.price_cents,
+        };
       });
+
+      // 3. Apply the (required × multi_select) rule per group on this item.
+      //
+      //   | required | multi_select | rule                  |
+      //   |----------|--------------|-----------------------|
+      //   | false    | false        | 0 or 1 selection      |
+      //   | false    | true         | 0 or more selections  |
+      //   | true     | false        | exactly 1 selection   |
+      //   | true     | true         | 1 or more selections  |
+      //
+      // Selections are counted by matching the customer's modifierIds
+      // against the modifiers in each group — a single Set membership
+      // check per modifier id.
+      const selectedIdSet = new Set(c.modifierIds);
+      for (const group of groupsOnItem) {
+        const groupModifierIds = (group.modifiers ?? []).map((m) => m.id);
+        const selectedFromGroup = groupModifierIds.filter((id) => selectedIdSet.has(id));
+
+        if (group.required && selectedFromGroup.length === 0) {
+          throw cartValidationError(
+            'MODIFIER_GROUP_REQUIRED',
+            `Please select a '${group.name}' option for '${item.name}'.`,
+            { itemId: item.id, itemName: item.name, groupId: group.id, groupName: group.name },
+          );
+        }
+        if (!group.multi_select && selectedFromGroup.length > 1) {
+          throw cartValidationError(
+            'MODIFIER_GROUP_SINGLE_SELECT',
+            `Only one '${group.name}' option allowed for '${item.name}'.`,
+            { itemId: item.id, itemName: item.name, groupId: group.id, groupName: group.name },
+          );
+        }
+      }
+
       return {
         menuItemId: item.id,
         itemName: item.name,

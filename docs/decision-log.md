@@ -994,3 +994,92 @@ When a stale failure webhook arrives for a PAID order, `payment_status` is `SUCC
 - 2 negative-coverage (missing orderId metadata, order not found in DB).
 
 Total test count: 228 → 239 (+11).
+
+---
+
+## 2026-05-11 — Modifier validation: required, multi-select, and duplicate enforcement
+
+**Decision:** rewrite `CheckoutService.validateCartItems` to enforce three previously-missing validation rules: per-item modifier deduplication, `modifier_groups.required` enforcement, and `modifier_groups.multi_select` enforcement. Every cart-validation rejection — both the three new rules and the four pre-existing ones — now throws `BadRequestException` carrying a structured `CartValidationRejectReason` code + human message + meta (item/group names), mirroring the `AvailabilityRejectReason` pattern from `HoursService`.
+
+**The three bugs:**
+
+| Bug | Damage | Fix |
+|---|---|---|
+| **No per-item modifier dedup** | Customer can post `modifierIds: ['oat-milk', 'oat-milk']` for one line item. Both copies flow into pricing → upcharge applied twice → customer overcharged. | Per-cart-item duplicate check via `Set(modifierIds).size !== modifierIds.length`. Throws `MODIFIER_DUPLICATE`. |
+| **No `required` group enforcement** | A drink with `modifier_groups.required = true` for a "Size" group can be ordered with no size selected. Barista has no idea what to make. | Per-group check: if `required && selectedFromGroup.length === 0` → throw `MODIFIER_GROUP_REQUIRED`. |
+| **No `multi_select` group enforcement** | Customer picks "Small" + "Large" on a single-choice group. Two upcharges, no clear answer for the barista. | Per-group check: if `!multi_select && selectedFromGroup.length > 1` → throw `MODIFIER_GROUP_SINGLE_SELECT`. |
+
+**The (required × multi_select) matrix:**
+
+| `required` | `multi_select` | Rule | Test case |
+|---|---|---|---|
+| `false` | `false` | 0 or 1 selection | TC1 (0 OK), TC2 (1 OK), TC3 (2 reject SINGLE_SELECT) |
+| `false` | `true` | 0 or more selections | TC4 (0 OK), TC5 (2 OK) |
+| `true` | `false` | exactly 1 selection | TC6 (0 reject REQUIRED), TC7 (1 OK), TC8 (2 reject SINGLE_SELECT) |
+| `true` | `true` | 1 or more selections | TC9 (0 reject REQUIRED), TC10 (1 OK), TC11 (3 OK) |
+
+All 4 combinations × all relevant counts → 11 explicit test cases. The matrix is canonical — every (required, multi_select, count) tuple has exactly one defined outcome.
+
+**Structured error codes — `CartValidationRejectReason`:**
+
+```ts
+type CartValidationRejectReason =
+  | 'ITEM_NOT_FOUND'              // item doesn't exist or is inactive
+  | 'ITEM_WRONG_LOCATION'         // item belongs to a different location's category
+  | 'MODIFIER_NOT_FOUND'          // (reserved — see note below)
+  | 'MODIFIER_NOT_ON_ITEM'        // modifier not present on this item's groups
+  | 'MODIFIER_DUPLICATE'          // same modifierId listed twice on one line item
+  | 'MODIFIER_GROUP_REQUIRED'     // required group has zero selections
+  | 'MODIFIER_GROUP_SINGLE_SELECT';  // single-select group has 2+ selections
+```
+
+The pre-existing item/modifier checks moved to structured codes too — the validation layer now speaks one language. Every rejection carries:
+
+- `reason`: machine-readable code (one of the union members).
+- `message`: human-readable English string (operator-facing fallback).
+- `meta`: optional `{itemId, itemName, modifierId, groupId, groupName}` for client-side i18n.
+
+iOS clients can map `reason` → localized strings using `meta.itemName` / `meta.groupName` interpolation. The English `message` matches the localization-key default.
+
+**`MODIFIER_NOT_FOUND` is reserved but not currently emitted.** The post-refactor flow loads modifiers via the nested `MenuItem.modifier_groups.modifiers` relation — meaning the lookup is scoped to the item being validated. A modifierId that exists but belongs to a different item registers as `MODIFIER_NOT_ON_ITEM`, not as "not found." A modifierId that doesn't exist anywhere similarly registers as `MODIFIER_NOT_ON_ITEM` (the customer's response is the same either way: "that modifier isn't available on this item"). `MODIFIER_NOT_FOUND` is kept in the enum for forward-compat with future flows that might do a global-modifier lookup.
+
+**Throw vs silent dedup — decided: throw.**
+
+Considered silently deduplicating `modifierIds` (running `new Set(...)` and continuing). Rejected. Reasons:
+
+- A client sending duplicates is buggy. Silent dedup masks the client bug and lets it ship; the dev team finds out months later when production reports start showing patterns.
+- Consistent with Golden Rule #8 (iOS prices are ignored). The backend doesn't accommodate client malformation; it surfaces malformation as 400.
+- The error is recoverable (client retries with a corrected cart). It doesn't break the user experience to fail-fast.
+
+`MODIFIER_DUPLICATE` is the right code. iOS client logic that builds the cart array should dedupe at the UI layer; backend doesn't do that work.
+
+**DRAFT-style coverage gap — checkout (`#10`):**
+
+Audit item #10 flagged that `CheckoutService` had zero spec coverage. This turn adds the spec file `apps/api/src/modules/checkout/checkout.service.spec.ts` covering the modifier-validation surface (16 tests) plus one end-to-end happy-path smoke test. **The smoke test is intentionally one test, not a full integration suite.** A top-of-file comment in the spec lists the deliberately-uncovered surfaces:
+
+- Idempotency cache paths (Step 1): cache HIT, cache MISS, same-key-different-customer ConflictException.
+- HoursService rejection passthrough (Step 2).
+- Inventory race (Step 5): the in-transaction inventory re-check has no row lock (audit item #8 — separate turn).
+- Transaction rollback / Stripe error path: audit item #5 — separate turn.
+- Tip-percent validation (Step 3.5) and pricing service integration (Step 4): delegate-tested at their respective service levels.
+
+The end-to-end smoke pins the test scaffold (mocked DataSource, repos, delegate services) so future `test(checkout): ...` commits can add specific scenarios without re-doing the harness. Splitting `#10` into a focused-tests-now-plus-broader-coverage-later approach was deliberate; comprehensive checkout coverage in this turn would have ballooned to ~30 tests and conflated two concerns.
+
+**Module wiring side effect — `Modifier` repo no longer injected:**
+
+The pre-fix `validateCartItems` injected `@InjectRepository(Modifier)` for a flat `modifiers.find({where: {id: In(allModifierIds)}})` call. The post-fix path loads modifiers via the nested `MenuItem.modifier_groups.modifiers` relation, which is required anyway to enumerate `required` / `multi_select` groups for a given item. The `Modifier` repo injection becomes unused → removed from `CheckoutService` constructor and from `checkout.module.ts`'s `TypeOrmModule.forFeature` list. The `Modifier` type import stays (still referenced inline as a type in the `modifierLookup` map's value type).
+
+**Tests:** `apps/api/src/modules/checkout/checkout.service.spec.ts` — 16 tests:
+
+- 11 (required × multi_select) matrix tests (TC1–TC11), one per cell of the cross-product where the rule has a different outcome.
+- 1 `MODIFIER_DUPLICATE` test (TC12).
+- 3 preserved-behavior tests with structured codes (TC13 `MODIFIER_NOT_ON_ITEM`, TC14 `ITEM_NOT_FOUND` for inactive items, TC15 `ITEM_WRONG_LOCATION`).
+- 1 end-to-end happy-path smoke (TC16) — exercises the full `checkout()` flow with all delegate services mocked, asserts the response shape (`{orderId, clientSecret, totalCents, display}`).
+
+Test count: 239 → 255 (+16). Build clean.
+
+**Future work:**
+
+- Audit item #8 (inventory race no row lock) — separate turn, would also touch `validateCartItems` adjacent code but for a different concern.
+- Audit item #5 (orphan PaymentIntent on transaction rollback) — separate turn, Step 5 transaction structure.
+- Full `CheckoutService` test coverage (idempotency cache paths, HoursService rejection passthrough, Stripe error paths) — incrementally added as `test(checkout): ...` commits when each is needed.

@@ -14,6 +14,25 @@ by entry title — search the log for the quoted title.
 
 ### Fixed
 
+- Checkout modifier validation now enforces three previously-silent
+  rules: per-cart-item duplicate detection
+  (`MODIFIER_DUPLICATE`), `modifier_groups.required` enforcement
+  (`MODIFIER_GROUP_REQUIRED`), and `modifier_groups.multi_select`
+  enforcement (`MODIFIER_GROUP_SINGLE_SELECT`). Pre-fix, a customer
+  could post the same modifier twice on one line item (charged twice
+  for the same upcharge), omit all selections from a required group
+  (e.g., order a drink with no size — barista has no idea what to
+  make), or select multiple modifiers from a single-select group
+  (e.g., "Small" AND "Large" simultaneously). All cart-validation
+  rejections — both the three new rules and the four pre-existing
+  ones (item not found, wrong location, modifier not on item) —
+  now throw `BadRequestException` carrying a structured `reason`
+  code + human `message` + optional `meta` (itemId, itemName,
+  groupName) so the iOS client can render localized strings.
+  Mirrors the `AvailabilityRejectReason` pattern from
+  `HoursService`. — see decision-log entry *"Modifier validation:
+  required, multi-select, and duplicate enforcement"*.
+
 - Stale `payment_intent.payment_failed` webhooks for orders that have
   already moved past `PENDING_PAYMENT` no longer trigger Stripe retry
   storms. Previously, a failure event arriving for a PAID / ACCEPTED /
