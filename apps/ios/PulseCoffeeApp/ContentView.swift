@@ -20,18 +20,16 @@ struct ContentView: View {
 }
 
 #if DEBUG
-/// Visible only in Debug builds. Surfaces the API base URL so the developer
-/// knows whether the app is pointing at localhost, a tunnel, or a staging
-/// host — prevents the "why isn't this working" debug session when the
-/// configuration drifts unnoticed.
+/// Visible only in Debug builds. Reads the active API base URL from
+/// `AppConfig` so configuration drift is visible at a glance — prevents
+/// the "why isn't this working" debug session when the developer expects
+/// localhost but the build is pointing somewhere else.
 private struct DebugAPIBanner: View {
-    private static let apiBaseURL = "http://localhost:3000/api/v1"
-
     var body: some View {
         VStack(spacing: 4) {
             Text("DEBUG")
                 .font(.caption2.weight(.bold))
-            Text(Self.apiBaseURL)
+            Text(AppConfig.apiBaseURL.absoluteString)
                 .font(.caption.monospaced())
         }
         .padding(.horizontal, 12)

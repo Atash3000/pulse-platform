@@ -61,7 +61,22 @@ test-results/
 # Treat it as a build artifact: never committed. Run `make project`
 # (from apps/ios/) after pulling to regenerate. See decision-log entry
 # "[iOS] XcodeGen for project file management".
-apps/ios/PulseCoffeeApp.xcodeproj/
+#
+# EXCEPTION — `Package.resolved`:
+# Xcode stores the SPM dependency lockfile inside the .xcodeproj at:
+#   project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+# We commit it for reproducible builds. The negation pattern below
+# allow-lists ONLY that file (and the directory chain leading to it),
+# leaving everything else under .xcodeproj/ ignored. See decision-log
+# entry "[iOS] Sentry + PostHog + AppConfig wiring" for why.
+apps/ios/PulseCoffeeApp.xcodeproj/*
+!apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/
+apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/*
+!apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/
+apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/*
+!apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # Xcode build artifacts and user-specific state
 **/build/

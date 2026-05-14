@@ -10,6 +10,7 @@ iOS 16+. Stripe iOS SDK for payments. APNs push for "your order is ready." Sentr
 # One-time setup
 make install        # brew install xcodegen
 make project        # generate PulseCoffeeApp.xcodeproj from project.yml
+make resolve        # resolve SPM packages, write Package.resolved lockfile
 
 # Day-to-day
 open PulseCoffeeApp.xcodeproj
@@ -17,22 +18,32 @@ make build          # CLI build for Simulator
 make test           # XCTest suite for Simulator
 ```
 
-The `.xcodeproj` is **gitignored** — `project.yml` is the source of truth. After pulling, run `make project` once and you're set. Rationale: see decision-log entry "[iOS] XcodeGen for project file management".
+The `.xcodeproj` is **gitignored** (except for the SPM `Package.resolved` lockfile inside it — see decision-log "[iOS] Sentry + PostHog + AppConfig wiring"). `project.yml` is the source of truth for the project structure; `Package.resolved` is the source of truth for the dependency versions. After pulling, `make project && make resolve` puts both in place.
 
 ## Layout
 
 ```
 apps/ios/
-├── project.yml                          XcodeGen source of truth
-├── Makefile                             make project / build / test
+├── project.yml                          XcodeGen source of truth (incl. SPM deps)
+├── Makefile                             make project / resolve / build / test
 ├── PulseCoffeeApp/
-│   ├── PulseCoffeeApp.swift            @main entry point
-│   ├── ContentView.swift                placeholder screen (Phase 1 scaffold)
+│   ├── PulseCoffeeApp.swift            @main entry point — Sentry + PostHog init
+│   ├── ContentView.swift                placeholder screen — reads AppConfig
 │   ├── PulseCoffeeApp.entitlements     push capability
+│   ├── Core/
+│   │   └── AppConfig.swift              compile-time config (DSN, key, baseURL, env)
 │   ├── Assets.xcassets/                 AppIcon + AccentColor (placeholders)
 │   └── Preview Content/                 SwiftUI preview-only assets
 └── PulseCoffeeAppTests/                 XCTest bundle
 ```
+
+SPM dependencies declared in `project.yml`:
+
+| Package | Product | First used in |
+|---|---|---|
+| `stripe-ios` | `StripePaymentSheet` | commit #7 (checkout) |
+| `sentry-cocoa` | `Sentry` | commit #2 (this commit — init in `App.init()`) |
+| `posthog-ios` | `PostHog` | commit #2 (this commit — init after Sentry) |
 
 ## Configuration
 

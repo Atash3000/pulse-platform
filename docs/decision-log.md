@@ -1935,3 +1935,79 @@ A follow-up commit can update `docs/ai-onboarding/ios.md` rule #10 inline to ref
 - `apps/api/README.md` module status table: row `loyalty | Next | Points on ORDER_PAID, tier upgrades. Currently last_visit_at updates inside OrderWorker; loyalty triggers when its module ships.`
 - Spec feature roadmap: page 24, items #9–#10.
 - Backend chat will revisit when ready to ship loyalty — no fixed timeline.
+
+---
+
+## 2026-05-14 — [iOS] Sentry + PostHog + AppConfig wiring
+
+**Decision:** commit #2 lands three SPM dependencies (Stripe iOS, Sentry iOS, PostHog iOS), a centralised `AppConfig` enum for compile-time configuration, Sentry init as the first line of `App.init()` per Golden Rule #9, and PostHog init immediately after Sentry. Strict concurrency promoted from `minimal` to `complete`. Six design choices made here are documented below; each was discussed in the iOS chat / CTO chat exchange and approved before this commit.
+
+**1. Single Sentry project, environment-tagged events (not two DSNs):**
+
+One iOS Sentry project covers both Debug and Release builds. Events are tagged with `options.environment = AppConfig.environment` ("debug" or "production"); the Sentry UI lets us filter by environment without operating two projects.
+
+Rejected: two DSNs (one per environment). Pros — dev noise doesn't pollute prod quota. Cons — two projects to operate, easier for a single developer to forget which is which. The free-tier quota overhead from dev events is negligible at Phase 1 volume.
+
+The backend has its own Sentry project (separate platform, separate alert routes) — that split is correct and orthogonal to this decision.
+
+**2. `tracesSampleRate = 1.0` for launch:**
+
+Phase 1 keeps performance-monitoring sampling at 100% because catching unknown-unknowns at launch is the high-value pass. The code comment explicitly notes that:
+
+- `tracesSampleRate` controls TRANSACTION sampling, not error sampling. Errors are always 100% captured regardless of this value.
+- Setting 1.0 makes every transaction (HTTP request, view lifecycle, etc.) a billable event in Sentry. At ~50 orders/day × ~10 transactions/order = ~15k transactions/month, we're near the Sentry "Developer" free-tier ceiling (10k/month).
+
+CTO sets an 80%-of-quota alert in Sentry as the operational backstop. If we approach the cap we tune `tracesSampleRate` down (Phase 2 default target is 0.2–0.5 once we know which transactions matter most). The cost of being wrong is ~$26/month for the "Team" tier — a worthwhile trade for full launch-period visibility.
+
+**3. `AppConfig.swift` enum (not `.xcconfig`):**
+
+Compile-time configuration lives in `apps/ios/PulseCoffeeApp/Core/AppConfig.swift` as a `case-less` enum with `static` members. Build-config-dependent values use `#if DEBUG`. Rejected `.xcconfig` files because their value-add (multi-target build settings sharing) doesn't apply to a single-app project with one Debug + one Release configuration.
+
+**4. `beforeSend` redactor installed empty in commit #2:**
+
+The Sentry SDK accepts a `beforeSend` closure that can mutate or drop events before they leave the device. In commit #2 the closure is a no-op pass-through. In commit #3 (APIClient + Keychain) it gets the real implementation: strip the `Authorization: Bearer <JWT>` header from request breadcrumbs, redact `password` / `token` fields from POST request body breadcrumbs.
+
+Why install empty now: cheaper than retrofitting after the first token leaks to Sentry. The structural slot exists; only the redaction logic is deferred. A clear `TODO(commit #3)` comment marks the open work.
+
+**5. SPM version pinning — `from:`, not `exact:`:**
+
+Each package uses `from:` so minor/patch upgrades flow in (especially security patches). Major bumps require deliberate edits to the `from:` floor — that's where breaking changes lurk.
+
+Initial floors:
+
+| Package | Floor | Product linked |
+|---|---|---|
+| `stripe-ios` | `23.0.0` | `StripePaymentSheet` (transitively pulls Apple Pay support) |
+| `sentry-cocoa` | `8.0.0` | `Sentry` |
+| `posthog-ios` | `3.0.0` | `PostHog` |
+
+The actual resolved versions live in `Package.resolved` at the canonical Xcode path `PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. That file is the only thing under `.xcodeproj/` that's committed — the root `.gitignore` carries a multi-line allow-list pattern that ignores the rest of `.xcodeproj/` while letting `Package.resolved` through.
+
+`make resolve` (added in this commit) runs `xcodebuild -resolvePackageDependencies` so the lockfile can be regenerated from CLI without opening Xcode.
+
+**6. Strict concurrency: `complete`, with `targeted` fallback documented:**
+
+`SWIFT_STRICT_CONCURRENCY` promoted from `minimal` (commit #1) to `complete`. Stripe iOS 23+, Sentry iOS 8+, and PostHog iOS 3+ all support Sendable conformance in their recent releases. If a future SDK upgrade introduces non-Sendable warnings we can't immediately fix, we downshift to `targeted` and open a follow-up to chase the SDK back to `complete`.
+
+**Sentry smoke-test mechanism:**
+
+A guarded path in `App.init()` fires a `SentrySDK.capture(message:)` event when the `SMOKE_TEST=1` environment variable is set in the Xcode scheme. Wrapped with `#if DEBUG` so production builds cannot emit it. Operator workflow:
+
+1. Edit scheme → Run → Arguments → Environment Variables → add `SMOKE_TEST = 1`
+2. Run on Simulator
+3. Confirm `ios.smoke-test: commit #2 wiring verified` appears in Sentry dashboard
+4. Remove the env var
+
+This is the verification the manager runs after pulling this commit to confirm event delivery end-to-end.
+
+**Package.resolved workflow:**
+
+The lockfile cannot be generated from a non-Mac environment — it's the output of `xcodebuild -resolvePackageDependencies`, which requires Xcode. The iOS chat does not commit `Package.resolved` directly; the CTO chat regenerates it on the Mac after pulling (via `make resolve`) and commits it as either part of the merge-to-main step or a small follow-up commit. The `.gitignore` exception ensures the regenerated file lands at the right path.
+
+**What this commit does NOT include:**
+
+- ATS exception for `http://localhost` — lands in commit #3 with the APIClient.
+- `Authorization` header / JWT redaction logic in `beforeSend` — commit #3 with the APIClient.
+- Real PostHog screen-view / funnel events — lands per feature commit as screens come online.
+- Any actual use of the Stripe SDK — linked here, imported in commit #7 (checkout).
+- Sentry release-tracking dSYM upload — DevOps phase, separate concern.

@@ -28,11 +28,36 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     # Hardens the build: third-party scripts cannot escape their sandbox.
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    # Modern concurrency safety. Phase 1 uses @MainActor; Swift 6 strict
-    # concurrency checks surface data-race risks at compile time. Keep
-    # `minimal` for now to avoid blocking commit #2 SPM dependency
-    # integration; tighten to `complete` once Stripe/Sentry/PostHog are in.
-    SWIFT_STRICT_CONCURRENCY: minimal
+    # Modern concurrency safety. Swift 6 strict concurrency checks surface
+    # data-race risks at compile time. Promoted from `minimal` to `complete`
+    # in commit #2 once the SPM dependencies (Stripe / Sentry / PostHog)
+    # landed cleanly. If a future SDK upgrade introduces non-Sendable
+    # warnings we can't immediately fix, downshift to `targeted` and open a
+    # follow-up to chase the SDK back to `complete`.
+    SWIFT_STRICT_CONCURRENCY: complete
+
+# -------------------------------------------------------------------------
+# Swift Package Manager dependencies.
+#
+# `from:` (not `exact:`) — accepts minor and patch upgrades automatically
+# so security patches flow in without manual intervention. Major upgrades
+# (potentially breaking) require a deliberate edit to bump the floor.
+# Package.resolved (committed at the canonical Xcode location) is the
+# actual lockfile pinning the exact resolved version.
+#
+# When a major version bumps upstream and we want it, bump the `from:`
+# floor here and run `make resolve` to regenerate Package.resolved.
+# -------------------------------------------------------------------------
+packages:
+  StripeIOS:
+    url: https://github.com/stripe/stripe-ios
+    from: "23.0.0"
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa
+    from: "8.0.0"
+  PostHog:
+    url: https://github.com/PostHog/posthog-ios
+    from: "3.0.0"
 
 targets:
   # -------------------------------------------------------------------------
@@ -51,6 +76,22 @@ targets:
           - "Preview Content/**"
       - path: PulseCoffeeApp/Preview Content
         buildPhase: resources
+    dependencies:
+      # Stripe iOS SDK — modern PaymentSheet UI brings in Apple Pay support
+      # transitively via StripeApplePay. Linked in commit #2 but no code
+      # imports it until commit #7 (checkout).
+      - package: StripeIOS
+        product: StripePaymentSheet
+      # Sentry iOS SDK — init as the first line of App.init() per Golden
+      # Rule #9. Auto-instruments URLSession (request breadcrumbs come for
+      # free), crash reporting, and app-hang detection.
+      - package: Sentry
+        product: Sentry
+      # PostHog iOS SDK — analytics + funnels. Tagged source: "ios" so
+      # backend events (later, tagged source: "api") stay distinguishable
+      # in the same PostHog project.
+      - package: PostHog
+        product: PostHog
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pulsecoffee.app

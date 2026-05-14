@@ -14,6 +14,32 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS SPM dependencies (Stripe iOS, Sentry iOS, PostHog iOS) declared
+  in `apps/ios/project.yml` with `from:` floors `23.0.0` / `8.0.0` /
+  `3.0.0` respectively. `Package.resolved` (the actual lockfile) lives
+  at the canonical Xcode path under `.xcodeproj/`; the root `.gitignore`
+  allow-lists exactly that file so the rest of `.xcodeproj/` stays
+  ignored. `make resolve` (new Makefile target) runs
+  `xcodebuild -resolvePackageDependencies` from CLI. — see decision-log
+  entry *"[iOS] Sentry + PostHog + AppConfig wiring"*.
+
+- iOS observability stack: Sentry initialised as the first line of
+  `App.init()` per Golden Rule #9 (single iOS project, environment-tagged
+  events via `options.environment = AppConfig.environment`,
+  `tracesSampleRate = 1.0` for launch with documented Phase 2
+  tune-down). PostHog initialised immediately after, with shared
+  properties `source: "ios"` + `environment` so the same project can
+  later receive backend events tagged `source: "api"`. A
+  `SMOKE_TEST=1` env-var-guarded `capture(message:)` path lets the
+  developer verify event delivery from Simulator without polluting prod.
+
+- `apps/ios/PulseCoffeeApp/Core/AppConfig.swift`: compile-time
+  configuration namespace (Sentry DSN, PostHog Project API Key,
+  `apiBaseURL`, `environment`). Build-config-dependent values use
+  `#if DEBUG`. The Debug-only banner in `ContentView.swift` now reads
+  `AppConfig.apiBaseURL` so there's a single source of truth for the
+  active backend URL.
+
 - iOS app scaffolding (`apps/ios/`): empty SwiftUI app with an
   XcodeGen-managed project spec (`project.yml`), Makefile for
   regeneration, bundle ID `com.pulsecoffee.app`, signing team
@@ -38,6 +64,19 @@ by entry title — search the log for the quoted title.
   Node version bump"*.
 
 ### Changed
+
+- iOS `SWIFT_STRICT_CONCURRENCY` promoted from `minimal` (commit #1
+  scaffold default) to `complete` now that the SPM dependencies are
+  in place and we've verified Stripe iOS 23+ / Sentry iOS 8+ /
+  PostHog iOS 3+ support Sendable conformance. If a future SDK
+  upgrade introduces non-Sendable warnings, we downshift to
+  `targeted` and open a follow-up to chase it back to `complete`. —
+  see decision-log entry *"[iOS] Sentry + PostHog + AppConfig wiring"*.
+
+- iOS `ContentView` Debug banner now reads `AppConfig.apiBaseURL`
+  instead of a hardcoded localhost string. Eliminates a possible
+  divergence between what the banner shows and what the app would
+  actually call.
 
 - `engines.node` floor in `apps/api/package.json` bumped from `">=18"`
   to `">=20"`. Node 18 reached EOL on April 30, 2025; the prior floor

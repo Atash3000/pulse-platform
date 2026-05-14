@@ -1,7 +1,7 @@
 # Pulse Coffee iOS — make targets.
 # `make project` regenerates the .xcodeproj from project.yml.
 
-.PHONY: help install project build test clean
+.PHONY: help install project resolve build test clean
 
 # Use a default destination that doesn't pin to a specific iPhone model.
 # `generic/platform=iOS Simulator` lets xcodebuild pick whichever Simulator
@@ -13,6 +13,7 @@ help:
 	@echo ""
 	@echo "  make install  Install XcodeGen via Homebrew (one-time setup)"
 	@echo "  make project  (Re)generate PulseCoffeeApp.xcodeproj from project.yml"
+	@echo "  make resolve  Resolve SPM dependencies and (re)write Package.resolved"
 	@echo "  make build    xcodebuild Debug for Simulator"
 	@echo "  make test     xcodebuild test for Simulator"
 	@echo "  make clean    Remove generated .xcodeproj and DerivedData"
@@ -32,6 +33,19 @@ project:
 	}
 	xcodegen generate
 	@echo "Regenerated PulseCoffeeApp.xcodeproj from project.yml."
+
+# Resolve SPM dependencies and write Package.resolved. This writes the
+# lockfile at
+#   PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+# which is the only file under .xcodeproj/ that we commit (see
+# root .gitignore for the exception pattern). Run this after editing
+# `packages:` in project.yml so the lockfile stays current.
+resolve: project
+	xcodebuild -resolvePackageDependencies \
+		-project PulseCoffeeApp.xcodeproj \
+		-scheme PulseCoffeeApp \
+		-quiet
+	@echo "Package.resolved (re)written. Commit any changes."
 
 build: project
 	xcodebuild \
