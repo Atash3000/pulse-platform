@@ -1577,3 +1577,55 @@ When Apple finishes verifying the manager's developer account and the manager fi
 **Cross-reference:**
 
 The C8 decision-log entry `"Real Telegram Bot API + APNs delivery (C8)"` named "push delivery is wired but currently has no live call sites" as a deferred follow-up. This commit closes that follow-up for `ORDER_READY` and `REFUND_CREATED` (committed arm).
+
+---
+
+## 2026-05-12 — Bundle ID typo correction (com.pulscoffee.app → com.pulsecoffee.app)
+
+**Decision:** rename every occurrence of `pulscoffee` to `pulsecoffee` in the codebase. The brand is "Pulse Coffee" (with the letter "e") per the README and brand identity; the codebase inherited a typo from the original spec PDF. This commit aligns the codebase to the App ID actually registered in the manager's Apple Developer console.
+
+**Origin of the typo:**
+
+The original product spec PDFs (`PulsCoffee_Final_Spec.pdf`, `PulsCoffee_AITeam_Plan.pdf`) use the stylized spelling "PulsCoffee" (without "e"). The pre-iOS engineer copied that spelling into the bundle-ID strings when writing the initial `.env.example` and the push-notification service spec. The README — which uses the brand-correct "Pulse Coffee" with "e" — never matched the bundle-ID strings; the inconsistency was unnoticed until the pre-commit-3 grep flagged it.
+
+When the manager first attempted to create the App ID in Apple Developer console (during the C8 APNs setup session), the initial attempt used the typo `com.pulscoffee.app` from the spec PDF. The typo was caught during the same session, the original App ID was deleted, and the App ID was recreated as the brand-correct `com.pulsecoffee.app`. That is the registration that exists in the Apple Developer console today. The `.p8` private key that Apple will issue post-verification is scoped to that bundle ID.
+
+**Why this matters — silent production-breaker:**
+
+`@parse/node-apn` sends the bundle ID as the APNs `apns-topic` header. Apple rejects sends whose topic does not match the registered App ID with `DeviceTokenNotForTopic` (a permanent error in our classifier — logged and swallowed, not retried). If the codebase shipped `com.pulscoffee.app` to a real APNs Provider, EVERY push to a real iOS device would silently fail with a `[push] permanent-send-error` log line and zero customer-visible notifications.
+
+Today, the manager is in the pre-Apple-verification window with `APNS_*` env empty — the push service runs in stubOnly mode and the bundle-ID mismatch would be invisible. The mismatch would surface the day the manager fills in `APNS_*` and the `.p8` lands, exactly when iOS testing begins. Catching it now prevents a debug session in iOS phase chasing a "why isn't push working" symptom whose root cause is in a 4-character codebase typo.
+
+**Files changed:**
+
+| File:line | Change |
+|---|---|
+| `.env.example:80` | `APNS_BUNDLE_ID=com.pulscoffee.app` → `com.pulsecoffee.app` |
+| `apps/api/src/modules/notifications/push-notification.service.spec.ts:59` | `FULL_APNS_CONFIG.APNS_BUNDLE_ID` |
+| `apps/api/src/modules/notifications/push-notification.service.spec.ts:363` | `notification.topic` assertion |
+| `apps/api/src/modules/payments/README.md:24` | `api.pulscoffee.com` → `api.pulsecoffee.com` (curl example) |
+
+The payments-README change is technically a domain-name correction rather than a bundle-ID correction, but the spelling decision is the same and bundling them in one commit keeps the rename atomic. The manager does NOT yet own the `pulsecoffee.com` domain (DNS registration is a DevOps-phase task); the README is a placeholder reflecting brand-correct intent. If `pulsecoffee.com` proves unavailable at DNS-registration time, that's a separate decision for the DevOps chat.
+
+**NOT changed (intentional):**
+
+- `PulsCoffee_Final_Spec.pdf` and `PulsCoffee_AITeam_Plan.pdf` filenames at the repo root. The PDFs use the stylized spelling internally; the filename matches the file content. Renaming binary files bloats git history without functional value.
+- The ~7 markdown references to those PDF filenames across `README.md`, `apps/api/README.md`, and `docs/ai-onboarding/*.md`. Filename references must match the actual file on disk.
+
+A future "let's regenerate the spec PDF" or "let's drop the spec PDF in favour of `docs/spec.md`" decision is independent of this commit.
+
+**Manager's local `.env`:**
+
+The manager confirmed their local `.env` at `apps/api/.env` (on the main checkout) already uses `APNS_BUNDLE_ID=com.pulsecoffee.app` — they edited it manually during the C8 setup session after catching the typo in Apple Developer console. No action needed on the local `.env`; this commit aligns the committed template (`.env.example`) and the test assertions to match.
+
+**Cross-reference C8:**
+
+The C8 decision-log entry `"Real Telegram Bot API + APNs delivery (C8)"` added the typo'd value `com.pulscoffee.app` to `.env.example` as a default for `APNS_BUNDLE_ID`. That entry's `.env.example` update is now superseded by this correction. The C8 entry itself is not edited (append-only log per the file's top-of-file convention) — this entry stands as the corrective record.
+
+**Tests:**
+
+No new tests. The 2 existing push-notification.service.spec.ts assertions on `APNS_BUNDLE_ID` and `notification.topic` were updated in-place to use the corrected spelling. All 347 tests across 19 suites continue to pass.
+
+**Forward-looking regression guard:**
+
+If a future regression reintroduces the typo, real APNs sends will fail with `DeviceTokenNotForTopic` and the failure will be findable via CloudWatch grep for `[push] permanent-send-error` (the marker introduced in C8). The classifier's permanent verdict for `DeviceTokenNotForTopic` is correct — retrying with the same wrong topic would just waste API calls. The path from "iOS testing reports zero pushes arriving" to "ah, the bundle ID got typo'd again" via grep is short.

@@ -86,6 +86,18 @@ by entry title — search the log for the quoted title.
 
 ### Changed
 
+- Bundle ID typo corrected: `com.pulscoffee.app` →
+  `com.pulsecoffee.app` (brand-correct "Pulse Coffee" spelling with the
+  letter "e"). The codebase inherited the typo from the spec PDFs; the
+  App ID registered in Apple Developer console is already the corrected
+  spelling. Without this fix, real APNs sends would have been rejected
+  with `DeviceTokenNotForTopic` once `APNS_*` env was filled in post-
+  Apple-verification. Domain reference in payments README also updated
+  from `api.pulscoffee.com` to `api.pulsecoffee.com` for consistency
+  (DNS not yet registered — DevOps phase). — see decision-log entry
+  *"Bundle ID typo correction (com.pulscoffee.app →
+  com.pulsecoffee.app)"*.
+
 - `[telegram-stub]` log prefix renamed to `[telegram]` on the six
   dispatch methods. The renamed prefix reflects that the log line now
   represents a real (or stub-fallback) dispatch ATTEMPT, not stub-

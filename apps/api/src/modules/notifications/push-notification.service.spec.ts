@@ -56,7 +56,7 @@ const PUSH_TOKEN_VALUE =
 const FULL_APNS_CONFIG = {
   APNS_KEY_ID: 'KEY123',
   APNS_TEAM_ID: 'TEAM456',
-  APNS_BUNDLE_ID: 'com.pulscoffee.app',
+  APNS_BUNDLE_ID: 'com.pulsecoffee.app',
   APNS_PRIVATE_KEY_PATH: '/fake/path/AuthKey.p8',
   APNS_USE_SANDBOX: 'true',
 };
@@ -360,7 +360,7 @@ describe('configured mode — real APNs send', () => {
     expect(apnSendMock).toHaveBeenCalledTimes(1);
     const [notification, recipient] = apnSendMock.mock.calls[0]!;
     expect(recipient).toBe(PUSH_TOKEN_VALUE);
-    expect(notification.topic).toBe('com.pulscoffee.app');
+    expect(notification.topic).toBe('com.pulsecoffee.app');
     expect(notification.alert).toEqual({ title: 'Order Ready', body: 'Your latte is ready' });
   });
 

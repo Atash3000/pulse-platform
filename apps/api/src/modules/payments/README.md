@@ -21,7 +21,7 @@ The tradeoff: the customer sees "paid" in the iOS app a few hundred milliseconds
 Without `Stripe-Signature` verification, `POST /api/v1/payments/webhook` is just an unauthenticated endpoint. An attacker who knows the URL — and the URL must be public for Stripe to call it — can `curl` it with a hand-crafted payload claiming any order has been paid:
 
 ```bash
-curl -X POST https://api.pulscoffee.com/api/v1/payments/webhook \
+curl -X POST https://api.pulsecoffee.com/api/v1/payments/webhook \
   -H 'Content-Type: application/json' \
   -d '{"type":"payment_intent.succeeded","data":{"object":{"id":"pi_attacker","metadata":{"orderId":"<their-order>"}}}}'
 ```
