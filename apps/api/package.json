@@ -5,7 +5,7 @@
   "description": "Puls Coffee backend API — NestJS + TypeORM + PostgreSQL",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "nest build",

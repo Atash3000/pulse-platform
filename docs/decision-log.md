@@ -1704,3 +1704,81 @@ This is a documentation-only commit. Files touched: `docs/decision-log.md` (this
 
 - The forthcoming Commit 5 ("GitHub Actions CI + Node version bump") will add CI gates that catch *new* vulnerabilities introduced after this point. CI runs `npm audit` and either fails on new highs (strict mode) or warns (advisory mode) — the choice is documented in that entry.
 - The C8 entry's `engines.node: ">=18"` floor (originally added with `@parse/node-apn`) is also superseded in Commit 5.
+
+---
+
+## 2026-05-12 — GitHub Actions CI workflow + Node version bump
+
+**Decision:** add `.github/workflows/ci.yml` gating every push to `main` and every PR against `main` behind a `test` + `build` job, and bump the `engines.node` floor in `apps/api/package.json` from `">=18"` to `">=20"`. The CI workflow pins Node `24.x` (the current LTS), not `20.x` (which is now in Maintenance) and not `26.x` (which is Current / not LTS). Three changes bundled in one commit because they're one coherent "Node version + CI gate" story.
+
+**`engines.node` floor: `">=18"` → `">=20"`:**
+
+Node 18 reached end-of-life on April 30, 2025. After EOL, Node 18 receives no security patches. A package.json that says `"node": ">=18"` is a security-misleading promise — it claims to support a Node version that the upstream Node project no longer maintains.
+
+The floor moves to `">=20"`:
+
+| Option considered | Pros | Cons | Decision |
+|---|---|---|---|
+| Keep `">=18"` | No developer disruption | Security-misleading post-EOL; teams shipping production on Node 18 would silently inherit unpatched CVEs | Rejected |
+| `">=20"` | Node 20 is in Maintenance (still receives security patches through April 2026); doesn't disrupt current developer machines (the manager is on 20.19.3); represents an honest floor | Node 20 is itself approaching EOL; will need another bump within ~6 months | **Chosen** |
+| `">=22"` or `">=24"` | More current floor | Would force every developer to upgrade their local Node before they can `npm install`. Phase 1 launch is too close to disrupt onboarding | Rejected for now |
+
+The floor is a CONTRACT statement: "this codebase supports Node 20+." Production deployment targets (DevOps phase) can pick a more current Node version independently — `>=20` accommodates running on Node 22 or Node 24 just as well as Node 20.
+
+**CI Node version: pinned to `24.x`:**
+
+GitHub Actions workflows resolve `24.x` to the latest Node 24 minor release at workflow runtime. As of May 2026 this is Node 24.x — the most current LTS line.
+
+| Option considered | Status (May 2026) | Pros | Cons | Decision |
+|---|---|---|---|---|
+| Node 20.x | Maintenance LTS (EOL April 2026) | Matches `engines.node` floor exactly | Maintenance line — fewer fixes shipped to it; would need an upgrade next month anyway | Rejected |
+| Node 22.x | Active LTS | Current Active LTS line; well-shaken-out by library ecosystem | Slightly less current than 24 | Plausible alternative; rejected only because 24 is the more current LTS |
+| Node 24.x | Current LTS (entered Oct 2025) | Latest LTS — gets new features + security patches longest; native-binding ecosystem (`bcrypt`, `@parse/node-apn`'s HTTP/2 path) has had 7+ months to stabilize on 24 | None significant | **Chosen** |
+| Node 26.x | Current (not LTS until Oct 2026) | Most current | Native bindings often lag Current by 3-6 months — `bcrypt`'s pre-built binaries, `@parse/node-apn`'s `node-forge` deps might not have Node 26 builds yet. Production runtime should NEVER be on Current. | Rejected |
+
+Pinning CI to Node 24 means "this code is tested against Node 24." DevOps can pick Node 22 or Node 24 for AWS Fargate independently — both satisfy the floor and both have CI evidence-of-compatibility (Node 22 indirectly, since 22 is API-compatible with 24 for everything we touch). I'd recommend DevOps pin production to Node 24 to match CI, but it's their call.
+
+**Why CI matters now, not later:**
+
+The repo workflow has been: `git push origin HEAD:main` direct-to-main, no PR review. This is fine for a single-engineer project, but:
+
+1. The iOS chat will start soon. A broken build on `main` would block iOS engineers from `git pull`-ing a working backend to integrate against.
+2. The DevOps chat needs a green build signal before deploying to AWS. Without CI, "did the latest commit compile and pass tests?" requires manually running `npm test && npm run build` on each pull.
+3. Future contributors (post-launch) will open PRs; the CI gate is the standard mechanism for "tests must pass before merge."
+
+The gate this commit lands is minimal but sufficient for Phase 1: test + build must pass. Future extensions (deploy on green, audit gate, e2e tests with a Postgres service container, multi-app matrix when dashboard + iOS land) are deferred.
+
+**Workflow design choices documented inline:**
+
+The YAML file carries comment blocks for every non-obvious decision (why `npm ci` over `npm install`, why `--maxWorkers=2`, why `concurrency.cancel-in-progress` on PRs only, why no audit gate today). A future engineer adjusting the workflow has the rationale at the call site rather than having to re-derive it from this decision log.
+
+**`npm audit` deliberately NOT in CI yet:**
+
+The current risk surface (29 vulnerabilities, all behind major bumps) would fail any strict audit gate immediately. Adding `npm audit` to CI today produces an all-red board that the team would learn to ignore — exactly the opposite of what a security gate should do.
+
+The path forward: after the NestJS v10 → v11 upgrade lands and the production-path highs resolve, add `npm audit --audit-level=high` to CI. Until then, the npm-audit-housekeeping decision-log entry stands as the documented snapshot, and Sentry catches any runtime exploit.
+
+**Cross-references:**
+
+- The C8 decision-log entry `"Real Telegram Bot API + APNs delivery (C8)"` originally added `engines.node: ">=18"` to support native `fetch`. That floor is now superseded by this commit's bump to `">=20"`.
+- The Commit-4 entry `"npm audit pre-DevOps housekeeping"` documented why CI doesn't include an audit gate today. This commit operationalizes the test + build gate; the audit gate is a follow-up.
+
+**Worktree cleanup (post-commit operational note, not a decision-log item):**
+
+The feature branch `claude/nostalgic-gauss-fa34da` used for this multi-commit sequence (C8 → Commit 5) was never pushed to a remote ref — every commit landed on `origin/main` directly via `git push origin HEAD:main`. There is no remote branch to delete; the local branch is checked out by a worktree and must be removed via `git worktree remove` rather than `git branch -d`. The cleanup sequence (run from the main checkout after Commit 5 lands on origin):
+
+```bash
+cd /Users/atamurad/Desktop/pulse-platform
+git fetch origin
+git pull origin main
+git worktree remove .claude/worktrees/nostalgic-gauss-fa34da
+git branch -a   # verify only main remains
+```
+
+`git worktree remove` handles the branch + working-directory cleanup atomically.
+
+**Tests + verification:**
+
+No source-code changes in this commit. `apps/api/package.json` `engines.node` is the only non-CI file modification. 19 suites, 347 tests still pass (`./node_modules/.bin/jest` exit 0). Build still passes (`npm run build` exit 0). The CI workflow itself is not testable until pushed — the first push to main triggers the first workflow run, which serves as the smoke test for the workflow's own correctness.
+
+If the first CI run on `main` fails (cache misconfiguration, wrong working-directory path, `npm ci` install failure on Node 24), a follow-up commit fixes the workflow. That's an acceptable feedback loop for a workflow's debut — short of running `act` locally (a separate dependency, not worth introducing for one workflow), the GitHub Actions runner is the canonical execution environment.

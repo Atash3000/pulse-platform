@@ -1,0 +1,101 @@
+# Pulse Platform — backend CI (Phase 1 scope).
+#
+# Gates every push to main and every PR against main behind:
+#   1. npm ci  (deterministic install from package-lock.json — never
+#      surprise-upgrades a transitive dep)
+#   2. npm test  (the Jest suite — 347 tests as of Commit 5;
+#      --maxWorkers=2 keeps memory under the runner's 7GB ceiling)
+#   3. npm run build  (nest build — typecheck + transpile)
+#
+# Exit non-zero on any step fails the workflow.
+#
+# DELIBERATELY OUT OF SCOPE (this workflow is the gate, not the deployer):
+#   - No deploy step. DevOps phase adds an ECS-Fargate deploy job in a
+#     follow-up that depends on this job succeeding.
+#   - No `npm audit` gate. The current risk surface is documented in
+#     decision-log entry "npm audit pre-DevOps housekeeping" — a
+#     strict audit gate today would block every push. A future commit
+#     can add advisory-mode audit (warn but don't fail) once the
+#     NestJS v10 -> v11 upgrade lands and the production-path highs
+#     are resolved.
+#   - No e2e / integration tests (none exist yet — the suite is pure
+#     unit tests with mocked TypeORM repos, mocked fetch, mocked apn).
+#     Future e2e tests would need a Postgres service container; see
+#     `services:` syntax in the GitHub Actions docs when that lands.
+#
+# Node version pinned to 24.x (current LTS as of May 2026). See
+# decision-log entry "GitHub Actions CI workflow + Node version bump"
+# for the rationale on:
+#   - Why CI Node 24, not 20 (20 is in Maintenance, Node 22 LTS or
+#     Node 24 LTS are the live LTS lines; 24 is the more current one).
+#   - Why not Node 26 (Current status — not LTS — native-binding
+#     ecosystem lag risk).
+#   - Why engines.node bumped from >=18 to >=20 in this commit (Node 18
+#     EOL April 2025; >=18 was a security-misleading promise).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Reduce noise when a developer pushes multiple commits to a PR rapidly —
+# cancel the prior run and let the latest start fresh.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test-and-build:
+    name: Test + Build (apps/api)
+    runs-on: ubuntu-latest
+
+    # All npm commands run in apps/api/ — the monorepo's backend dir.
+    # Future iOS / dashboard CI jobs would live in their own working
+    # directories with their own job blocks; the matrix is YAGNI today.
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.x (latest LTS, matches production target)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          # Built-in npm cache. The cache key is derived from
+          # cache-dependency-path; an apps/api/package-lock.json change
+          # invalidates the cache (correct behaviour).
+          cache: 'npm'
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Install dependencies (npm ci, deterministic)
+        # `npm ci` honors package-lock.json exactly. It is faster than
+        # `npm install` (skips dep-tree resolution) and refuses to
+        # write to package.json — so a misbehaving postinstall script
+        # cannot silently bump a version. The right install mode for
+        # CI; never use `npm install` in CI.
+        run: npm ci
+
+      - name: Run tests (jest, --maxWorkers=2 for runner memory headroom)
+        # The default ubuntu-latest runner has 4 cores / ~7GB RAM.
+        # Jest's default --maxWorkers is num_cpus, which on a 4-core
+        # runner spawns 4 Node processes and can OOM on the larger
+        # specs (especially the @parse/node-apn mocked Provider
+        # construction tests). --maxWorkers=2 gives every worker
+        # ~3.5GB of headroom and runs ~5s slower in wallclock; the
+        # stability is worth it.
+        run: npm test -- --maxWorkers=2
+
+      - name: Build (nest build)
+        # nest build runs the TypeScript compiler + transformer chain.
+        # Exits non-zero on any type error, which CI then surfaces as
+        # a failed check on the PR. This is the second-level gate
+        # after the test run: tests can pass with a stale tsbuildinfo
+        # cache; the build step proves the code typechecks cleanly
+        # from scratch on a fresh runner.
+        run: npm run build

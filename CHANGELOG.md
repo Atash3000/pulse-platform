@@ -14,6 +14,29 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) gating every
+  push to `main` and every PR against `main` behind `npm ci` +
+  `npm test` (with `--maxWorkers=2` for runner memory headroom) +
+  `npm run build`. Node version pinned to `24.x` (current LTS — most
+  current LTS line, native-binding ecosystem maturity). No deploy step
+  (deferred to DevOps phase), no audit gate (deferred until the
+  NestJS v10 → v11 upgrade resolves the current high-severity
+  surface). Workflow design choices documented inline in the YAML
+  comments. — see decision-log entry *"GitHub Actions CI workflow +
+  Node version bump"*.
+
+### Changed
+
+- `engines.node` floor in `apps/api/package.json` bumped from `">=18"`
+  to `">=20"`. Node 18 reached EOL on April 30, 2025; the prior floor
+  was a security-misleading promise. `>=20` is honest, accommodates
+  current developer machines, and lets DevOps pick a more current
+  Node version for production (Node 22 or 24) independently. Floor
+  represents the codebase's support contract, not the production
+  runtime target.
+
+### Added
+
 - Customer-facing iOS push notifications are now wired and live for two
   events:
   - `ORDER_READY` ("Your coffee is ready!" — "Pickup is waiting for you
