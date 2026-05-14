@@ -14,6 +14,18 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS app scaffolding (`apps/ios/`): empty SwiftUI app with an
+  XcodeGen-managed project spec (`project.yml`), Makefile for
+  regeneration, bundle ID `com.pulsecoffee.app`, signing team
+  `3828C7WU89`, iOS 16+ deployment target, Push Notifications
+  capability (`aps-environment=development`), placeholder
+  `ContentView` with a Debug-only banner displaying the API base URL.
+  Test target compiles with one trivial scaffold test; real coverage
+  starts with commit #3 (`APIClient` + `Keychain` + models). The
+  generated `.xcodeproj` is **gitignored** — run `make project` (from
+  `apps/ios/`) after pulling. — see decision-log entry *"[iOS]
+  XcodeGen for project file management"*.
+
 - GitHub Actions CI workflow (`.github/workflows/ci.yml`) gating every
   push to `main` and every PR against `main` behind `npm ci` +
   `npm test` (with `--maxWorkers=2` for runner memory headroom) +

@@ -1,0 +1,113 @@
+# XcodeGen specification — single source of truth for PulseCoffeeApp.xcodeproj.
+# Regenerate the .xcodeproj after editing this file: `make project` (from apps/ios/).
+# See decision-log entry "[iOS] XcodeGen for project file management" for rationale.
+
+name: PulseCoffeeApp
+
+options:
+  bundleIdPrefix: com.pulsecoffee
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+  developmentLanguage: en
+  groupSortPosition: top
+  generateEmptyDirectories: true
+  xcodeVersion: "15.0"
+
+configs:
+  Debug: debug
+  Release: release
+
+# Project-wide settings. Per-target overrides live under `targets:`.
+settings:
+  base:
+    DEVELOPMENT_TEAM: 3828C7WU89
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.10"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    # Hardens the build: third-party scripts cannot escape their sandbox.
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # Modern concurrency safety. Phase 1 uses @MainActor; Swift 6 strict
+    # concurrency checks surface data-race risks at compile time. Keep
+    # `minimal` for now to avoid blocking commit #2 SPM dependency
+    # integration; tighten to `complete` once Stripe/Sentry/PostHog are in.
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  # -------------------------------------------------------------------------
+  # Customer-facing app.
+  # -------------------------------------------------------------------------
+  PulseCoffeeApp:
+    type: application
+    platform: iOS
+    sources:
+      # `Preview Content` is excluded from the main sources list and added
+      # explicitly as resources below — Xcode treats it specially as
+      # "development assets" that ship in Debug but are stripped from
+      # Release archives.
+      - path: PulseCoffeeApp
+        excludes:
+          - "Preview Content/**"
+      - path: PulseCoffeeApp/Preview Content
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pulsecoffee.app
+        CODE_SIGN_ENTITLEMENTS: PulseCoffeeApp/PulseCoffeeApp.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        DEVELOPMENT_ASSET_PATHS: '"PulseCoffeeApp/Preview Content"'
+        # iPhone only for Phase 1 (TARGETED_DEVICE_FAMILY=1). iPad support
+        # can ship separately if/when there's demand.
+        TARGETED_DEVICE_FAMILY: "1"
+        # Auto-generate Info.plist entries from build settings. No
+        # checked-in Info.plist file unless we need a custom entry that
+        # the auto-generator doesn't cover (e.g., ATS exceptions in
+        # commit #3).
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "Pulse Coffee"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+        # Marketing version + build number are managed by the project's
+        # version bumping process — placeholder values for the scaffold.
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
+  # -------------------------------------------------------------------------
+  # Unit test bundle. One trivial test today (compile/import check);
+  # real coverage starts in commit #3 (APIClient + Keychain + Models).
+  # -------------------------------------------------------------------------
+  PulseCoffeeAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PulseCoffeeAppTests
+    dependencies:
+      - target: PulseCoffeeApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pulsecoffee.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PulseCoffeeApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PulseCoffeeApp"
+
+schemes:
+  PulseCoffeeApp:
+    build:
+      targets:
+        PulseCoffeeApp: all
+        PulseCoffeeAppTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - PulseCoffeeAppTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
