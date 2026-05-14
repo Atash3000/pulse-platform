@@ -14,6 +14,22 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- Customer-facing iOS push notifications are now wired and live for two
+  events:
+  - `ORDER_READY` ("Your coffee is ready!" — "Pickup is waiting for you
+    at <location name>")
+  - `REFUND_CREATED` committed arm only ("Refund processed" —
+    "Your refund of $X.XX is on its way back to your card")
+  When the iOS app registers a push token via the new
+  `PUT /customers/me/push-token` endpoint AND the APNS_* env is
+  configured (post-Apple-verification), real APNs delivery fires.
+  Race-recorded refund variants (Phase 3 race + webhook race) carry
+  `actionRequired` and DO NOT push — a customer notification on those
+  paths would be factually false (no card refund has moved). The
+  `handleOrderPickedUp` handler intentionally stays unwired (no UX
+  value). — see decision-log entry *"Push handler wiring (Phase 1
+  subset)"*.
+
 - `PUT /api/v1/customers/me/push-token` — authenticated customers can
   register or clear their APNs device token. New `CustomersModule` /
   `CustomersService` / `CustomersController` under

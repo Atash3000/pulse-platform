@@ -9,6 +9,7 @@ import {
   OutboxEventType,
 } from '../../database/entities';
 import { NotificationsService } from './notifications.service';
+import { PushNotificationService } from './push-notification.service';
 import { TelegramService } from './telegram.service';
 
 // =============================================================================
@@ -40,6 +41,10 @@ describe('NotificationsService', () => {
   // C5: locations + telegram added for handleOrderPaidNotification.
   let locationsFindOne: jest.Mock;
   let telegramNewOrder: jest.Mock;
+  // Post-C8 push wiring: handleOrderReady and handleRefundCreated (committed
+  // arm only) call pushNotifications.send(). The spec exposes the mock so
+  // each test can assert call count and args.
+  let pushSend: jest.Mock;
   let logSpy: jest.SpyInstance;
   let warnSpy: jest.SpyInstance;
 
@@ -49,6 +54,7 @@ describe('NotificationsService', () => {
     menuItemsFindOne = jest.fn();
     locationsFindOne = jest.fn();
     telegramNewOrder = jest.fn().mockResolvedValue(undefined);
+    pushSend = jest.fn().mockResolvedValue(undefined);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -70,6 +76,10 @@ describe('NotificationsService', () => {
             refundIssued: jest.fn(),
             alertDeadOutboxEvent: jest.fn(),
           },
+        },
+        {
+          provide: PushNotificationService,
+          useValue: { send: pushSend },
         },
       ],
     }).compile();
@@ -329,6 +339,74 @@ describe('NotificationsService', () => {
         service.handleOrderReady({ orderId: 42 } as unknown as Record<string, unknown>),
       ).rejects.toThrow(/missing required string field 'orderId'/);
     });
+
+    // -------------------------------------------------------------------------
+    // Post-C8 push wiring — customer "Your coffee is ready!" push.
+    // -------------------------------------------------------------------------
+
+    it('calls pushNotifications.send with the spec Part 9 title/body and location name', async () => {
+      const order = makeOrder({
+        id: 'o-ready-push',
+        customer_id: 'cust-push-1',
+        location: { id: 'loc-1', name: 'Main St' },
+      });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-push-1', full_name: 'Bob' });
+
+      await service.handleOrderReady({ orderId: 'o-ready-push' });
+
+      expect(pushSend).toHaveBeenCalledTimes(1);
+      const [customerId, title, body, data] = pushSend.mock.calls[0]!;
+      expect(customerId).toBe('cust-push-1');
+      expect(title).toBe('Your coffee is ready!');
+      expect(body).toBe('Pickup is waiting for you at Main St');
+      expect(data).toEqual({
+        orderId: 'o-ready-push',
+        deepLink: 'pulse://orders/o-ready-push',
+      });
+    });
+
+    it('falls back to "the shop" when location relation is missing (defensive)', async () => {
+      // Defensive against a rare race where the location row is deleted
+      // between order creation and the ORDER_READY dispatch. The push
+      // body degrades gracefully — operator-visible but non-fatal.
+      const order = makeOrder({ id: 'o-ready-noloc', location: null });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Bob' });
+
+      await service.handleOrderReady({ orderId: 'o-ready-noloc' });
+
+      const body = pushSend.mock.calls[0]![2] as string;
+      expect(body).toBe('Pickup is waiting for you at the shop');
+    });
+
+    it('loads order with location relation (single JOINed query)', async () => {
+      // Efficiency sanity-check pinned by the C8.5 decision-log entry:
+      // adding the location-name lookup did NOT add a separate query.
+      // findOne is called with relations: { location: true }.
+      const order = makeOrder({ id: 'o-rel', location: { id: 'loc-1', name: 'Main St' } });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null);
+
+      await service.handleOrderReady({ orderId: 'o-rel' });
+
+      const findOneCall = ordersFindOne.mock.calls[0]![0] as Record<string, unknown>;
+      expect(findOneCall.relations).toEqual({ location: true });
+    });
+
+    it('propagates transient push errors so the outbox retries', async () => {
+      // The PushNotificationService's contract: permanent reasons swallow,
+      // transient reasons throw. The handler does not catch — the throw
+      // surfaces to the outbox.
+      const order = makeOrder({ id: 'o-transient', location: { id: 'l', name: 'L' } });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null);
+      pushSend.mockRejectedValueOnce(new Error('[push] transient send error: TooManyRequests'));
+
+      await expect(
+        service.handleOrderReady({ orderId: 'o-transient' }),
+      ).rejects.toThrow(/transient send error/);
+    });
   });
 
   describe('handleOrderCancelled', () => {
@@ -512,6 +590,104 @@ describe('NotificationsService', () => {
       // The warn we observe is the order-not-found warning, NOT the
       // action-required warning — assert by matching the message text.
       expect(warnSpy.mock.calls[0]![0]).toMatch(/not found in DB/);
+    });
+
+    // -------------------------------------------------------------------------
+    // Post-C8 push wiring — customer "Refund processed" push on COMMITTED ARM
+    // ONLY. The actionRequired gate is critical correctness: the race-recorded
+    // variants record an outbox event for staff investigation; no card refund
+    // has actually moved. Sending the customer "Your refund of $X.XX is on
+    // its way" on those paths would be factually false. See decision-log
+    // entry "Push handler wiring (Phase 1 subset)".
+    // -------------------------------------------------------------------------
+
+    it('committed-arm: calls pushNotifications.send with title="Refund processed" and $X.XX in body', async () => {
+      const order = makeOrder({ id: 'o-refund-push', customer_id: 'cust-refund-1' });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-refund-1', full_name: 'Eve' });
+
+      await service.handleRefundCreated({
+        orderId: 'o-refund-push',
+        amountCents: 500,
+        stripeRefundId: 're_committed',
+        refundType: 'partial',
+        staffUserId: 'staff-1',
+      });
+
+      expect(pushSend).toHaveBeenCalledTimes(1);
+      const [customerId, title, body, data] = pushSend.mock.calls[0]!;
+      expect(customerId).toBe('cust-refund-1');
+      expect(title).toBe('Refund processed');
+      expect(body).toBe('Your refund of $5.00 is on its way back to your card');
+      expect(data).toEqual({
+        orderId: 'o-refund-push',
+        refundType: 'partial',
+        stripeRefundId: 're_committed',
+      });
+    });
+
+    it('actionRequired (Phase 3 race) → DOES NOT push (money has not moved)', async () => {
+      // The race-recorded arm records an outbox event for STAFF to
+      // investigate. No card refund has occurred yet. A customer push
+      // saying "Your refund of $X is on its way back" would be a lie
+      // and damage trust the moment the customer checks their bank.
+      const order = makeOrder({ id: 'o-refund-race' });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null);
+
+      await service.handleRefundCreated({
+        orderId: 'o-refund-race',
+        amountCents: 1000,
+        staffUserId: 'staff-1',
+        actionRequired: 'manual-reconciliation',
+      });
+
+      expect(pushSend).not.toHaveBeenCalled();
+    });
+
+    it('webhook-race payload (actionRequired set, no staffUserId) → DOES NOT push', async () => {
+      // System-actored webhook race — actionRequired present, no
+      // staffUserId. Push must also be gated off this path.
+      const order = makeOrder({ id: 'o-refund-webhook-race' });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null);
+
+      await service.handleRefundCreated({
+        orderId: 'o-refund-webhook-race',
+        amountCents: 825,
+        requestId: 'req-abc',
+        actionRequired: 'manager-refund-via-admin-endpoint',
+      });
+
+      expect(pushSend).not.toHaveBeenCalled();
+    });
+
+    it('missing amountCents → DOES NOT push (defensive against malformed payload)', async () => {
+      // The log line above already records the malformed payload; pushing
+      // "$NaN" would be operator-visible noise on the customer side.
+      const order = makeOrder({ id: 'o-malformed' });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null);
+
+      await service.handleRefundCreated({
+        orderId: 'o-malformed',
+        // no amountCents
+      });
+
+      expect(pushSend).not.toHaveBeenCalled();
+    });
+
+    it('non-positive amountCents → DOES NOT push (defensive)', async () => {
+      const order = makeOrder({ id: 'o-zero' });
+      ordersFindOne.mockResolvedValueOnce(order);
+      customersFindOne.mockResolvedValueOnce(null);
+
+      await service.handleRefundCreated({
+        orderId: 'o-zero',
+        amountCents: 0,
+      });
+
+      expect(pushSend).not.toHaveBeenCalled();
     });
   });
 

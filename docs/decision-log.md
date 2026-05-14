@@ -1475,3 +1475,105 @@ Total test count: 324 → 338 (+14). The earlier "+10" estimate was conservative
 **Consumer of this endpoint — referenced by C8:**
 
 The new endpoint is the input side of the C8 push-delivery pipeline. The decision-log entry `"Real Telegram Bot API + APNs delivery (C8)"` named "push delivery is wired but currently has no live call sites" as a deferred item; this endpoint provides the input that makes those callers reachable. The output side (handler wiring) lands in the very next commit.
+
+---
+
+## 2026-05-12 — Push handler wiring (Phase 1 subset)
+
+**Decision:** wire `PushNotificationService.send()` into `NotificationsService.handleOrderReady` and the COMMITTED ARM of `handleRefundCreated`. Skip `handleOrderPickedUp` indefinitely. The race-recorded arms of `handleRefundCreated` (Phase 3 race + webhook race, both carrying `actionRequired`) are explicitly NOT wired to push — a customer-facing "your refund is on its way" notification on those paths would be factually false.
+
+**Which handlers wired, and why each:**
+
+| Handler | Wired? | Reasoning |
+|---|---|---|
+| `handleOrderReady` | ✅ Wired | "Your coffee is ready!" is the canonical mobile-ordering push UX. Without it, customers either keep refreshing the app or miss the pickup window entirely. This is the entire reason iOS push delivery exists for this product. |
+| `handleRefundCreated` (committed arm) | ✅ Wired | "Refund processed — $X.XX is on its way back to your card." Important for trust: refunds without notification create customer-service tickets ("did you actually refund me?"). When the refund is committed, the card-side reversal has already been requested at Stripe; the push is factually accurate. |
+| `handleRefundCreated` (race-recorded arms) | ❌ Skipped | See critical-correctness section below. |
+| `handleOrderPickedUp` | ❌ Skipped (indefinitely) | Pickup-confirmation push is operationally noisy without clear UX value. The customer already knows they picked up their order — they were just at the counter. Most coffee apps don't push for pickup. If a future receipt-email flow wants notification, it should be a separate channel (email, in-app receipt), not push. |
+
+**The `actionRequired` gate — critical correctness:**
+
+`handleRefundCreated` has three emit sites with overlapping payload shapes:
+1. `admin-orders.service.ts refund()` committed arm — staff-initiated, money moved, `actionRequired` absent.
+2. `admin-orders.service.ts refund()` Phase 3 race branch — race-with-concurrent-refund detected, money did NOT move, `actionRequired` set.
+3. `webhook-orders.service.ts markPaidFromWebhook` race detection — webhook race detected, money did NOT move, `actionRequired` set.
+
+Sites 2 and 3 record an outbox event for STAFF investigation: a real refund still has to be reconciled manually. The customer's card balance is unchanged. Sending a push that says "Your refund of $X.XX is on its way back to your card" on these paths would be:
+
+- **Factually false** at send time (no card-side reversal has happened).
+- **A trust violation** the moment the customer checks their bank statement and sees nothing.
+- **A support-cost amplifier** — the customer-service ticket count for "you said my refund was processed but I don't see it" would dwarf the cost of the missed notification.
+
+The handler now gates the push call behind `if (actionRequired) return;`. The race-recorded paths still:
+- Emit the `[notifications-stub] REFUND_CREATED (action required)` WARN log line for operators.
+- Are visible in the admin dashboard via the same `actionRequired` flag (when the dashboard surfaces it).
+- Will (post-Telegram-wiring of those paths in a future turn) trigger a Telegram alert to the owner.
+
+Staff complete the reconciliation manually and trigger an explicit customer notification when the card refund actually lands. That's the right human-in-the-loop pattern for race conditions involving real money.
+
+**Defensive secondary guard — non-positive `amountCents`:**
+
+The handler also skips push when `amountCents` is missing or `<= 0`. The first arm above (`typeof amountCents !== 'number'`) catches the malformed-payload case the C1 entry already names; the second (`amountCents <= 0`) catches the rare case where a future refund flow emits a zero-cents row (e.g., a refund for a fully-discounted item). The log line above already records the malformed shape for operators; pushing a `$0.00` or `$NaN` body to the customer would be operator-visible noise without UX value.
+
+**Title/body copy:**
+
+| Event | Title | Body |
+|---|---|---|
+| ORDER_READY | `Your coffee is ready!` | `Pickup is waiting for you at <location.name>` |
+| REFUND_CREATED (committed) | `Refund processed` | `Your refund of <$X.XX> is on its way back to your card` |
+
+Both bodies use plain language; iOS truncates push body text on lockscreen at ~110 characters and these are well under. Title strings open with the action verb (matches Apple HIG recommendation for actionable push). The `data` payload on each push carries `{ orderId, deepLink: 'pulse://orders/<id>' }` for ORDER_READY and `{ orderId, refundType, stripeRefundId }` for REFUND_CREATED — iOS reads `data.deepLink` on tap to open the right view.
+
+The `$X.XX` formatting is delegated to `formatCents` from `telegram-formatters.ts`. Sibling notification services sharing a money-formatting helper is fine; if `notification-formatters` ever needs to be its own neutral module (e.g., a future SMS service joins the cluster), that's a small file-rename refactor for a later turn, not a blocker now.
+
+**`location.name` fallback to `'the shop'`:**
+
+The handler loads `Order` with `relations: { location: true }` so the location row arrives JOINed. The (rare) case where the location is null at dispatch time — the row was deleted between order creation and ORDER_READY — falls back to a generic `"the shop"` rather than crashing on a null reference. Operator-visible (the body reads "Pickup is waiting for you at the shop") but non-fatal. A `location.name` rename in the future ripples to one fallback string here and the `handleOrderPaidNotification` body separately.
+
+**Efficiency sanity-check (contingent from the C8.5 instruction):**
+
+The manager's instruction asked for a sanity-check on the loading cost. Pre-wiring `handleOrderReady` made two queries: `orders.findOne` + `customers.findOne`. Post-wiring uses `relations: { location: true }` to eager-load the location alongside the order — TypeORM emits a single `LEFT JOIN` query. Total: still 2 queries (order+location via JOIN, then customer). The location lookup is "free" in query count.
+
+A test `loads order with location relation (single JOINed query)` pins the `relations` config so a future engineer who removes it accidentally fails immediately rather than silently regressing to a 3-query pattern.
+
+**Transient errors propagate, permanent errors absorbed:**
+
+The `PushNotificationService.send()` contract from the C8 entry already does the permanent/transient classification:
+- Permanent (BadDeviceToken, Unregistered, DeviceTokenNotForTopic, status 410, etc.) → log warn + return.
+- Transient (TooManyRequests, ServiceUnavailable, library throws, network errors) → throw.
+
+The handlers do NOT wrap `send()` in try/catch. Transient throws propagate up to the outbox worker, which retries the event up to 5 times and eventually marks it DEAD. Permanent failures are absorbed silently — retrying a BadDeviceToken won't bring the customer's reinstalled app back. This matches the C8 design directly; no new error-handling code in the handler.
+
+**`handleOrderReady` is now reachable end-to-end:**
+
+For the first time, the chain is fully live: `admin-orders.service.ts markReady()` → emits `ORDER_READY` outbox row → outbox worker picks up → `notifications.dispatch(ORDER_READY)` → `handleOrderReady` → loads order+customer+location → calls `pushNotifications.send()` → (when APNs env is configured) real APNs delivery. The C8 commit landed the infrastructure; this commit provides the live caller.
+
+When Apple finishes verifying the manager's developer account and the manager fills in `APNS_*` env, **iOS push notifications for "your coffee is ready" will start working without further code change** — exactly the design pattern named in the C8 decision-log entry.
+
+**Tests:**
+
+`apps/api/src/modules/notifications/notifications.service.spec.ts` — 28 → 37 (+9 net):
+
+`handleOrderReady` (+4 new):
+- `calls pushNotifications.send with the spec Part 9 title/body and location name` — pins title="Your coffee is ready!", body="Pickup is waiting for you at Main St", data deepLink shape.
+- `falls back to "the shop" when location relation is missing (defensive)` — regression guard against null-location crashes.
+- `loads order with location relation (single JOINed query)` — pins the `relations: { location: true }` config so a future remove-the-relation regression is caught.
+- `propagates transient push errors so the outbox retries` — explicit contract test: handler does not catch, transient throws bubble to outbox.
+
+`handleRefundCreated` (+5 new):
+- `committed-arm: calls pushNotifications.send with title="Refund processed" and $X.XX in body` — happy-path verification including `formatCents` integration.
+- `actionRequired (Phase 3 race) → DOES NOT push (money has not moved)` — CRITICAL CORRECTNESS GATE pinned.
+- `webhook-race payload (actionRequired set, no staffUserId) → DOES NOT push` — same gate, second emit site.
+- `missing amountCents → DOES NOT push (defensive against malformed payload)` — defensive secondary guard.
+- `non-positive amountCents → DOES NOT push (defensive)` — defensive secondary guard.
+
+**Deferred follow-ups (do NOT belong in this commit):**
+
+- `handleOrderCancelled` push wiring — Spec Part 9 mentions customer notification for cancellations; deferred because the current flow already emits a Telegram alert to the owner and the customer-facing copy ("Sorry — we cancelled your order") is sensitive enough that the manager will want UX review before wiring it.
+- `handleOrderPickedUp` push wiring — explicitly skipped indefinitely; no UX value.
+- Email fallback for customers without APNs tokens — out of scope for Phase 1 (no email infra yet).
+- Push-failure → `customer.push_token = null` writeback — deferred per the C8 entry's stance; first observable via the `[push] permanent-send-error` CloudWatch log line.
+
+**Cross-reference:**
+
+The C8 decision-log entry `"Real Telegram Bot API + APNs delivery (C8)"` named "push delivery is wired but currently has no live call sites" as a deferred follow-up. This commit closes that follow-up for `ORDER_READY` and `REFUND_CREATED` (committed arm).

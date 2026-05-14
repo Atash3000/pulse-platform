@@ -9,6 +9,8 @@ import {
   Order,
   OutboxEventType,
 } from '../../database/entities';
+import { PushNotificationService } from './push-notification.service';
+import { formatCents } from './telegram-formatters';
 import { TelegramService } from './telegram.service';
 
 /**
@@ -89,6 +91,14 @@ export class NotificationsService {
     // stubbed — the [telegram-stub] log line confirms the right data is
     // being passed through.
     private readonly telegram: TelegramService,
+    // Post-C8: PushNotificationService for customer-facing iOS push.
+    // Wired into handleOrderReady ("your coffee is ready!") and
+    // handleRefundCreated (committed-arm only, guarded by absence of
+    // `actionRequired`). handleOrderPickedUp intentionally NOT wired —
+    // pickup-confirmation push is operationally noisy without clear UX
+    // value; deferred indefinitely. See decision-log entry
+    // "Push handler wiring (Phase 1 subset)".
+    private readonly pushNotifications: PushNotificationService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -243,7 +253,15 @@ export class NotificationsService {
 
   async handleOrderReady(payload: Record<string, unknown>): Promise<void> {
     const orderId = this.extractOrderId(payload, 'ORDER_READY');
-    const order = await this.orders.findOne({ where: { id: orderId } });
+    // Eagerly load the location relation so we have `location.name` for
+    // the push body without a separate query. Query count unchanged from
+    // pre-wiring (still 2: order+location via JOIN, then customer).
+    // See decision-log entry "Push handler wiring (Phase 1 subset)" —
+    // efficiency sanity-check subsection.
+    const order = await this.orders.findOne({
+      where: { id: orderId },
+      relations: { location: true },
+    });
     if (!order) {
       this.logger.warn(
         `[notifications] ORDER_READY order ${orderId} not found in DB — skipping`,
@@ -261,6 +279,26 @@ export class NotificationsService {
       pickup_type: order.pickup_type,
       estimated_ready_at: order.estimated_ready_at?.toISOString() ?? null,
     });
+
+    // Customer push. The PushNotificationService internally handles:
+    //   - validator throws on empty inputs (we pre-check non-empty here)
+    //   - missing customer → warn + return (best-effort)
+    //   - customer with no push_token → [push-skip] info + return
+    //   - real APNs send with permanent/transient classification
+    // Transient errors from send() propagate so the outbox retries this
+    // ORDER_READY event. Permanent errors are absorbed by the push
+    // service (logged at warn, no throw).
+    //
+    // The location.name fallback to 'the shop' covers the (rare) case
+    // where location row was deleted after the order was placed — the
+    // push body degrades gracefully rather than crashing on a null name.
+    const locationName = order.location?.name ?? 'the shop';
+    await this.pushNotifications.send(
+      order.customer_id,
+      'Your coffee is ready!',
+      `Pickup is waiting for you at ${locationName}`,
+      { orderId: order.id, deepLink: `pulse://orders/${order.id}` },
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -403,6 +441,37 @@ export class NotificationsService {
         `[notifications-stub] REFUND_CREATED: ${JSON.stringify(context)}`,
       );
     }
+
+    // ---------------------------------------------------------------------
+    // Customer push — COMMITTED-ARM ONLY. Critical correctness gate.
+    //
+    // The race-recorded variants (`actionRequired` set) record an outbox
+    // event for STAFF investigation; NO actual card refund has occurred
+    // yet. Sending the customer "Your refund of $X.XX is on its way back
+    // to your card" on this path would be FACTUALLY FALSE and would
+    // damage trust the moment the customer checks their bank statement
+    // and sees nothing. The race-recorded path is surfaced to operators
+    // via the [notifications-stub] WARN line + Telegram + admin dashboard;
+    // customer notification is the staff's call after they reconcile.
+    //
+    // See decision-log entry "Push handler wiring (Phase 1 subset)" —
+    // REFUND_CREATED actionRequired gate subsection — for the full
+    // reasoning and the trust-impact analysis.
+    //
+    // Also skip when amountCents is missing or non-positive — defensive
+    // against a malformed payload reaching the push body builder; the
+    // log line above already records the malformed shape for operators.
+    // ---------------------------------------------------------------------
+
+    if (actionRequired) return;
+    if (typeof amountCents !== 'number' || amountCents <= 0) return;
+
+    await this.pushNotifications.send(
+      order.customer_id,
+      'Refund processed',
+      `Your refund of ${formatCents(amountCents)} is on its way back to your card`,
+      { orderId: order.id, refundType, stripeRefundId },
+    );
   }
 
   // ---------------------------------------------------------------------------
