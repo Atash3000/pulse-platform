@@ -63,7 +63,13 @@ struct PulseCoffeeApp: App {
         // backend later, tagged source: "api"). Shared properties below
         // tag every event with `source: "ios"` so the two streams stay
         // distinguishable when the funnel correlation matters.
-        let postHogConfig = PostHogConfig(apiKey: AppConfig.postHogAPIKey)
+        //
+        // PostHog 3.x renamed the `apiKey:` parameter to `projectToken:`
+        // for clarity (the value has always been the public Project API
+        // Key, now sometimes called "Project Token" in PostHog's docs).
+        // Our `AppConfig.postHogAPIKey` constant name is unchanged —
+        // same value.
+        let postHogConfig = PostHogConfig(projectToken: AppConfig.postHogAPIKey)
         PostHogSDK.shared.setup(postHogConfig)
         PostHogSDK.shared.register([
             "source": "ios",

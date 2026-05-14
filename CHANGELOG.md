@@ -14,6 +14,37 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS SPM lockfile (`Package.resolved`) committed at the canonical
+  Xcode path
+  (`apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`).
+  Pins resolved versions: `posthog-ios 3.58.1`, `sentry-cocoa 8.58.2`,
+  `stripe-ios 23.32.0`. The root `.gitignore` allow-list lets this one
+  file through while the rest of `.xcodeproj/` stays ignored — see
+  decision-log entry *"[iOS] Sentry + PostHog + AppConfig wiring"*.
+
+- `make clean-derived` Makefile target — wipes Xcode's per-project
+  DerivedData cache. Use when builds report errors that don't match
+  the code (almost always stale package resolution or strict-concurrency
+  rule cache after a `project.yml` edit). Project-scoped path pattern
+  (`PulseCoffeeApp-*`), so other Xcode projects on the same Mac are
+  unaffected.
+
+### Changed
+
+- iOS `PostHogConfig(apiKey:)` → `PostHogConfig(projectToken:)` in
+  `App.init()` to suppress the PostHog 3.x deprecation warning. Same
+  value, renamed parameter for clarity in the SDK. Our
+  `AppConfig.postHogAPIKey` constant name is unchanged.
+
+- Reverted commit `a844b2c`'s `SentryRequest()` substitution in
+  `SentryRedactorTests` back to `Request()` — the original test code
+  was correct, the build failure that prompted the "fix" was a stale
+  DerivedData cache (now resolved by the new `make clean-derived`
+  target). The `Request` Swift name from sentry-cocoa's
+  `NS_SWIFT_NAME(Request)` macro still works in 8.58.2.
+
+### Added
+
 - iOS networking foundation: `APIClient` (actor, single network entry
   point, `async/await` API, Authorization header injection from
   Keychain, 401 → `APIError.authRequired` with Sentry breadcrumb,
@@ -38,12 +69,14 @@ by entry title — search the log for the quoted title.
   from `GENERATE_INFOPLIST_FILE=YES` to a checked-in `INFOPLIST_FILE`
   to express the nested ATS dict.
 
-- iOS test coverage: **35 new tests** across `KeychainTests` (8),
-  `CodableTests` (6 — including `ServerError` variant decoders for
+- iOS test coverage: **38 new tests** across `KeychainTests` (8),
+  `CodableTests` (7 — including `ServerError` variant decoders for
   single-string vs `class-validator` array vs structured cart errors),
-  `SentryRedactorTests` (13 — header / body / Stripe ID redaction +
-  idempotency + empty-event guards), and `APIClientTests` (8 — using
-  a `URLProtocol`-backed stub session for hermetic networking).
+  `SentryRedactorTests` (14 — header / body / Stripe ID redaction +
+  idempotency + empty-event guards), and `APIClientTests` (9 — using
+  a `URLProtocol`-backed stub session for hermetic networking). With
+  the commit 1 scaffold smoke test, the iOS suite stands at 39 tests
+  total.
 
 - iOS SPM dependencies (Stripe iOS, Sentry iOS, PostHog iOS) declared
   in `apps/ios/project.yml` with `from:` floors `23.0.0` / `8.0.0` /

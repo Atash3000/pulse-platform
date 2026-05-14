@@ -89,11 +89,7 @@ final class SentryRedactorTests: XCTestCase {
 
     func test_redact_appliesToEventRequestHeaders() {
         let event = Event()
-        // sentry-cocoa 8.58.2 dropped the `NS_SWIFT_NAME(Request)` alias
-        // for its Obj-C `SentryRequest` class. Use the Obj-C class name
-        // directly — it always resolves and avoids the ambiguity that
-        // killed the bare `Request` Swift name.
-        let request = SentryRequest()
+        let request = Request()
         request.headers = ["Authorization": "Bearer eyJ.secret", "Accept": "application/json"]
         event.request = request
 

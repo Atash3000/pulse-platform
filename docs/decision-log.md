@@ -2090,3 +2090,35 @@ Total: **35 new tests** across four files. Coverage of the new code paths is com
 
 - `SWIFT_STRICT_CONCURRENCY=complete` was set in commit #2 against the Sentry/PostHog/Stripe SDKs in the dependency graph. Without a Mac to test from, I cannot verify the build is warning-free. If commit #2 verification surfaced concurrency warnings, the same warnings affect this commit — and if commit #2 needed `targeted` fallback, this commit picks that up automatically. No code in this commit introduces new Sendable risks.
 - `StubURLProtocol` uses `nonisolated(unsafe) private static var` for stub state — acceptable for a test-only helper, but won't satisfy strict-concurrency complete cleanly. If concurrency mode tightens further, refactor to a per-test stub instance. Documented as a known-limitation in the test file.
+
+---
+
+## 2026-05-14 — [iOS] Housekeeping: Package.resolved committed, PostHog rename, SentryRequest revert, clean-derived
+
+**Decision:** bundle four small operational fixes that surfaced during commit 2 / commit 3 verification. All four are "stuff that should have been in commits 2 or 3 but couldn't be" — honest bundling under one `chore(ios)` scope rather than four single-file commits each.
+
+**1. `Package.resolved` committed at canonical Xcode path.**
+
+`xcodebuild -resolvePackageDependencies` (run on the CTO's Mac per the `make resolve` workflow) generated the lockfile. The file lives inside `.xcodeproj/` — which is otherwise gitignored — but the `.gitignore` allow-list pattern lands in commit 2 (`apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`) lets exactly this one path through. Pinned versions: `posthog-ios 3.58.1`, `sentry-cocoa 8.58.2`, `stripe-ios 23.32.0`. Future SPM updates: bump the `from:` floor in `project.yml`, re-run `make resolve`, re-commit `Package.resolved`. The lockfile carries the per-package commit SHA so two developers / CI runs resolve to identical bits.
+
+**2. PostHog `apiKey:` → `projectToken:`.**
+
+PostHog 3.x deprecated `PostHogConfig(apiKey:)` in favour of `PostHogConfig(projectToken:)`. Same value (the public Project API Key from the PostHog dashboard), renamed parameter. Our internal `AppConfig.postHogAPIKey` constant is unchanged — renaming it would force a wider edit for cosmetic gain. The comment at the call site explains the discrepancy so a future reader doesn't wonder which one is right.
+
+**3. `SentryRequest()` reverted to `Request()` in test (misdiagnosis lineage).**
+
+Commit `a844b2c` was a misdiagnosis. When the manager's first Xcode build of commit 3 surfaced `"Cannot find 'Request' in scope"` at `SentryRedactorTests.swift:92`, the only signal I had was the error message, which pattern-matched to "Sentry SDK API drift" (an outcome I'd flagged as a known risk in commit 3's pre-push report). I pushed a defensive fix replacing `Request()` with `SentryRequest()` — the underlying Obj-C class name, which is always valid regardless of Swift naming.
+
+After the manager wiped DerivedData and rebuilt cleanly, the original `Request()` compiled correctly. The build failure had been a stale Xcode package cache — not API drift. The `NS_SWIFT_NAME(Request)` alias is fully present in `sentry-cocoa 8.58.2` and the bare `Request` Swift name resolves as Sentry's documentation describes.
+
+**Lesson recorded for future iOS sessions:** when an iOS build error doesn't match the code (especially "cannot find type X in scope" or "method Y not available"), suspect the DerivedData cache **before** suspecting the SDK. The new `make clean-derived` target (below) is the one-command remediation. Saves a round-trip every time.
+
+**4. `make clean-derived` Makefile target.**
+
+`rm -rf ~/Library/Developer/Xcode/DerivedData/PulseCoffeeApp-*`. Scoped to our project's per-project cache directory (Xcode appends a unique hash to the project name); other Xcode projects on the same machine are unaffected. Added to the Makefile help output so future contributors discover it during the standard `make help` browse.
+
+**Not a "deviation" or a decision-log-worthy choice individually, but worth the entry because:**
+
+- The misdiagnosis lineage is now traceable (`a844b2c` exists, this entry explains why)
+- The DerivedData-cache-first debugging discipline becomes the documented norm for the iOS chat
+- Future engineers checking out the project see a complete dependency snapshot via `Package.resolved`
