@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Most CFBundle*/UI* values are resolved at build time from build
+		settings in `project.yml` (CFBundleIdentifier from
+		PRODUCT_BUNDLE_IDENTIFIER, version pair from MARKETING_VERSION +
+		CURRENT_PROJECT_VERSION, etc.). The keys below either declare
+		that resolution or hold values Info.plist must carry directly.
+
+		If you're editing in Xcode's plist GUI: be aware that Xcode may
+		strip XML comments on save. The same rationale is mirrored in
+		decision-log entry "[iOS] APIClient + Keychain + first Codables
+		+ ATS for localhost" — re-read there if a comment goes missing.
+	-->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleDisplayName</key>
+	<string>Pulse Coffee</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<!--
+		NSAppTransportSecurity — localhost exception only:
+
+		Required for Debug builds to reach the local backend on
+		http://localhost:3000 (the dev's `docker compose up` + Nest dev
+		server). Without it, the app's first network call in Debug fails
+		with the iOS ATS denial error.
+
+		Safe in Release builds: real users do not run a web server on
+		their iPhone, so the exception cannot be exploited in
+		production. Apple's review-rejection trigger is
+		`NSAllowsArbitraryLoads = YES` (blanket), NOT a targeted
+		localhost exception — many production apps ship this exact
+		entry.
+
+		Do NOT "tighten" this by removing the entry. Removing it
+		breaks dev workflow with zero security benefit. The exception
+		stays for the life of the project, by design.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

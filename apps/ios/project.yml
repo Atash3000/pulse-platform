@@ -102,15 +102,15 @@ targets:
         # iPhone only for Phase 1 (TARGETED_DEVICE_FAMILY=1). iPad support
         # can ship separately if/when there's demand.
         TARGETED_DEVICE_FAMILY: "1"
-        # Auto-generate Info.plist entries from build settings. No
-        # checked-in Info.plist file unless we need a custom entry that
-        # the auto-generator doesn't cover (e.g., ATS exceptions in
-        # commit #3).
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: "Pulse Coffee"
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+        # Commit #3 switched off Info.plist auto-generation: we need an
+        # `NSAppTransportSecurity` exception for localhost (for Debug
+        # builds to reach the local backend), and that's a nested-dict
+        # entry that `INFOPLIST_KEY_*` build settings cannot express.
+        # See `PulseCoffeeApp/Info.plist` for the actual contents and
+        # decision-log entry "[iOS] APIClient + Keychain + first
+        # Codables + ATS for localhost" for the rationale.
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: PulseCoffeeApp/Info.plist
         # Marketing version + build number are managed by the project's
         # version bumping process — placeholder values for the scaffold.
         MARKETING_VERSION: "0.1.0"

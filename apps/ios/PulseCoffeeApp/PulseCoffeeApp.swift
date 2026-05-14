@@ -33,17 +33,22 @@ struct PulseCoffeeApp: App {
             // target is 0.2–0.5 once we know which transactions matter.
             options.tracesSampleRate = 1.0
 
-            // Empty redactor today; populated in commit #3 (APIClient) with
-            // JWT-and-secret redaction logic — strips the
-            // `Authorization: Bearer <token>` header from every breadcrumb
-            // before it leaves the device, plus any `password` fields in
-            // POST request bodies. Cheaper to install the hook structurally
-            // now than retrofit it after the first token leaks to Sentry.
+            // Populated in commit #3: `SentryRedactor.redact` scrubs
+            // sensitive values from outbound events before delivery.
+            // - `Authorization` headers on the event request + on each
+            //   breadcrumb's request snapshot.
+            // - `password`, `client_secret`, `idempotency_key`, `cvv`,
+            //   `cvc`, `card_number` field values in any breadcrumb's
+            //   request body.
+            // - Stripe object IDs (`pi_*`, `ch_*`, `re_*`) in breadcrumb
+            //   URLs (defense-in-depth — not credentials, but they
+            //   shouldn't appear in error tracking either).
+            //
+            // See `Core/SentryRedactor.swift` for the redaction rules
+            // and `PulseCoffeeAppTests/SentryRedactorTests.swift` for
+            // the test coverage.
             options.beforeSend = { event in
-                // TODO(commit #3): redact Authorization header from
-                // request breadcrumbs, redact password/token fields from
-                // POST body breadcrumbs. Today this is a no-op pass-through.
-                return event
+                SentryRedactor.redact(event)
             }
 
             // Auto-instrument URLSession: every iOS network call becomes a

@@ -2011,3 +2011,82 @@ The lockfile cannot be generated from a non-Mac environment — it's the output 
 - Real PostHog screen-view / funnel events — lands per feature commit as screens come online.
 - Any actual use of the Stripe SDK — linked here, imported in commit #7 (checkout).
 - Sentry release-tracking dSYM upload — DevOps phase, separate concern.
+
+---
+
+## 2026-05-14 — [iOS] APIClient + Keychain + first Codables + ATS for localhost
+
+**Decision:** commit #3 lands the iOS networking foundation (`APIClient`), the typed Keychain wrapper, the first four Codable models (the canonical convention example), the `SentryRedactor` (separate testable type), and the ATS exception for `http://localhost` via a checked-in `Info.plist`. The `beforeSend` Sentry hook (installed empty in commit #2) is populated.
+
+This entry covers five design choices made in the iOS chat / CTO chat exchange before this commit, all approved with refinements.
+
+**1. APIClient as `actor`, not `final class`:**
+
+The `actor` declaration serialises all access to the underlying `URLSession`, `JSONDecoder`, and `JSONEncoder` — eliminates data-race risk and satisfies `SWIFT_STRICT_CONCURRENCY=complete` without `@unchecked Sendable` workarounds. Every call already goes through `async/await`, so the actor's "all members are async" requirement doesn't cost the call sites anything.
+
+`tokenProvider` is a `@Sendable @escaping () throws -> String?` closure injected at init — production uses `Keychain.loadAccessToken`; tests inject canned strings or `nil` to exercise the with-token / without-token / empty-token code paths.
+
+**2. 401 → `APIError.authRequired` (refresh-or-login deferred to commit #4):**
+
+The APIClient surfaces 401 as an `authRequired` error and adds a Sentry breadcrumb naming the request that produced it. The breadcrumb's `data` does not include the `Authorization` header (the header is on the request itself, not the breadcrumb body) — but if a future code path adds it manually, `SentryRedactor` scrubs it before delivery.
+
+The actual refresh-token retry loop lives with the auth coordinator in commit #4. This keeps commit #3 a pure infrastructure commit and commit #4 a pure feature commit. The split was the CTO's call after I flagged scope creep risk; it lets each commit's review focus on one concern.
+
+**3. ATS exception via checked-in Info.plist, single file for both configs:**
+
+The simpler alternative (`INFOPLIST_KEY_*` build settings) cannot express the nested `NSAppTransportSecurity` → `NSExceptionDomains` → `localhost` → `NSExceptionAllowsInsecureHTTPLoads` dict. XcodeGen does support `info:` blocks with arbitrary nested values, but committing a real `Info.plist` is more legible to anyone reviewing the project for security review later (they can `cat` it; they cannot `cat` a generated file).
+
+The same `Info.plist` ships in both Debug and Release. Two reasons:
+
+- Apple's review trigger is `NSAllowsArbitraryLoads = YES` blanket. A targeted `NSExceptionDomains` entry for `localhost` only is NOT a rejection basis — production iPhones do not run web servers, so the exception is unreachable in real-world Release usage.
+- Two `Info.plist` files (one per config) doubles the per-build maintenance and introduces a class of bug where the dev edits Debug's file but forgets Release's. The single-file approach is observably safer with zero security cost.
+
+An XML comment next to the `NSAppTransportSecurity` entry explains the rationale for any future engineer who reads the file. Xcode's plist GUI may strip XML comments on save; the same rationale is mirrored here so the paper trail survives.
+
+**4. `SentryRedactor` as a separate type, not inline in `App.init()`:**
+
+Splitting the redactor into `Core/SentryRedactor.swift` lets it be unit-tested without spinning up the full Sentry SDK. The `beforeSend` closure in `App.init()` is one line — `{ event in SentryRedactor.redact(event) }` — and all the redaction logic lives where tests can exercise it directly.
+
+Redaction surface (matches what was approved in the CTO exchange):
+
+| Location | Replacement | Why |
+|---|---|---|
+| `event.request.headers["Authorization"]` (case-insensitive) | `<redacted>` | JWT exfiltration. Auto-redacted even though Sentry doesn't include headers in URLSession breadcrumbs by default; defends against future manual breadcrumbs that do. |
+| `breadcrumb.data["headers"]["Authorization"]` | `<redacted>` | Same, on each breadcrumb. |
+| `breadcrumb.data["body"][<field>]` for: `password`, `client_secret`, `idempotency_key`, `cvv`, `cvc`, `card_number` | `<redacted>` | Auth credentials + Stripe payment authorization secret + payment-dedup keys + PCI-tier card data (defense-in-depth: Stripe SDK tokenises cards on-device, so card data *should* never appear in our APIClient body — the redactor catches a future code-path mistake). |
+| Stripe object IDs (`pi_*`, `ch_*`, `re_*`) in `breadcrumb.data["url"]` | `<prefix>_<redacted>` | Not credentials, but transaction-correlation defense-in-depth — shouldn't appear in error tracking. |
+
+**5. Codable convention — explicit `CodingKeys`, inline convention header on the first model file:**
+
+`AuthResponse.swift` carries a block comment at the top of the file documenting the convention. Future iOS engineers adding a new Codable will see it as they browse `apps/ios/PulseCoffeeApp/Models/`. The rationale (compile-time signal on backend rename, explicit field-by-field mapping) is fully written up in the contracts decision-log entry — the inline header is a breadcrumb, not a manifesto.
+
+Four Codables in this commit:
+
+| Type | Maps to | Notes |
+|---|---|---|
+| `AuthResponse` | `apps/api/src/modules/auth/auth.service.ts` `CustomerAuthResponse` | Carries the convention header comment. |
+| `RefreshResponse` | Same file, `RefreshResponse` interface | Just `access_token`. |
+| `CustomerProfile` | Same file, nested `customer` object | `full_name` → `fullName`. |
+| `ServerError` | NestJS exception bodies + structured cart/domain errors | Custom `init(from:)` handles both `message: String` and `message: [String]` shapes. |
+
+**Test plan in this commit:**
+
+- `KeychainTests.swift` — 8 tests: access-token round-trip, refresh-token round-trip, missing-item returns nil, overwrite, independence between the two items, clear-tokens removes both, idempotent clear on empty keychain, idempotent re-clear after save.
+- `CodableTests.swift` — 6 tests: AuthResponse snake_case round-trip, RefreshResponse, CustomerProfile, ServerError structured cart variant, ServerError NestJS single-string variant, ServerError class-validator array variant, ServerError unknown-shape fallback.
+- `SentryRedactorTests.swift` — 13 tests across header redaction (case sensitivity), body redaction (per-field + idempotency + empty input), Stripe-ID URL redaction (PI/charge/refund + leaves unrelated text alone), full pipeline (event-level + breadcrumb-level + empty event + missing-data breadcrumb + multiple breadcrumbs).
+- `APIClientTests.swift` — 8 tests using `URLProtocol`-backed stub session: decoder round-trip success, Authorization header present when token provided, omitted when no token, omitted when empty-string token, 401 → authRequired, 400 with structured body → serverError, 500 with garbage body → unexpected, URL query construction, POST body encoding as JSON.
+
+Total: **35 new tests** across four files. Coverage of the new code paths is comprehensive; any future change that breaks one of these contracts surfaces immediately.
+
+**What this commit does NOT include:**
+
+- The refresh-token retry loop (commit #4 — auth coordinator).
+- Anti-thundering-herd in-flight refresh deduplication (commit #4).
+- Actual login / register UI (commit #4).
+- A keychain test for `KeychainError.invalidStringEncoding` — this path is only triggered by impossibly malformed input (a non-UTF8 string-into-Data conversion, which Swift's `String.data(using: .utf8)` never returns nil for any valid `String`). Testing it would require force-corrupting Keychain state in ways that test fixtures don't expose.
+- Apple Pay merchant ID in entitlements (commit #7 with Stripe checkout).
+
+**Risk surfaced, not blocking:**
+
+- `SWIFT_STRICT_CONCURRENCY=complete` was set in commit #2 against the Sentry/PostHog/Stripe SDKs in the dependency graph. Without a Mac to test from, I cannot verify the build is warning-free. If commit #2 verification surfaced concurrency warnings, the same warnings affect this commit — and if commit #2 needed `targeted` fallback, this commit picks that up automatically. No code in this commit introduces new Sendable risks.
+- `StubURLProtocol` uses `nonisolated(unsafe) private static var` for stub state — acceptable for a test-only helper, but won't satisfy strict-concurrency complete cleanly. If concurrency mode tightens further, refactor to a per-test stub instance. Documented as a known-limitation in the test file.

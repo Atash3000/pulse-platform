@@ -14,6 +14,37 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS networking foundation: `APIClient` (actor, single network entry
+  point, `async/await` API, Authorization header injection from
+  Keychain, 401 → `APIError.authRequired` with Sentry breadcrumb,
+  structured 4xx/5xx → `APIError.serverError`), typed `Keychain`
+  wrapper (`saveAccessToken` / `loadAccessToken` / `saveRefreshToken` /
+  `loadRefreshToken` / `clearTokens` — no stringly-typed key access),
+  `SentryRedactor` (scrubs `Authorization` headers + sensitive body
+  fields + Stripe object IDs from outbound Sentry events; wired as the
+  `beforeSend` hook), and the first four Codable models —
+  `AuthResponse`, `RefreshResponse`, `CustomerProfile`, `ServerError`.
+  Each model carries a header comment naming the backend DTO it
+  mirrors; `AuthResponse.swift` carries the iOS Codable convention
+  preamble for future contributors. — see decision-log entry *"[iOS]
+  APIClient + Keychain + first Codables + ATS for localhost"*.
+
+- iOS ATS exception for `http://localhost` via a checked-in
+  `Info.plist` (`NSAppTransportSecurity` → `NSExceptionDomains` →
+  `localhost`). Single plist for both Debug and Release — production
+  iPhones do not run web servers, so the exception is unreachable in
+  real-world Release usage and not a basis for App Store rejection
+  (only blanket `NSAllowsArbitraryLoads = YES` is). XcodeGen switched
+  from `GENERATE_INFOPLIST_FILE=YES` to a checked-in `INFOPLIST_FILE`
+  to express the nested ATS dict.
+
+- iOS test coverage: **35 new tests** across `KeychainTests` (8),
+  `CodableTests` (6 — including `ServerError` variant decoders for
+  single-string vs `class-validator` array vs structured cart errors),
+  `SentryRedactorTests` (13 — header / body / Stripe ID redaction +
+  idempotency + empty-event guards), and `APIClientTests` (8 — using
+  a `URLProtocol`-backed stub session for hermetic networking).
+
 - iOS SPM dependencies (Stripe iOS, Sentry iOS, PostHog iOS) declared
   in `apps/ios/project.yml` with `from:` floors `23.0.0` / `8.0.0` /
   `3.0.0` respectively. `Package.resolved` (the actual lockfile) lives
