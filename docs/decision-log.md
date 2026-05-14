@@ -1629,3 +1629,78 @@ No new tests. The 2 existing push-notification.service.spec.ts assertions on `AP
 **Forward-looking regression guard:**
 
 If a future regression reintroduces the typo, real APNs sends will fail with `DeviceTokenNotForTopic` and the failure will be findable via CloudWatch grep for `[push] permanent-send-error` (the marker introduced in C8). The classifier's permanent verdict for `DeviceTokenNotForTopic` is correct — retrying with the same wrong topic would just waste API calls. The path from "iOS testing reports zero pushes arriving" to "ah, the bundle ID got typo'd again" via grep is short.
+
+---
+
+## 2026-05-12 — npm audit pre-DevOps housekeeping
+
+**Decision:** document the current `npm audit` risk surface and the rationale for which vulnerabilities are accepted-and-deferred versus fixed. No package versions are bumped in this commit — `npm audit fix` (without `--force`) made no real upgrades because every fix is blocked behind a major-version bump that the `package.json` semver pins refuse. The 29 vulnerabilities split into "dev-only", "production-path but inert", and "production-path with documented mitigations" buckets; none warrant blocking Phase 1 launch.
+
+This entry is housekeeping for DevOps phase: the AWS deployment chat will read this to understand the remaining risk surface before cutting over.
+
+**Audit summary:** 29 vulnerabilities total — 9 high, 16 moderate, 4 low. None are direct dev or production dependencies of `@pulse/api` itself except `@nestjs/cli`, `@nestjs/platform-express`, and `bcrypt`. Every fix-available marker resolves to a major-version bump.
+
+**Why no fixes were applied this commit:**
+
+`npm audit fix` (without `--force`) was run and made only a lockfile normalization (auto-syncing the `engines.node` block from `package.json` into `package-lock.json`). No package versions changed. The reason: every `fixAvailable` in the audit JSON points to a SemVer-major upgrade (`isSemVerMajor: true`), and the `package.json` ranges (`^10.x`, `^3.x`, etc.) refuse to cross majors automatically. The lockfile normalization was reverted to keep this commit a pure docs-only entry; the `engines.node` bump lands cleanly in the next commit.
+
+**Aggressive `--force` was NOT attempted** per the manager's explicit instruction: "Don't aggressively clean to zero if it means major version bumps of core dependencies." The NestJS v10 → v11 cascade would touch ~10 packages and require careful regression testing of HTTP middleware, decorators, and the testing module — a substantial separate commit (likely a multi-turn upgrade), not an audit-housekeeping commit.
+
+**Risk classification of the 9 HIGH-severity vulnerabilities:**
+
+| Package | Direct? | CVE summary | Production path? | Effective runtime risk | Disposition |
+|---|---|---|---|---|---|
+| `@nestjs/cli` | YES | Bundles vulnerable `webpack`, `glob`, `inquirer`, `@angular-devkit/*` | **DEV ONLY** — build tool, never loaded at runtime | Zero (not in production deps tree) | Defer; would need NestJS CLI v11 bump |
+| `@nestjs/platform-express` | YES | Transitive `multer` (DoS via incomplete cleanup, resource exhaustion, uncontrolled recursion) | Yes (HTTP server) BUT `multer` itself is unreachable — see grep evidence below | Effectively zero | Defer; documented mitigation |
+| `bcrypt` | YES | Transitive `tar` (hardlink path traversal, symlink poisoning, race conditions in extraction) | DEV/INSTALL ONLY — `tar` is used by `@mapbox/node-pre-gyp` only during `npm install` to extract the pre-compiled bcrypt binary; not invoked at runtime | Install-time only (would require supply-chain compromise of bcrypt release artifacts) | Defer; install-time CVE, runtime safe |
+| `@mapbox/node-pre-gyp` | no (via bcrypt) | Transitive `tar` (same as above) | DEV/INSTALL ONLY | Same as bcrypt | Defer |
+| `tar` | no (via @mapbox/node-pre-gyp) | Hardlink path traversal, race conditions | DEV/INSTALL ONLY | Same | Defer |
+| `multer` | no (via @nestjs/platform-express) | DoS attacks on file upload handling | Production path BUT `grep -rn "multer\|FileInterceptor\|MulterModule"` across `apps/api/src` returns **zero hits** — the codebase has no file-upload endpoints | Zero — vulnerable code path is unreachable | Defer; documented unreachable |
+| `glob` | no (via @nestjs/cli) | CLI command injection via `-c/--cmd` shell:true | **DEV ONLY** — used by build tool, not API runtime | Zero | Defer |
+| `picomatch` | no (via @nestjs/cli, ts-jest, ts-loader) | ReDoS via extglob quantifiers; method injection in POSIX character classes | **DEV ONLY** — glob patterns in jest/ts-loader configs are hard-coded constants, not attacker-controlled | Zero (no attacker-controlled glob input) | Defer |
+| `lodash` | no (via @nestjs/config, @nestjs/swagger, @nestjs/cli) | Prototype pollution in `_.unset`/`_.omit`; code injection via `_.template` | Production path BUT the vulnerable functions are not invoked by `@nestjs/config`'s use (object merging via `_.merge`) or by our `@nestjs/swagger` schema generation. Direct `_.template` use is absent from app code. | Low — vulnerable functions not reached by app code | Defer; documented usage profile |
+
+**The two key mitigations** that let the production-path highs ride:
+
+1. **multer is unreachable in this codebase.** Verified by grep: zero `FileInterceptor` decorators, zero `MulterModule` imports, zero upload endpoints. The DoS CVEs require the attacker to send a multipart upload that triggers the vulnerable cleanup / recursion paths. With no endpoint accepting multipart uploads, the attack surface is closed. If a future feature adds file uploads (e.g., Phase 2 menu-item image upload via S3 pre-signed URL would bypass multer entirely; menu-item uploads via the API would re-open this surface and demand a multer bump first), this entry should be revisited.
+
+2. **tar is install-time only.** `@mapbox/node-pre-gyp` invokes `tar` during `npm install` to extract the pre-compiled bcrypt native binding from the bcrypt project's GitHub release artifact. Once installed, `tar` is not loaded at runtime — `bcrypt.hash`, `bcrypt.compare`, `bcrypt.genSalt` call the compiled C++ binding directly. Exploiting the tar CVEs would require compromising the bcrypt project's release artifacts (a supply-chain attack on a popular package; if that happened, the entire JS ecosystem is in trouble, not just our app).
+
+**Risk classification of the 16 MODERATE-severity vulnerabilities:**
+
+All 16 moderates are transitive deps of the NestJS v10.x cluster (`@nestjs/common`, `@nestjs/core`, `@nestjs/swagger`, `@nestjs/typeorm`, `@nestjs/throttler`, etc.) or the @nestjs/cli build tooling (`@angular-devkit/*`, `webpack`, `ajv`, `js-yaml`, `inquirer`). Each fix requires `@nestjs/<package>` v11 — the same major bump that the highs would force. Bundled into the same deferred decision.
+
+The 4 LOW-severity vulnerabilities are all transitive of `@nestjs/cli` (build tool): `external-editor`, `inquirer`, `tmp`, `webpack`. Dev-only by definition.
+
+**The deferred NestJS v10 → v11 upgrade — its own separate commit:**
+
+When the team decides to bump NestJS, the upgrade should be its own multi-step commit covering:
+
+- All `@nestjs/*` packages including @nestjs/cli, @nestjs/core, @nestjs/common, @nestjs/platform-express, @nestjs/swagger, @nestjs/typeorm, @nestjs/throttler, @nestjs/config, @nestjs/schedule, @nestjs/schematics, @nestjs/testing.
+- `bcrypt` v5 → v6 (the same upgrade resolves @mapbox/node-pre-gyp + tar).
+- Regression testing of HTTP middleware, decorator-based DI, the global ValidationPipe, the AuthGuard pattern across every controller, and the workers' scheduled-task lifecycle.
+- A migration-checklist read of the NestJS v11 changelog (Express 4 → 5 transition, breaking changes in custom decorators).
+
+This is not a single-PR change. The right time is when the team has a quiet day for the upgrade. Phase 1 launches before that day.
+
+**Acceptable Phase 1 launch state per the manager's policy:**
+
+> "What we cannot ship is ANY unpatched high-severity vulnerability in production paths without explicit justification."
+
+Every high-severity in a production path has an explicit justification documented above. The deferral is therefore policy-compliant.
+
+**DevOps-phase pre-flight checklist (read this before AWS deploy):**
+
+1. Re-run `npm audit` immediately before the production build. If new advisories have published since this entry, re-evaluate. The risk surface is a snapshot, not a constant.
+2. The npm CI install step (`npm ci`) in the DevOps workflow does NOT auto-fix vulnerabilities — it installs exactly what `package-lock.json` specifies. Vulnerable transitive deps stay vulnerable in the CI build artifact.
+3. Sentry will capture any runtime exception traces; the `[push] permanent-send-error`, `[telegram] permanent send error`, and DEAD-outbox alerts are the in-band signals.
+4. Penetration testing pre-launch should specifically probe: any future file-upload endpoint (multer comes alive); any future use of `lodash._.template` (RCE).
+
+**No code changes in this commit:**
+
+This is a documentation-only commit. Files touched: `docs/decision-log.md` (this entry) and `CHANGELOG.md` (a one-line note). `apps/api/package.json` and `apps/api/package-lock.json` are unchanged. 19 test suites, 347 tests still passing; no risk of test regression because no source code or dependency was modified.
+
+**Cross-references:**
+
+- The forthcoming Commit 5 ("GitHub Actions CI + Node version bump") will add CI gates that catch *new* vulnerabilities introduced after this point. CI runs `npm audit` and either fails on new highs (strict mode) or warns (advisory mode) — the choice is documented in that entry.
+- The C8 entry's `engines.node: ">=18"` floor (originally added with `@parse/node-apn`) is also superseded in Commit 5.

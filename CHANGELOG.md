@@ -86,6 +86,18 @@ by entry title — search the log for the quoted title.
 
 ### Changed
 
+- npm audit risk surface documented in `docs/decision-log.md` (entry
+  "npm audit pre-DevOps housekeeping"). 29 vulnerabilities (9 high,
+  16 moderate, 4 low) classified by production-path vs dev-only and
+  mitigation status. No package upgrades — every fix requires a major
+  version bump (NestJS v10 → v11 cascade); deferred to a dedicated
+  upgrade commit. Each production-path high has documented mitigation:
+  `multer` is unreachable (zero file-upload endpoints in the
+  codebase), `tar` CVEs are install-time only, `lodash` vulnerable
+  functions are not invoked. Phase 1 launch is policy-compliant per
+  the "no unpatched highs in production paths without explicit
+  justification" rule.
+
 - Bundle ID typo corrected: `com.pulscoffee.app` →
   `com.pulsecoffee.app` (brand-correct "Pulse Coffee" spelling with the
   letter "e"). The codebase inherited the typo from the spec PDFs; the
