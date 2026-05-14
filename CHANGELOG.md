@@ -14,6 +14,19 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- `PUT /api/v1/customers/me/push-token` — authenticated customers can
+  register or clear their APNs device token. New `CustomersModule` /
+  `CustomersService` / `CustomersController` under
+  `apps/api/src/modules/customers/`. Validates exactly 64 hex chars or
+  empty string (empty clears the token / opts out of push). Customer
+  JWT required; staff JWTs return 403. Idempotent. Returns
+  `{success: true}` on 200; invalid token shape returns 400 with
+  `code: 'PUSH_TOKEN_INVALID'`. The token value is never logged on any
+  path (matches the C8 output-side security invariant). Closes the
+  input-side gap left by C8 — iOS can now register a token that the
+  push handlers will eventually dispatch to. — see decision-log entry
+  *"Push token registration endpoint design"*.
+
 - Real Telegram Bot API delivery in `TelegramService`. When
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_CHAT_ID` are both set, the
   six event-driven dispatch methods (`newOrder`, `paymentFailed`,

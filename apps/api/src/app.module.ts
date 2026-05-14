@@ -11,6 +11,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
+import { CustomersModule } from './modules/customers/customers.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -43,6 +44,7 @@ import { WorkersModule } from './workers/workers.module';
     PricingModule,
     PaymentsModule,
     CheckoutModule,
+    CustomersModule,
     OrdersModule,
     AdminModule,
     WorkersModule,

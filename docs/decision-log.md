@@ -1404,3 +1404,74 @@ The `.gitignore` already covered `*.p8`, `*.pem`, `*.key`, `.env`, `.env.*`. C8 
 Top-of-file comments name uncovered surfaces (HTTP/2 connection-pool behaviour under sustained load, JWT auto-refresh timing inside the library, sandbox/production credential rotation, Retry-After-aware backoff for 429s) for future work.
 
 Total test count: 270 → 324 (+54 net: +21 classifier + +17 telegram + +16 push). The earlier instruction-draft number of "~300 expected" was a rough estimate; the actual delta is larger because the C8 spec rebuilds add coverage for the dual-mode paths (real-send happy-path, each permanent code, each transient code) that the pre-C8 stub specs did not exercise.
+
+---
+
+## 2026-05-12 — Push token registration endpoint design
+
+**Decision:** introduce `apps/api/src/modules/customers/` with a single endpoint `PUT /api/v1/customers/me/push-token` that accepts a 64-char hex APNs device token (or empty string to clear) from an authenticated customer and writes it to `customers.push_token`. This closes the input-side gap in the C8 work: APNs delivery is wired, but until iOS can register a token there are no live recipients. The endpoint is the first piece of the iOS-facing surface.
+
+**HTTP method — PUT, not PATCH:**
+
+The semantic is wholesale replacement of a single scalar (`push_token`). PUT matches that ("here is the full new state of this resource subset"); PATCH implies partial update of a structured resource ("change these fields, leave the others"). For a single-field scalar update, both are defensible — choosing PUT because the operation is naturally idempotent and the request body carries the complete new value.
+
+**Empty-string-as-clear:**
+
+A PUT with `{ "token": "" }` clears `push_token` to NULL. Two reasons over a separate DELETE endpoint:
+1. Single endpoint = one iOS code path. The app already knows "register or update my push token"; making opt-out an empty-string PUT means the same call site handles both register-on-launch and opt-out flows.
+2. Empty string is unambiguous in the wire format and trivial for the DTO to validate. A separate DELETE doubles the API surface for negligible benefit.
+
+The behaviour is documented in the DTO's `@ApiProperty` description and the controller's `@ApiOperation` description so a future iOS-side or Swagger reader sees it without reading service code.
+
+**Validation — exactly 64 hex chars OR exactly empty:**
+
+APNs device tokens are conventionally 32 bytes = 64 hex chars (lower OR upper case, the library treats them as case-insensitive). Apple has stated the length may grow in future iOS versions, so the validator pins a CONSTANT (`EXPECTED_PUSH_TOKEN_LENGTH = 64`) at the top of the DTO module rather than embedding the literal. If production logs ever show a non-64-char token rejected with `PUSH_TOKEN_INVALID`, that constant is the single spot to relax.
+
+The DTO uses a discrete regex `^(|[0-9a-fA-F]{64})$` — either empty OR exactly 64 hex chars. A `^[0-9a-fA-F]*$` regex would accept arbitrary lengths; we want EXACTLY the two valid shapes. Defense-in-depth re-validation lives in `CustomersService.updatePushToken` for the case where a future direct service caller bypasses the DTO.
+
+**Whitespace trimming:**
+
+`class-transformer`'s `@Transform(({value}) => value.trim())` runs BEFORE class-validator. iOS debug-print logs of APNs tokens commonly carry a trailing newline; trimming makes copy-paste workflows (manual curl tests, support escalations) succeed without spurious `PUSH_TOKEN_INVALID` errors. The trim is one-way: clients can never accidentally submit `" "` and have it interpreted as the clear-token sentinel (post-trim it becomes empty string, which is the documented clear behaviour — a small footgun, but matches the documented contract).
+
+**Error code:**
+
+400 with structured body `{ code: 'PUSH_TOKEN_INVALID', message: '...' }`. The code is the stable contract for iOS error handling; the message is operator-facing. Matches the existing convention used by `markFailedFromWebhook`'s idempotency-fix entry (`ORDER_ALREADY_TERMINAL`, etc.) — structured-code-plus-message rather than raw string. iOS can swap any future copy update without breaking client error handling.
+
+**Auth — customer JWT only:**
+
+`@UseGuards(AuthGuard('jwt'))` + a `requireCustomer(req)` helper that rejects staff JWTs with 403. Mirrors `orders.controller.ts`'s `requireCustomer` pattern. Staff users have no push tokens (they don't run the iOS customer app); rejecting their JWTs here keeps the surface tight and prevents a future bug where a staff JWT accidentally writes to a customer row.
+
+**Actor identity comes from the JWT subject, never the body:**
+
+The body carries only `token`. The customer ID is read from `req.user.sub`. This means a malicious caller cannot "update someone else's push token" — even if they construct a body with an embedded customer ID, the controller ignores it. The spec includes a regression test for this exact scenario.
+
+**Security — log the boolean, never the token:**
+
+The service emits `[customers] push-token-updated {customer_id, cleared}` — a `cleared: true|false` discriminator confirms whether a register or opt-out happened, the `customer_id` audits the actor, and the token VALUE never appears. Mirrors `PushNotificationService`'s output-side invariant; both sides of the credential pipeline are now log-safe. A regression test asserts the token value is absent from every log line.
+
+**No migration needed:**
+
+The `customers.push_token` column has existed since the InitialSchema migration (`1778273424632-InitialSchema.ts`); `entities.ts:222` declares it as `text NULL`. The C8 PushNotificationService reads this column; this endpoint writes it. No DDL.
+
+**Throttling:**
+
+30/min/IP via `@Throttle({default: {limit: 30, ttl: 60_000}})`. Push-token updates from a single device are infrequent (registration on app launch + occasional rotation when iOS rotates the token). 30/min is far below abuse thresholds and well above the legitimate-traffic ceiling.
+
+**Module wiring:**
+
+`CustomersModule` registers `TypeOrmModule.forFeature([Customer])` locally. The same entity is already registered in `NotificationsModule` for the push service's reads — TypeORM tolerates multiple `forFeature` calls for the same entity across modules. AppModule imports `CustomersModule` between `CheckoutModule` and `OrdersModule`.
+
+**Tests:** 14 across two specs.
+
+- `customers.service.spec.ts` — 9 tests covering: valid lowercase / uppercase 64-char token persists via update(); empty string clears push_token to NULL; non-hex characters throw `PUSH_TOKEN_INVALID` (DTO-bypass defense); wrong length throws `PUSH_TOKEN_INVALID`; affected-rows 0 throws `NotFoundException`; idempotency (same token twice → same DB writes, no second-call side-effect); security regression (token value absent from log output) on both register and clear paths.
+- `customers.controller.spec.ts` — 5 tests covering: customer JWT routes to service with the JWT subject; staff JWT raises ForbiddenException; missing user raises ForbiddenException; customerId is ALWAYS read from JWT subject (a body carrying a different customerId cannot affect another customer); empty token is forwarded for the clear-token semantics.
+
+End-to-end pieces NOT covered in these unit specs (deferred to e2e / DevOps phase):
+- The actual AuthGuard('jwt') guard behaviour with a forged / expired token. The unit test bypasses the guard via `Test.createTestingModule` and exercises the controller's `requireCustomer` helper directly. The guard itself is exercised by every existing controller that uses it.
+- ValidationPipe behaviour on a malformed body (e.g., missing `token` field). The global `whitelist: true, forbidNonWhitelisted: true` pipe is shared across the app and is functionally an end-to-end concern.
+
+Total test count: 324 → 338 (+14). The earlier "+10" estimate was conservative; the actual delta covers more edge cases (uppercase hex, idempotency, JWT-subject-vs-body-subject regression).
+
+**Consumer of this endpoint — referenced by C8:**
+
+The new endpoint is the input side of the C8 push-delivery pipeline. The decision-log entry `"Real Telegram Bot API + APNs delivery (C8)"` named "push delivery is wired but currently has no live call sites" as a deferred item; this endpoint provides the input that makes those callers reachable. The output side (handler wiring) lands in the very next commit.
