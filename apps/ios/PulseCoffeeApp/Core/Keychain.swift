@@ -44,14 +44,41 @@ enum Keychain {
         try loadString(for: .refreshToken)
     }
 
-    /// Removes both access and refresh tokens. Idempotent — calling on
-    /// an already-empty keychain returns success.
+    /// Persists the customer profile alongside the tokens. JSON-encoded.
+    /// Used on launch to populate `AppState.authState = .loggedIn(profile)`
+    /// synchronously without a network round-trip.
+    static func saveCustomer(_ customer: CustomerProfile) throws {
+        let data = try JSONEncoder().encode(customer)
+        guard let string = String(data: data, encoding: .utf8) else {
+            throw KeychainError.invalidStringEncoding
+        }
+        try saveString(string, for: .customer)
+    }
+
+    /// Returns the persisted customer profile, or `nil` if none is stored.
+    /// Throws on Keychain error OR on JSON-decoding failure (the latter
+    /// indicates a corrupted Keychain entry — the caller should treat it
+    /// like "no customer" and force a fresh login).
+    static func loadCustomer() throws -> CustomerProfile? {
+        guard let string = try loadString(for: .customer) else {
+            return nil
+        }
+        guard let data = string.data(using: .utf8) else {
+            throw KeychainError.invalidStringEncoding
+        }
+        return try JSONDecoder().decode(CustomerProfile.self, from: data)
+    }
+
+    /// Removes all stored auth data: access token, refresh token, AND the
+    /// customer profile. Idempotent — calling on an already-empty
+    /// keychain returns success.
     ///
-    /// Use this on logout. After this call, both `loadAccessToken()` and
-    /// `loadRefreshToken()` return `nil`.
-    static func clearTokens() throws {
+    /// Use this on logout. After this call, every `load*` accessor returns
+    /// `nil`.
+    static func clearAll() throws {
         try deleteItem(for: .accessToken)
         try deleteItem(for: .refreshToken)
+        try deleteItem(for: .customer)
     }
 
     // MARK: - Internal implementation
@@ -63,8 +90,9 @@ enum Keychain {
     private enum Item: String {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
+        case customer = "customer_profile"
 
-        /// `kSecAttrAccount` value. Distinguishes the two items within
+        /// `kSecAttrAccount` value. Distinguishes items within
         /// the same `kSecAttrService` namespace.
         var account: String { rawValue }
     }

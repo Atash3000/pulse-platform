@@ -4,6 +4,14 @@ import PostHog
 
 @main
 struct PulseCoffeeApp: App {
+
+    /// Single source of truth for the auth lifecycle. Created in
+    /// `App.init()` so its synchronous Keychain bootstrap happens
+    /// before any view evaluates — the root view sees the resolved
+    /// `authState` on first render and routes correctly without a
+    /// loading flash.
+    @StateObject private var appState: AppState
+
     init() {
         // Golden Rule #9: Sentry MUST be the first call in App.init() —
         // before any other code can throw, log, or crash. We need errors
@@ -88,57 +96,19 @@ struct PulseCoffeeApp: App {
         if ProcessInfo.processInfo.environment["SMOKE_TEST"] == "1" {
             SentrySDK.capture(message: "ios.smoke-test: commit #2 wiring verified")
         }
-        Self.bootstrapPersonalDevToken()
         #endif
+
+        // AppState is constructed AFTER Sentry init so that any Keychain
+        // read failure during `AppState.bootstrap()` is captured to
+        // Sentry. AppState's init synchronously reads Keychain — no
+        // spinner on launch.
+        _appState = StateObject(wrappedValue: AppState())
     }
-
-    #if DEBUG
-    /// One-shot bootstrap that copies the `DEV_ACCESS_TOKEN` and
-    /// `DEV_REFRESH_TOKEN` environment variables into the Keychain
-    /// **if and only if** the Keychain is currently empty.
-    ///
-    /// Workflow for personal-MVP testing (no login UI, single-developer
-    /// scenario — see `apps/ios/README.md` "Personal MVP testing" section
-    /// for the curl recipe that produces these tokens):
-    ///
-    /// 1. Manager creates a customer account via `POST /api/v1/auth/register`
-    ///    on the backend; saves `access_token` + `refresh_token` from the
-    ///    response.
-    /// 2. In Xcode: Product → Scheme → Edit Scheme → Run → Arguments →
-    ///    Environment Variables. Add `DEV_ACCESS_TOKEN` and (optionally)
-    ///    `DEV_REFRESH_TOKEN`.
-    /// 3. Build + run once with Xcode attached — the tokens land in
-    ///    Keychain on app launch.
-    /// 4. After step 3, the env vars are no longer consulted (Keychain
-    ///    wins). Sideload-to-phone builds work because Keychain persists.
-    ///
-    /// To force a re-bootstrap (rotated token, wrong account), the
-    /// dev clears Keychain first — easiest via uninstall+reinstall, or
-    /// via a future logout flow.
-    ///
-    /// Stripped from Release builds via `#if DEBUG` — production never
-    /// reads environment variables for credentials.
-    private static func bootstrapPersonalDevToken() {
-        // Bail out if Keychain already has a token (steady-state path).
-        if let existing = try? Keychain.loadAccessToken(), !existing.isEmpty {
-            return
-        }
-
-        let env = ProcessInfo.processInfo.environment
-        guard let access = env["DEV_ACCESS_TOKEN"], !access.isEmpty else {
-            return
-        }
-
-        try? Keychain.saveAccessToken(access)
-        if let refresh = env["DEV_REFRESH_TOKEN"], !refresh.isEmpty {
-            try? Keychain.saveRefreshToken(refresh)
-        }
-    }
-    #endif
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(appState)
         }
     }
 

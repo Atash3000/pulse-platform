@@ -2150,3 +2150,96 @@ After the manager wiped DerivedData and rebuilt cleanly, the original `Request()
 **Why this scope:**
 
 The personal-MVP goal (per CTO direction in the previous exchange) is "walk to the shop, order one coffee, pay with Apple Pay, pick it up." Everything that doesn't directly serve that goal is a future polish step. MVP-3 (cart + Apple Pay) and MVP-4 (order status) follow the same shortcut philosophy.
+
+---
+
+## 2026-05-18 — [iOS] Phase-1 auth scope reversal — auth UI added back after MVP-1 cut
+
+**Decision:** Phase 1 ships real `LoginView` / `RegisterView` with backend `POST /auth/login` and `POST /auth/register` wiring, plus `AppState` ObservableObject as the root state machine. The MVP-1 `DEV_ACCESS_TOKEN` env-var bootstrap shortcut (commit `82ee027`) is removed.
+
+**The trajectory** (so a future reader doesn't mistake this for indecision):
+
+1. **Original plan** — auth in Phase 1 commit #4.
+2. **First reversal** — cut auth in favor of guest checkout. Surface-level appeal: lower-friction first-order UX. Underlying problem surfaced during review: backend's protected endpoints (`/checkout`, `/orders/:id`, `/orders/:id/cancel`) all require customer JWT, so "guest checkout" would have required a backend change the iOS chat couldn't make.
+3. **Second reversal** — cut auth UI entirely; hardcode a personal customer JWT via `DEV_ACCESS_TOKEN` env var into Keychain for single-developer "order a real coffee on my own phone" testing. Shipped as MVP-1 (commit `82ee027`).
+4. **Third reversal (this commit)** — real auth UI back. Reason: even for a single-developer test, the env-var bootstrap creates a "this is a developer tool, not an app" feeling. And once we have auth UI, the app is real, the path to TestFlight is real, the path to App Store is real.
+
+The lesson — not the indecision, the LESSON — is that "smallest possible MVP" is appealing but trades less than expected when each cut item is small. Auth UI is ~1,700 lines including tests. That's one focused day of work, not a week-long detour. Probably should have been kept in throughout.
+
+**What the code looks like now:**
+
+- `AppState` (`@MainActor` ObservableObject) reads Keychain synchronously on init. If both tokens AND customer profile are present, transitions to `.loggedIn(profile)`; otherwise `.loggedOut`. No spinner.
+- `ContentView` switches on `appState.authState` and routes to `LoginView` or `MenuView`.
+- `LoginView` / `RegisterView` share `AuthViewModel` parametrised by `Mode`.
+- `MenuView` toolbar gains a gear icon with a Sign Out menu item (chosen over a separate Profile tab — gear is 5 lines, tab is a full nav structure; reintroduce a Profile tab when there's other content to put in it).
+
+**MVP-1 cleanup folded in (not a separate revert commit):** the `DEV_ACCESS_TOKEN` bootstrap function in `App.init()`, the token-status UI in `ContentView`, and the "Personal MVP testing" section of `apps/ios/README.md` all delete cleanly because `AppState` replaces their entire surface area. A separate `git revert 82ee027` would create noise without value — the diff against `60080e3` tells the story.
+
+---
+
+## 2026-05-18 — [iOS] Email verification deferred to Phase 2 — known gap
+
+**Decision:** `POST /auth/register` immediately issues a JWT pair without verifying the email address. iOS registration is single-screen: enter email + password + name (optional phone), tap Create Account, you're in.
+
+This is acceptable for personal-MVP testing AND for any private-test TestFlight build. It is **NOT** acceptable for a public App Store launch.
+
+**Why it's a Phase 1 gap:**
+
+- Backend has no SMTP wired. No service account, no template, no bounce handling.
+- Adding it requires picking a provider (SES / SendGrid / Postmark), wiring the verification token flow on the backend, plumbing the iOS confirmation deep-link or in-app code-entry screen — at least a week of work.
+- Personal-MVP testing doesn't need it — the developer who creates the account is the same person who verifies it.
+
+**Why it must be fixed before public launch:**
+
+- **Account squatting**: a malicious user can register `someone-else@gmail.com` and lock the legitimate owner out of using that email later. Stripe customer records, refunds, future loyalty points all flow to the wrong identity.
+- **Password recovery dead-end**: if a real user forgets their password (Phase-2 forgot-password endpoint), the only way to verify identity is the email — which we never confirmed they own.
+- **Spam at scale**: bots can register accounts at the rate-limit ceiling (10/min/IP), polluting the customer table and any future analytics.
+
+**Path forward** (not landed today, captured for posterity):
+
+1. Backend: pick a transactional email provider; wire `POST /auth/register` to send a verification email, accept tokens via `POST /auth/verify-email`.
+2. Backend: gate `POST /checkout` (and other money-adjacent endpoints) behind `customer.email_verified = true`.
+3. iOS: post-register screen showing "Check your email" with a "Resend verification" button. Open via universal link from the email.
+4. Migration: existing test accounts get a backfill verification email or a manual flag flip.
+
+Until that lands, **production deployment is gated** on the email-verification work. A note has been added to `apps/ios/README.md` and the CHANGELOG so the gap surfaces in launch readiness review.
+
+---
+
+## 2026-05-18 — [iOS] NotificationCenter as the logout signal bus
+
+**Decision:** when authentication fails irrecoverably (refresh-token expired, second 401 after a refresh-retry), the iOS app posts `Notification.Name.authRequired` via `NotificationCenter.default`. `AppState` subscribes to that notification in its `init` and triggers `logout()` on receipt.
+
+**Alternatives considered:**
+
+| Option | Pros | Cons | Decision |
+|---|---|---|---|
+| Direct `AppState` injection into every view model | Explicit, type-safe, easy to trace | Every feature view model needs an `appState:` constructor parameter. Couples unrelated features to AppState. Verbose. | Rejected |
+| `EventBus` Combine subject | First-class Swift; subscribers are typed | Adds a new abstraction (`EventBus.swift`) for a single event type today. Pulse Coffee's spec calls out an EventBus for the future but it doesn't exist yet. | Rejected for now; revisit if a second app-wide event type appears |
+| **`NotificationCenter.Name.authRequired`** | Decoupled — view models don't import AppState. Single subscription point. Well-precedented in iOS. Posting from inside an actor is safe (NotificationCenter is thread-safe). | Implicit signal flow; one more place to look when tracing "what handles this." | **Chosen** |
+
+**Why it works for this specific event:**
+
+`authRequired` is genuinely global: when it fires, every feature in the app needs to react (drop in-flight requests, clear state, route back to login). A typed Combine subject would let receivers ignore events they "don't care about" — but every receiver cares about this one. The notification's "broadcast to all" semantics match the actual signal semantics.
+
+**The posting sites:**
+
+- `TokenRefresher.performRefresh()` when `/auth/refresh` returns 401 (refresh token expired or revoked).
+- `APIClient.perform()` when a retried request — sent with a refreshed access token — still gets 401 (token revoked between refresh and retry, customer disabled, etc.).
+
+Both paths also throw `APIError.authRequired` for the caller's flow control. The notification is fire-and-forget; the throw is the synchronous return path.
+
+**Cross-reference:** `apps/ios/PulseCoffeeApp/Core/AuthEvents.swift` declares the `Notification.Name`. `AppState.subscribeToAuthRequired()` is the only subscriber. `SentryRedactor` ensures no token values leak via Sentry breadcrumbs from either posting site.
+
+---
+
+## 2026-05-18 — [iOS] Profile tab cut from Phase 1 — toolbar gear instead
+
+**Decision:** Phase 1 doesn't ship a Profile tab. The only user action the spec lists for the profile screen — Sign Out — lives as a toolbar item (gear icon → "Sign Out") in `MenuView` instead.
+
+**Why:**
+
+- A tab requires a navigation shell (TabView, multiple tabs to coexist with), per-tab state preservation, and at minimum two tabs (otherwise it's a single-screen app with extra UI). MVP has exactly one user action that doesn't fit on the menu screen itself — Sign Out — and that's a five-line toolbar item.
+- When real profile content arrives (payment methods, address book, dietary preferences, order history), reintroduce the tab. The toolbar gear can absorb it as a "Settings" entry meanwhile, or be deleted in favor of the tab.
+
+**Tradeoff acknowledged:** the spec's Part 6 project structure ([`PulsCoffee_Final_Spec.pdf` page 22]) lists a `Features/Profile/ProfileView.swift`. Skipping it for personal-MVP is a deliberate divergence, not a typo — captured here so a future reader doesn't think it was a forgotten directory.

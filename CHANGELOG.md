@@ -14,6 +14,68 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS authentication feature: real `LoginView` and `RegisterView` SwiftUI
+  forms backed by `POST /auth/login` and `POST /auth/register`. Root
+  `AppState` (`@MainActor` ObservableObject) owns the auth lifecycle —
+  reads Keychain synchronously on launch, transitions between
+  `.loggedOut` and `.loggedIn(CustomerProfile)`. `ContentView` switches
+  on `authState` to route to `LoginView` or `MenuView`. `MenuView`
+  gains a toolbar gear icon with a Sign Out menu item.
+  — see decision-log entry *"[iOS] Phase-1 auth scope reversal"*.
+
+- iOS `TokenRefresher` actor with refresh-deduplication: when concurrent
+  requests all 401, only one `/auth/refresh` round-trip occurs; all
+  in-flight callers receive the same new access token. Wired into
+  `APIClient` so 401 → refresh → retry-once happens transparently. If
+  the refresh itself fails (or the retried request 401s again),
+  `Notification.Name.authRequired` is posted and `AppState` triggers
+  logout. Sentry breadcrumbs around every refresh attempt
+  (before / success / failure with status code) — `SentryRedactor`
+  scrubs token values before delivery.
+
+- iOS `APIError.rateLimited` case for HTTP 429. View models map this
+  to mode-specific copy ("Too many login attempts" / "Too many
+  registration attempts") rather than a generic "something went wrong".
+
+- iOS `Keychain.saveCustomer` / `loadCustomer` / `clearAll` methods.
+  Customer profile JSON-encoded alongside access + refresh tokens for
+  synchronous bootstrap of `AppState.authState` on launch. Login,
+  register, and the previous `clearTokens()` are subsumed.
+
+- iOS test coverage: **AppStateTests (8)**, **TokenRefresherTests (8)**,
+  **AuthViewModelTests (9)**, extended `KeychainTests (11)` and
+  `APIClientTests (12)` for the 401 retry + 429 paths. iOS suite
+  total: **77 tests** (was 46 after MVP-2).
+
+### Changed
+
+- iOS `APIClient` now retries 401 responses once by calling
+  `TokenRefresher.refresh()`, then re-issuing the original request with
+  the new access token. A second 401 surfaces as
+  `APIError.authRequired` and posts the matching notification so
+  `AppState` can log the user out cleanly.
+
+- iOS `Keychain.clearTokens()` renamed to `clearAll()` — now clears
+  the customer profile too.
+
+### Removed
+
+- iOS personal `DEV_ACCESS_TOKEN` env-var bootstrap from commit
+  `82ee027` (MVP-1). Real `LoginView` / `RegisterView` replaces it.
+  The bootstrap function in `App.init()`, the token-status UI in
+  `ContentView`, and the "Personal MVP testing" section of
+  `apps/ios/README.md` are all deleted as part of the auth feature
+  commit — not a separate revert.
+
+### Known Gaps (must resolve before public App Store launch)
+
+- **Email verification not implemented.** Backend has no SMTP wired;
+  `POST /auth/register` immediately issues tokens without confirming
+  the email is owned by the registering user. Acceptable for
+  personal-MVP testing; blocks public launch. See decision-log entry
+  *"[iOS] Email verification deferred to Phase 2"* for the full
+  threat model and migration path.
+
 - iOS menu screen (`MenuView`) for personal-MVP coffee ordering.
   Sectioned list (one section per backend menu category), item rows
   with name + price + sold-out / "Only N left" indicators,

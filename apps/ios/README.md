@@ -63,40 +63,15 @@ ATS exception for `http://localhost` lands with the `APIClient` in commit #3.
 3. 15 golden rules — [`docs/golden-rules.md`](../../docs/golden-rules.md). Rules 1–4, 7–9 are iOS-relevant.
 4. Decision log — [`docs/decision-log.md`](../../docs/decision-log.md). Search for `[iOS]` prefix.
 
-## Personal MVP testing — order yourself a real coffee
+## Running the app
 
-Phase 1 scope was narrowed to "single-developer testing on a real iPhone with Apple Pay (Stripe test mode)." Goal: walk to the shop, order a coffee through the app. No public launch, no login UI, no signup screen. Account creation is done out-of-band; iOS uses your personal customer JWT directly.
+1. Bring up the backend (`docker compose up -d`, then in `apps/api/`: `npm run start:dev`).
+2. Open `PulseCoffeeApp.xcodeproj` and run on Simulator or a sideloaded device.
+3. The app opens to a **Sign In** screen. First-time users tap **Create an account** to register; existing users sign in with email + password.
+4. After successful login/register the app persists tokens + customer profile in Keychain and routes to **Menu**.
+5. Sign out via the gear icon in the Menu screen toolbar.
 
-**One-time setup on your Mac:**
-
-1. Bring up the backend (`docker compose up -d`, `cd apps/api && npm run start:dev`).
-2. Create a customer account for yourself via curl:
-
-   ```bash
-   curl -X POST http://localhost:3000/api/v1/auth/register \
-     -H "Content-Type: application/json" \
-     -d '{
-       "email":"you@example.com",
-       "password":"a-long-password-you-do-not-need-to-remember",
-       "full_name":"Your Name",
-       "phone":"+1 718 555 0100"
-     }'
-   ```
-
-   Response contains `access_token` and `refresh_token`. Copy both.
-
-3. In Xcode: Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables. Add:
-
-   | Name | Value |
-   |---|---|
-   | `DEV_ACCESS_TOKEN` | the `access_token` from step 2 |
-   | `DEV_REFRESH_TOKEN` | the `refresh_token` from step 2 |
-
-4. Build and run once with the env vars set. The app reads them on first launch and persists both tokens into the Keychain. After this, the env vars are no longer consulted — Keychain wins. You can clear the env vars in Xcode and run via sideload to your phone; the tokens persist across Xcode detach and across app launches.
-
-5. To rotate the token (account change, refresh expired after 30 days): uninstall + reinstall the app.
-
-**Personal-MVP builds are Debug builds.** The `DEV_*` env var bootstrap is `#if DEBUG` and stripped from Release. Production builds never read credentials from environment variables.
+The bundled `seed:dev` script creates one location but no menu items. To order a real coffee you'll need to seed at least one item (and its inventory row) — see `apps/api/README.md` for the seed scripts or insert manually via `psql`.
 
 ## Build sequence
 
@@ -106,20 +81,23 @@ Phase 1 scope was narrowed to "single-developer testing on a real iPhone with Ap
 | 2 | SPM deps (Stripe, Sentry, PostHog) + AppConfig + Sentry/PostHog init | ✅ Landed |
 | 3 | APIClient, Keychain, Codable models, ATS exception | ✅ Landed |
 | Housekeeping | Package.resolved, PostHog rename, make clean-derived | ✅ Landed |
-| MVP-1 | Personal dev-token bootstrap | (this commit) |
-| MVP-2 | Menu screen (location fetch + menu fetch + sectioned list) | (next) |
+| MVP-2 | Menu screen (location + menu fetch, sectioned list) | ✅ Landed |
+| Commit A | Auth feature — AppState, TokenRefresher, Login/Register UI, 401 retry | (this commit) |
 | MVP-3 | Cart + Apple Pay checkout + idempotency | (planned) |
 | MVP-4 | Order status polling + receipt screen | (planned) |
 | MVP-5 | Apple Pay merchant ID entitlement + TestFlight prep | (planned) |
 
 Scope deferred to Phase 2 (post-personal-MVP):
 
-- Login / register UI
+- Forgot password (needs backend SMTP)
+- Email verification (needs backend SMTP)
+- Sign in with Apple (not required while we offer only email login)
 - Order history list
 - Push notifications (APNs delivery to customers)
 - Loyalty UI
 - Scheduled pickup
-- Modifier selection on items (MVP uses default options)
+- Modifier selection on items (MVP orders use default options)
+- Profile tab (gear → Sign Out in MenuView toolbar covers the only Phase-1 user action)
 
 Pre-push discipline: each commit pauses before push for CTO review.
 

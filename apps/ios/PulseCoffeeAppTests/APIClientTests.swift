@@ -71,11 +71,36 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(sent.value(forHTTPHeaderField: "Authorization"))
     }
 
-    // MARK: - 401 → AuthRequired
+    // MARK: - 401 → refresh → retry flow
 
-    func test_get_401_surfacesAuthRequired() async {
+    func test_get_401_thenRefreshSuccess_retriesAndReturnsResult() async throws {
+        // Three responses in the queue:
+        //   1. Original request returns 401
+        //   2. Refresh endpoint returns 200 with new access token
+        //   3. Retry of original request returns 200 with the real payload
         StubURLProtocol.stub(statusCode: 401, body: #"{"message":"Unauthorized"}"#)
-        let client = makeClient()
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"new-jwt"}"#)
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"final"}"#)
+
+        let client = makeClient(token: "expired", refreshToken: "valid-refresh")
+
+        let response: RefreshResponse = try await client.get("/orders/abc")
+        XCTAssertEqual(response.accessToken, "final")
+
+        // Three HTTP round-trips: original → refresh → retry
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 3)
+        XCTAssertEqual(StubURLProtocol.capturedRequests[1].url?.lastPathComponent, "refresh")
+    }
+
+    func test_get_401_thenRefreshFails_throwsAuthRequired() async {
+        // Original 401, refresh also 401 → propagate authRequired and
+        // post notification.
+        StubURLProtocol.stub(statusCode: 401, body: "{}")
+        StubURLProtocol.stub(statusCode: 401, body: "{}")
+
+        let notificationExpectation = expectation(forNotification: .authRequired, object: nil)
+
+        let client = makeClient(token: "expired", refreshToken: "expired-refresh")
 
         do {
             let _: RefreshResponse = try await client.get("/orders/abc")
@@ -84,6 +109,48 @@ final class APIClientTests: XCTestCase {
             // expected
         } catch {
             XCTFail("Expected APIError.authRequired, got \(error)")
+        }
+
+        await fulfillment(of: [notificationExpectation], timeout: 1.0)
+    }
+
+    func test_get_401_thenRefreshSuccess_butRetry401_throwsAuthRequired() async {
+        // Edge case: refresh produces a new token, but by the time we
+        // retry the customer was disabled / token revoked → second 401.
+        // We surface authRequired and post the notification.
+        StubURLProtocol.stub(statusCode: 401, body: "{}")
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"new"}"#)
+        StubURLProtocol.stub(statusCode: 401, body: "{}")
+
+        let notificationExpectation = expectation(forNotification: .authRequired, object: nil)
+
+        let client = makeClient(token: "expired", refreshToken: "valid-refresh")
+
+        do {
+            let _: RefreshResponse = try await client.get("/orders/abc")
+            XCTFail("Expected APIError.authRequired")
+        } catch APIError.authRequired {
+            // expected
+        } catch {
+            XCTFail("Expected APIError.authRequired, got \(error)")
+        }
+
+        await fulfillment(of: [notificationExpectation], timeout: 1.0)
+    }
+
+    // MARK: - 429 → rateLimited
+
+    func test_get_429_throwsRateLimited() async {
+        StubURLProtocol.stub(statusCode: 429, body: #"{"message":"ThrottlerException: Too Many Requests"}"#)
+        let client = makeClient()
+
+        do {
+            let _: RefreshResponse = try await client.get("/auth/login")
+            XCTFail("Expected APIError.rateLimited")
+        } catch APIError.rateLimited {
+            // expected — discrete case, view layers map to friendly copy
+        } catch {
+            XCTFail("Expected APIError.rateLimited, got \(error)")
         }
     }
 
@@ -170,64 +237,87 @@ final class APIClientTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeClient(token: String? = nil) -> APIClient {
-        APIClient(
+    private func makeClient(
+        token: String? = nil,
+        refreshToken: String? = nil
+    ) -> APIClient {
+        let baseURL = URL(string: "http://localhost:3000/api/v1")!
+        let refresher = TokenRefresher(
+            baseURL: baseURL,
             session: session,
-            baseURL: URL(string: "http://localhost:3000/api/v1")!,
-            tokenProvider: { token }
+            refreshTokenProvider: { refreshToken },
+            accessTokenWriter: { _ in /* no-op for tests */ }
+        )
+        return APIClient(
+            session: session,
+            baseURL: baseURL,
+            tokenProvider: { token },
+            refresher: refresher
         )
     }
 }
 
 // MARK: - URLProtocol-backed stub
 
-/// Captures the request sent to `session.data(for:)` and serves a
-/// canned response. One stub per test.
+/// Captures requests and serves canned responses. Supports a queue of
+/// responses for tests that exercise multi-step flows (e.g. 401 → retry).
 ///
-/// `lastRequest` exposes the URLRequest the client built (URL, method,
-/// headers). `lastBodyData` captures the HTTP body — URLProtocol's
-/// `request.httpBody` is `nil` for streamed bodies on iOS, so we read
-/// from `httpBodyStream` if that's the case.
+/// - `stub(statusCode:body:)` appends a single response to the queue.
+/// - `startLoading` pops the head of the queue; if the queue is empty
+///   it falls back to a default 200 `{}` so a missing stub doesn't
+///   crash the test, only fails the assertion.
+/// - `capturedRequests` holds every request the client sent, in order.
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) private static var stubbedStatus: Int = 200
-    nonisolated(unsafe) private static var stubbedBody: String = "{}"
-    nonisolated(unsafe) static var lastRequest: URLRequest?
-    nonisolated(unsafe) static var lastBodyData: Data?
+    private struct StubResponse {
+        let statusCode: Int
+        let body: String
+    }
+
+    nonisolated(unsafe) private static var responseQueue: [StubResponse] = []
+    nonisolated(unsafe) static var capturedRequests: [URLRequest] = []
+    nonisolated(unsafe) static var capturedBodies: [Data?] = []
 
     static func stub(statusCode: Int, body: String) {
-        stubbedStatus = statusCode
-        stubbedBody = body
+        responseQueue.append(StubResponse(statusCode: statusCode, body: body))
     }
 
     static func reset() {
-        stubbedStatus = 200
-        stubbedBody = "{}"
-        lastRequest = nil
-        lastBodyData = nil
+        responseQueue = []
+        capturedRequests = []
+        capturedBodies = []
     }
+
+    /// Convenience accessors that match the prior single-stub API.
+    static var lastRequest: URLRequest? { capturedRequests.last }
+    static var lastBodyData: Data? { capturedBodies.last ?? nil }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Self.lastRequest = request
-        // Drain the body stream if URLProtocol gave us one instead of
-        // populated httpBody (URLSession streams POST bodies).
+        Self.capturedRequests.append(request)
         if let body = request.httpBody {
-            Self.lastBodyData = body
+            Self.capturedBodies.append(body)
         } else if let stream = request.httpBodyStream {
-            Self.lastBodyData = Self.drain(stream)
+            Self.capturedBodies.append(Self.drain(stream))
+        } else {
+            Self.capturedBodies.append(nil)
         }
+
+        // Pop the next stubbed response; fall back to 200 {} if empty.
+        let stub = Self.responseQueue.isEmpty
+            ? StubResponse(statusCode: 200, body: "{}")
+            : Self.responseQueue.removeFirst()
 
         let url = request.url ?? URL(string: "http://stub")!
         let response = HTTPURLResponse(
             url: url,
-            statusCode: Self.stubbedStatus,
+            statusCode: stub.statusCode,
             httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/json"]
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Self.stubbedBody.data(using: .utf8) ?? Data())
+        client?.urlProtocol(self, didLoad: stub.body.data(using: .utf8) ?? Data())
         client?.urlProtocolDidFinishLoading(self)
     }
 

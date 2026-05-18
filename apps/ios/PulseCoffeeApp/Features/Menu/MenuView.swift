@@ -8,12 +8,25 @@ import SwiftUI
 /// For now, the detail screen has a "Cart coming soon" disabled button so
 /// the navigation flow is testable end-to-end.
 struct MenuView: View {
+    @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = MenuViewModel()
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle(title)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button("Sign Out", role: .destructive) {
+                                Task { await appState.logout() }
+                            }
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .accessibilityLabel("Settings")
+                        }
+                    }
+                }
                 .task {
                     if case .idle = viewModel.state {
                         await viewModel.load()

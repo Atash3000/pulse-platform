@@ -12,12 +12,12 @@ final class KeychainTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        // Wipe both items before each test so order-independent.
-        try Keychain.clearTokens()
+        // Wipe all items before each test so order-independent.
+        try Keychain.clearAll()
     }
 
     override func tearDown() async throws {
-        try Keychain.clearTokens()
+        try Keychain.clearAll()
         try await super.tearDown()
     }
 
@@ -62,24 +62,45 @@ final class KeychainTests: XCTestCase {
         XCTAssertEqual(try Keychain.loadRefreshToken(), "refresh-value")
     }
 
-    // MARK: - Clear
+    // MARK: - Customer profile round-trip
 
-    func test_clearTokens_removesBoth() throws {
-        try Keychain.saveAccessToken("a")
-        try Keychain.saveRefreshToken("r")
-        try Keychain.clearTokens()
-        XCTAssertNil(try Keychain.loadAccessToken())
-        XCTAssertNil(try Keychain.loadRefreshToken())
+    func test_saveAndLoadCustomer_roundTrips() throws {
+        let original = CustomerProfile(id: "cust-1", email: "x@y.com", fullName: "X Y")
+        try Keychain.saveCustomer(original)
+        let loaded = try Keychain.loadCustomer()
+        XCTAssertEqual(loaded, original)
     }
 
-    func test_clearTokens_isIdempotent() throws {
-        // Empty keychain — should not throw.
-        try Keychain.clearTokens()
-        XCTAssertNil(try Keychain.loadAccessToken())
+    func test_loadCustomer_returnsNilWhenAbsent() throws {
+        XCTAssertNil(try Keychain.loadCustomer())
+    }
 
-        // Save, clear, clear again — second clear is still a no-op success.
+    func test_saveCustomer_overwritesPreviousValue() throws {
+        try Keychain.saveCustomer(.init(id: "1", email: "a@b", fullName: "A"))
+        try Keychain.saveCustomer(.init(id: "2", email: "c@d", fullName: "B"))
+        XCTAssertEqual(try Keychain.loadCustomer()?.id, "2")
+    }
+
+    // MARK: - Clear all
+
+    func test_clearAll_removesEveryItem() throws {
+        try Keychain.saveAccessToken("a")
+        try Keychain.saveRefreshToken("r")
+        try Keychain.saveCustomer(.init(id: "x", email: "x@y", fullName: "X"))
+
+        try Keychain.clearAll()
+
+        XCTAssertNil(try Keychain.loadAccessToken())
+        XCTAssertNil(try Keychain.loadRefreshToken())
+        XCTAssertNil(try Keychain.loadCustomer())
+    }
+
+    func test_clearAll_isIdempotent() throws {
+        try Keychain.clearAll()
+        XCTAssertNoThrow(try Keychain.clearAll())
+
         try Keychain.saveAccessToken("x")
-        try Keychain.clearTokens()
-        XCTAssertNoThrow(try Keychain.clearTokens())
+        try Keychain.clearAll()
+        XCTAssertNoThrow(try Keychain.clearAll())
     }
 }

@@ -46,19 +46,26 @@ actor APIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
-    /// `tokenProvider` and `tokenWriter` are injectable so tests can
-    /// substitute Keychain access. Default implementations call the
-    /// real Keychain.
+    /// `tokenProvider` is injectable so tests can substitute Keychain
+    /// access. Default reads from the real Keychain.
     private let tokenProvider: @Sendable () throws -> String?
+
+    /// `refresher` is the token-refresh dedup primitive. Injected for
+    /// tests; defaults to the shared singleton in production. See
+    /// `TokenRefresher.swift` for the dedup pattern and breadcrumb
+    /// trail rationale.
+    private let refresher: TokenRefresher
 
     init(
         session: URLSession = .shared,
         baseURL: URL = AppConfig.apiBaseURL,
-        tokenProvider: @Sendable @escaping () throws -> String? = { try Keychain.loadAccessToken() }
+        tokenProvider: @Sendable @escaping () throws -> String? = { try Keychain.loadAccessToken() },
+        refresher: TokenRefresher = .shared
     ) {
         self.session = session
         self.baseURL = baseURL
         self.tokenProvider = tokenProvider
+        self.refresher = refresher
 
         let d = JSONDecoder()
         // No global key strategy. Each Codable carries explicit
@@ -122,7 +129,8 @@ actor APIClient {
         _ method: HTTPMethod,
         path: String,
         query: [URLQueryItem],
-        body: Data?
+        body: Data?,
+        isRetry: Bool = false
     ) async throws -> T {
         let request = try buildRequest(method: method, path: path, query: query, body: body)
 
@@ -147,25 +155,49 @@ actor APIClient {
             }
 
         case 401:
-            // Surface AuthRequired. Commit #4's auth coordinator catches
-            // this, attempts a refresh via `POST /auth/refresh`, then
-            // either retries the original request or navigates to
-            // the login screen.
+            // First 401: ask TokenRefresher for a fresh access token and
+            // retry the original request once. Second 401 (post-retry):
+            // surface `authRequired` so AppState logs the user out.
             //
-            // The breadcrumb gives Sentry context about which request
-            // produced the 401. `Authorization` header values are
+            // `Authorization` header values in this breadcrumb are
             // redacted by `SentryRedactor.beforeSend` before the event
-            // leaves the device — see `SentryRedactor.swift`.
+            // leaves the device.
             let crumb = Breadcrumb(level: .info, category: "api.auth")
-            crumb.message = "401 from \(method.rawValue) \(path) — surfaced as AuthRequired"
+            crumb.message = isRetry
+                ? "401 from \(method.rawValue) \(path) — second 401, giving up"
+                : "401 from \(method.rawValue) \(path) — attempting refresh"
             crumb.type = "http"
             crumb.data = [
                 "method": method.rawValue,
                 "path": path,
                 "status_code": 401,
+                "is_retry": isRetry,
             ]
             SentrySDK.addBreadcrumb(crumb)
-            throw APIError.authRequired
+
+            if isRetry {
+                NotificationCenter.default.post(name: .authRequired, object: nil)
+                throw APIError.authRequired
+            }
+
+            do {
+                _ = try await refresher.refresh()
+            } catch {
+                // TokenRefresher already posted authRequired on its own
+                // path; just propagate the error.
+                throw APIError.authRequired
+            }
+
+            return try await perform(method, path: path, query: query, body: body, isRetry: true)
+
+        case 429:
+            // Throttler 429 — NestJS Throttler returns
+            // `{statusCode:429, message:"ThrottlerException: Too Many Requests"}`
+            // which is decodable by ServerError but the view layer wants
+            // a clean discriminator. Surface a dedicated case so view
+            // models can map "too many attempts" copy without parsing
+            // status codes out of `unexpected(429)`.
+            throw APIError.rateLimited
 
         default:
             // 4xx/5xx — try to decode the structured error body. Fall
@@ -247,9 +279,17 @@ enum APIError: Error, @unchecked Sendable {
     /// (e.g. 409 conflict needs different UX than 400 validation).
     case serverError(ServerError, statusCode: Int)
 
-    /// Backend returned 401. Caller (auth coordinator, commit #4)
-    /// is responsible for refresh-or-login handling.
+    /// Backend rejected the request after one refresh-retry cycle, OR
+    /// the refresh itself returned 401. `AppState` listens for the
+    /// matching `Notification.Name.authRequired` post and transitions
+    /// the UI to the login screen.
     case authRequired
+
+    /// HTTP 429 — backend's throttler rejected the request. View
+    /// layers map this to "too many attempts, please wait" copy.
+    /// Surfaces as a discrete case (not `unexpected(429)`) so view
+    /// models don't have to parse status codes out of unrelated paths.
+    case rateLimited
 
     /// Backend returned a non-2xx status that didn't match any of
     /// the known structured-error shapes. The status code is

@@ -75,6 +75,8 @@ final class MenuViewModel: ObservableObject {
             // does, the backend has flipped the guards and the iOS
             // contract needs updating.
             return "Authentication required for menu (unexpected)."
+        case .rateLimited:
+            return "Hit a rate limit. Please wait a minute and try again."
         case .unexpected(let code):
             return "Menu request failed with status \(code)."
         }
