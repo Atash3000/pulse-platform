@@ -1,21 +1,68 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var tokenStatus: TokenStatus = .checking
+
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Text("Pulse Coffee")
                 .font(.largeTitle.weight(.bold))
 
-            Text("Phase 1 scaffold")
+            Text("Personal MVP test build")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            tokenStatusBadge
+
             #if DEBUG
             DebugAPIBanner()
-                .padding(.top, 32)
+                .padding(.top, 24)
             #endif
         }
         .padding()
+        .onAppear(perform: refreshTokenStatus)
+    }
+
+    @ViewBuilder
+    private var tokenStatusBadge: some View {
+        switch tokenStatus {
+        case .checking:
+            ProgressView()
+                .padding(.top, 16)
+        case .loaded:
+            Label("Personal token loaded", systemImage: "checkmark.shield.fill")
+                .foregroundStyle(.green)
+                .padding(.top, 16)
+        case .notLoaded:
+            VStack(spacing: 8) {
+                Label("No personal token", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Set DEV_ACCESS_TOKEN in the Xcode scheme env vars and re-run.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            .padding(.top, 16)
+        }
+    }
+
+    private func refreshTokenStatus() {
+        do {
+            if let token = try Keychain.loadAccessToken(), !token.isEmpty {
+                tokenStatus = .loaded
+            } else {
+                tokenStatus = .notLoaded
+            }
+        } catch {
+            tokenStatus = .notLoaded
+        }
+    }
+
+    private enum TokenStatus {
+        case checking
+        case loaded
+        case notLoaded
     }
 }
 

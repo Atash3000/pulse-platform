@@ -63,22 +63,63 @@ ATS exception for `http://localhost` lands with the `APIClient` in commit #3.
 3. 15 golden rules — [`docs/golden-rules.md`](../../docs/golden-rules.md). Rules 1–4, 7–9 are iOS-relevant.
 4. Decision log — [`docs/decision-log.md`](../../docs/decision-log.md). Search for `[iOS]` prefix.
 
+## Personal MVP testing — order yourself a real coffee
+
+Phase 1 scope was narrowed to "single-developer testing on a real iPhone with Apple Pay (Stripe test mode)." Goal: walk to the shop, order a coffee through the app. No public launch, no login UI, no signup screen. Account creation is done out-of-band; iOS uses your personal customer JWT directly.
+
+**One-time setup on your Mac:**
+
+1. Bring up the backend (`docker compose up -d`, `cd apps/api && npm run start:dev`).
+2. Create a customer account for yourself via curl:
+
+   ```bash
+   curl -X POST http://localhost:3000/api/v1/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email":"you@example.com",
+       "password":"a-long-password-you-do-not-need-to-remember",
+       "full_name":"Your Name",
+       "phone":"+1 718 555 0100"
+     }'
+   ```
+
+   Response contains `access_token` and `refresh_token`. Copy both.
+
+3. In Xcode: Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables. Add:
+
+   | Name | Value |
+   |---|---|
+   | `DEV_ACCESS_TOKEN` | the `access_token` from step 2 |
+   | `DEV_REFRESH_TOKEN` | the `refresh_token` from step 2 |
+
+4. Build and run once with the env vars set. The app reads them on first launch and persists both tokens into the Keychain. After this, the env vars are no longer consulted — Keychain wins. You can clear the env vars in Xcode and run via sideload to your phone; the tokens persist across Xcode detach and across app launches.
+
+5. To rotate the token (account change, refresh expired after 30 days): uninstall + reinstall the app.
+
+**Personal-MVP builds are Debug builds.** The `DEV_*` env var bootstrap is `#if DEBUG` and stripped from Release. Production builds never read credentials from environment variables.
+
 ## Build sequence
 
-This commit lands the scaffold only. Following commits:
+| Commit | Scope | Status |
+|---|---|---|
+| 1 | Xcode project + XcodeGen | ✅ Landed |
+| 2 | SPM deps (Stripe, Sentry, PostHog) + AppConfig + Sentry/PostHog init | ✅ Landed |
+| 3 | APIClient, Keychain, Codable models, ATS exception | ✅ Landed |
+| Housekeeping | Package.resolved, PostHog rename, make clean-derived | ✅ Landed |
+| MVP-1 | Personal dev-token bootstrap | (this commit) |
+| MVP-2 | Menu screen (location fetch + menu fetch + sectioned list) | (next) |
+| MVP-3 | Cart + Apple Pay checkout + idempotency | (planned) |
+| MVP-4 | Order status polling + receipt screen | (planned) |
+| MVP-5 | Apple Pay merchant ID entitlement + TestFlight prep | (planned) |
 
-| # | Scope |
-|---|---|
-| 2 | SPM dependencies (Stripe, Sentry, PostHog) + Sentry init on first line of `App.init()` |
-| 3 | APIClient, Keychain (JWT), Codable models, ATS exception for localhost |
-| 4 | Auth (register, login, refresh) |
-| 5 | Menu (browse, item detail, disk cache) |
-| 6 | Cart (in-memory, no server) |
-| 7 | Checkout (Stripe PaymentSheet + Apple Pay + idempotency) |
-| 8 | Orders (10s polling, history) — terminal states `[PICKED_UP, CANCELLED, FAILED, REFUNDED]` per ios.md |
-| 9 | Push notifications (APNs token registration, deep-link to order detail) |
-| 10 | Loyalty + Profile + logout (loyalty endpoint pending backend) |
-| 11 | PostHog + TestFlight prep |
+Scope deferred to Phase 2 (post-personal-MVP):
+
+- Login / register UI
+- Order history list
+- Push notifications (APNs delivery to customers)
+- Loyalty UI
+- Scheduled pickup
+- Modifier selection on items (MVP uses default options)
 
 Pre-push discipline: each commit pauses before push for CTO review.
 

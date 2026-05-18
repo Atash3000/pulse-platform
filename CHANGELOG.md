@@ -14,6 +14,22 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS personal-MVP token bootstrap. On first launch in Debug builds,
+  if Keychain is empty, the app reads `DEV_ACCESS_TOKEN` and
+  `DEV_REFRESH_TOKEN` from the process environment (set via the Xcode
+  scheme) and persists them to Keychain. After that, the env vars are
+  ignored — Keychain wins. Sideload-to-phone builds keep working
+  because Keychain persists across Xcode detach. Stripped from Release
+  builds via `#if DEBUG`. Enables single-developer "order a real
+  coffee on my phone" testing without a login UI. — see
+  `apps/ios/README.md` § *"Personal MVP testing"* for the full
+  workflow.
+
+- iOS `ContentView` now displays the token-loaded status — green
+  shield "Personal token loaded" when Keychain has a token, orange
+  warning "Set DEV_ACCESS_TOKEN" otherwise. Visual confirmation that
+  the bootstrap worked without needing to inspect Keychain manually.
+
 - iOS SPM lockfile (`Package.resolved`) committed at the canonical
   Xcode path
   (`apps/ios/PulseCoffeeApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`).
