@@ -2122,3 +2122,31 @@ After the manager wiped DerivedData and rebuilt cleanly, the original `Request()
 - The misdiagnosis lineage is now traceable (`a844b2c` exists, this entry explains why)
 - The DerivedData-cache-first debugging discipline becomes the documented norm for the iOS chat
 - Future engineers checking out the project see a complete dependency snapshot via `Package.resolved`
+
+---
+
+## 2026-05-18 — [iOS] MVP-2: menu screen for personal coffee-buying test
+
+**Decision:** ship the menu browsing screen as a one-screen sectioned list (one section per category) with read-only item detail. Several spec-mandated features are deferred to a future "real launch" effort because the personal-MVP scope (single developer, single shop, one drink at a time) doesn't need them.
+
+**What ships:**
+
+- `LocationSummary` + `Menu`/`MenuCategory`/`MenuItem`/`ModifierGroup`/`Modifier` Codable models, all with explicit `CodingKeys` for snake_case wire fields and DTO-path doc comments (per "[iOS] Contracts source of truth").
+- `LocationService.firstLocation()` — fetches `GET /locations` and returns the first row. No picker UI; personal MVP has one shop.
+- `MenuService.fetchMenu(locationId:)` — fetches `GET /menu?locationId=…`. No client-side cache yet.
+- `MenuViewModel` (@MainActor ObservableObject) with `idle / loading / loaded / failed` state.
+- `MenuView` — sectioned `List` with category headers, item rows showing name + price + sold-out / "Only N left" indicators. Pull-to-refresh wired.
+- `ItemDetailView` — read-only screen; "Add to cart" button visible but disabled until MVP-3 lands the cart.
+- 7 tests in `MenuTests.swift` covering LocationSummary + Menu decoding (including modifier groups) and the `displayPrice` formatter.
+
+**What's deferred:**
+
+- **Disk cache for menu (Golden Rule #1).** The "menu loads instantly from disk on launch" pattern is a real-launch requirement, not a personal-MVP requirement. For personal testing the dev is online and a network round-trip on launch is acceptable. Lands when public launch is in scope.
+- **Modifier-selection UI.** Item detail shows that modifier groups exist but doesn't surface the picker. Personal-MVP items are expected to be plain "Latte / Cortado / Drip" with no required modifiers. If `MenuItem.modifierGroups[].required == true` for an item, MVP-3's checkout will reject the cart — that's correct behaviour, not a bug; it just means that item can't be ordered until modifier UI lands.
+- **Multi-location picker UI.** Backend is multi-location-ready (every record carries `location_id`). iOS picks the first active location. When a second shop ships, this view replaces the title with a tap-to-switch picker.
+- **Location settings reactivity.** `location_settings.mobile_ordering_paused` and the like are NOT consumed in this screen — checkout (MVP-3) reads them at submit time. A "we're closed right now" banner on the menu screen would be a real-launch polish step.
+- **`MenuItem` price formatting** uses `String(format: "$%.2f")` for personal-MVP simplicity. A real launch needs `NumberFormatter` with locale awareness — different shops in different countries will have different currency symbols and decimal conventions. Not a Phase-1-personal concern.
+
+**Why this scope:**
+
+The personal-MVP goal (per CTO direction in the previous exchange) is "walk to the shop, order one coffee, pay with Apple Pay, pick it up." Everything that doesn't directly serve that goal is a future polish step. MVP-3 (cart + Apple Pay) and MVP-4 (order status) follow the same shortcut philosophy.

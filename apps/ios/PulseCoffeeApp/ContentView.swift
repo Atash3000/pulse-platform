@@ -1,18 +1,51 @@
 import SwiftUI
 
+/// Root view router for personal-MVP testing.
+///
+/// - If a personal access token is in Keychain (set up via the
+///   `DEV_ACCESS_TOKEN` env-var bootstrap in `App.init()`), routes to
+///   `MenuView`.
+/// - Otherwise shows a "setup needed" screen explaining how to wire the
+///   env vars. This is the only branch that exists in personal-MVP —
+///   when login UI lands (Phase 2), this view replaces the orange-warning
+///   branch with `LoginView`.
 struct ContentView: View {
     @State private var tokenStatus: TokenStatus = .checking
 
     var body: some View {
+        Group {
+            switch tokenStatus {
+            case .checking:
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            case .loaded:
+                MenuView()
+
+            case .notLoaded:
+                setupNeeded
+            }
+        }
+        .onAppear(perform: refreshTokenStatus)
+    }
+
+    private var setupNeeded: some View {
         VStack(spacing: 20) {
-            Text("Pulse Coffee")
-                .font(.largeTitle.weight(.bold))
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.largeTitle)
+                .foregroundStyle(.orange)
 
-            Text("Personal MVP test build")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Text("Personal MVP setup needed")
+                .font(.title2.weight(.semibold))
 
-            tokenStatusBadge
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1. Create a customer account on the backend (see `apps/ios/README.md`).")
+                Text("2. Add the `DEV_ACCESS_TOKEN` and `DEV_REFRESH_TOKEN` env vars to the Xcode scheme.")
+                Text("3. Re-run the app once with Xcode attached.")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal)
 
             #if DEBUG
             DebugAPIBanner()
@@ -20,31 +53,7 @@ struct ContentView: View {
             #endif
         }
         .padding()
-        .onAppear(perform: refreshTokenStatus)
-    }
-
-    @ViewBuilder
-    private var tokenStatusBadge: some View {
-        switch tokenStatus {
-        case .checking:
-            ProgressView()
-                .padding(.top, 16)
-        case .loaded:
-            Label("Personal token loaded", systemImage: "checkmark.shield.fill")
-                .foregroundStyle(.green)
-                .padding(.top, 16)
-        case .notLoaded:
-            VStack(spacing: 8) {
-                Label("No personal token", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text("Set DEV_ACCESS_TOKEN in the Xcode scheme env vars and re-run.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            .padding(.top, 16)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func refreshTokenStatus() {
@@ -68,9 +77,7 @@ struct ContentView: View {
 
 #if DEBUG
 /// Visible only in Debug builds. Reads the active API base URL from
-/// `AppConfig` so configuration drift is visible at a glance — prevents
-/// the "why isn't this working" debug session when the developer expects
-/// localhost but the build is pointing somewhere else.
+/// `AppConfig` so configuration drift is visible at a glance.
 private struct DebugAPIBanner: View {
     var body: some View {
         VStack(spacing: 4) {

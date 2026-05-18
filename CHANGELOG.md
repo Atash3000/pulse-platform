@@ -14,6 +14,26 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS menu screen (`MenuView`) for personal-MVP coffee ordering.
+  Sectioned list (one section per backend menu category), item rows
+  with name + price + sold-out / "Only N left" indicators,
+  pull-to-refresh, read-only `ItemDetailView` with disabled "Add to
+  cart" placeholder (cart wires up in MVP-3). Two services back the
+  view: `LocationService` (fetches the first active location from
+  `GET /locations`) and `MenuService` (fetches `GET /menu` for that
+  location). View model exposes a 4-state machine
+  (`idle / loading / loaded / failed`) with user-friendly error
+  messages for the common failure modes (no locations seeded, backend
+  unreachable, etc.). 7 new tests in `MenuTests.swift` covering Codable
+  round-trips and the `displayPrice` helper. — see decision-log entry
+  *"[iOS] MVP-2: menu screen for personal coffee-buying test"*.
+
+- iOS `ContentView` now routes to `MenuView` when a personal access
+  token is in Keychain, or shows a "setup needed" screen with the
+  one-time `DEV_ACCESS_TOKEN` env-var workflow otherwise. Lays the
+  groundwork for swapping in `LoginView` in Phase 2 without touching
+  the routing call site.
+
 - iOS personal-MVP token bootstrap. On first launch in Debug builds,
   if Keychain is empty, the app reads `DEV_ACCESS_TOKEN` and
   `DEV_REFRESH_TOKEN` from the process environment (set via the Xcode
