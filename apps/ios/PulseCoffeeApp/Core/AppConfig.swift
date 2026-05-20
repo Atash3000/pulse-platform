@@ -48,12 +48,23 @@ enum AppConfig {
     // — the actual hostname is a DevOps phase decision; the value below
     // is a placeholder until then.
     //
-    // ATS exception for `http://localhost` is added in commit #3
-    // alongside the APIClient. Until then this constant is read by the
-    // Debug banner in `ContentView.swift` but no networking occurs.
+    // `DEBUG_API_BASE_URL` environment override (Debug only): when set
+    // in the Xcode scheme's Run → Environment Variables, replaces the
+    // default localhost URL. Use case: sideloading to a real iPhone via
+    // Xcode with an ngrok / Cloudflare tunnel pointed at the Mac backend
+    // (real device can't reach `http://localhost:3000`). No code change
+    // needed; just set the env var to the tunnel URL.
+    //
+    // ATS exception in `Info.plist` covers `localhost` only — tunnel URLs
+    // must be HTTPS (which ngrok / Cloudflare provide by default).
 
     static let apiBaseURL: URL = {
         #if DEBUG
+        if let override = ProcessInfo.processInfo.environment["DEBUG_API_BASE_URL"],
+           !override.isEmpty,
+           let url = URL(string: override) {
+            return url
+        }
         return URL(string: "http://localhost:3000/api/v1")!
         #else
         return URL(string: "https://api.pulsecoffee.com/api/v1")!

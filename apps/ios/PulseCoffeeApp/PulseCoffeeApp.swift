@@ -12,6 +12,12 @@ struct PulseCoffeeApp: App {
     /// loading flash.
     @StateObject private var appState: AppState
 
+    /// In-memory cart. Persists across Menu / Cart / Checkout
+    /// navigation; cleared on app close (no server-side cart per
+    /// `docs/ai-onboarding/ios.md` rule #2). Cleared post-checkout
+    /// by `CheckoutViewModel`.
+    @StateObject private var cart = CartManager()
+
     init() {
         // Golden Rule #9: Sentry MUST be the first call in App.init() —
         // before any other code can throw, log, or crash. We need errors
@@ -109,6 +115,7 @@ struct PulseCoffeeApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .environmentObject(cart)
         }
     }
 

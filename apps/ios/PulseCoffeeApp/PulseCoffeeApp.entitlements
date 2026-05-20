@@ -4,5 +4,21 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<!--
+		Apple Pay merchant ID. Must exist in Apple Developer (Identifiers
+		→ Merchant IDs → merchant.com.pulsecoffee.app) before runtime
+		Apple Pay sheets work. Build compiles fine without the merchant
+		registered, but Stripe's PaymentSheet will not display Apple Pay
+		as an option until the merchant ID exists, is linked to the
+		Stripe account, and has an Apple Pay Payment Processing
+		Certificate generated.
+
+		See decision-log entry "[iOS] MVP-3 — cart + Apple Pay checkout"
+		for the parallel-setup workflow.
+	-->
+	<key>com.apple.developer.in-app-payments</key>
+	<array>
+		<string>merchant.com.pulsecoffee.app</string>
+	</array>
 </dict>
 </plist>

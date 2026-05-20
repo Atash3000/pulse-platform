@@ -9,19 +9,29 @@ import SwiftUI
 /// the navigation flow is testable end-to-end.
 struct MenuView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var cart: CartManager
     @StateObject private var viewModel = MenuViewModel()
+    @State private var showCart = false
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle(title)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
+                    ToolbarItem(placement: .navigationBarLeading) {
                         Button(role: .destructive) {
                             Task { await appState.logout() }
                         } label: {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
                                 .accessibilityLabel("Sign Out")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showCart = true
+                        } label: {
+                            cartIcon
+                                .accessibilityLabel("Cart with \(cart.totalItemCount) items")
                         }
                     }
                 }
@@ -33,6 +43,34 @@ struct MenuView: View {
                 .refreshable {
                     await viewModel.load()
                 }
+                .sheet(isPresented: $showCart) {
+                    if case .loaded(let location, _) = viewModel.state {
+                        CartView(locationId: location.id)
+                    } else {
+                        // Cart can still be opened before menu loads —
+                        // CartView shows the empty state until items
+                        // get added (which requires the menu loading first).
+                        CartView(locationId: "")
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var cartIcon: some View {
+        if cart.totalItemCount > 0 {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "cart.fill")
+                Text("\(cart.totalItemCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.red, in: Capsule())
+                    .offset(x: 10, y: -10)
+            }
+        } else {
+            Image(systemName: "cart")
         }
     }
 

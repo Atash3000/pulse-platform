@@ -14,6 +14,38 @@ by entry title — search the log for the quoted title.
 
 ### Added
 
+- iOS **MVP-3 cart + Apple Pay checkout**: in-memory `CartManager`
+  (`@StateObject` at App root, propagated via `@EnvironmentObject`);
+  Stripe `PaymentSheet` with Apple Pay capability via
+  `merchant.com.pulsecoffee.app`; idempotency-key generator
+  (`SHA256(userId + sorted(cartItemIds).joined + timestamp)`, stable
+  across retries of the same checkout tap per Golden Rule #4);
+  `CheckoutViewModel` state machine (`idle → creatingOrder → ready →
+  paying → success | failed`); `CartView` with quantity steppers +
+  swipe-to-remove + empty state with "Browse Menu" CTA; `CheckoutView`
+  with backend-sourced totals + PaymentSheet button + success / failure
+  screens; toolbar cart icon in `MenuView` with item-count badge;
+  `ItemDetailView` "Add to Cart" button wired. — see decision-log
+  entry *"[iOS] MVP-3 — cart + Apple Pay checkout"*.
+
+- iOS `AppConfig.apiBaseURL` reads `DEBUG_API_BASE_URL` from the
+  process environment in Debug builds, falling back to
+  `http://localhost:3000/api/v1`. Lets a developer sideloading the
+  app to a real iPhone point at an ngrok / Cloudflare tunnel without
+  editing code. Stripped from Release builds.
+
+- iOS Apple Pay capability (`com.apple.developer.in-app-payments`)
+  added to `PulseCoffeeApp.entitlements` with merchant ID
+  `merchant.com.pulsecoffee.app`. Build compiles before the merchant
+  is registered in Apple Developer; runtime Apple Pay sheet starts
+  showing the option once the merchant ID + Stripe link + Apple Pay
+  Payment Processing Certificate are all set up.
+
+- iOS test coverage: **CartManagerTests (13)**, **IdempotencyKeyTests
+  (9)**, **CheckoutViewModelTests (9)**, all locked in via
+  `xcodebuild` on iPhone 17 Pro Simulator. iOS suite total: **108
+  tests / 108 passing** (was 77 after Commit A).
+
 - iOS authentication feature: real `LoginView` and `RegisterView` SwiftUI
   forms backed by `POST /auth/login` and `POST /auth/register`. Root
   `AppState` (`@MainActor` ObservableObject) owns the auth lifecycle —
