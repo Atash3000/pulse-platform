@@ -76,6 +76,38 @@ clean:
 # The path pattern `PulseCoffeeApp-*` is project-specific (Xcode appends
 # a unique hash), so this command only touches our app's cache — other
 # Xcode projects on the same machine are unaffected.
+#
+# Robust against Xcode being open. Xcode keeps files in
+# `Build/Intermediates.noindex/` mmap'd while the IndexStoreDB is active,
+# which makes a plain `rm -rf` fail with "Directory not empty". This
+# target works around it by **renaming** the DerivedData directory first
+# (`mv` only touches the directory entry, not the held-open inodes — so
+# it works even when files inside are locked), then deleting the
+# renamed copy on a best-effort basis. After the rename Xcode's next
+# build sees a fresh DerivedData regardless of whether the async delete
+# completes; any leftover `.trash.<ts>.<pid>` directories are harmless
+# and disappear at next reboot (or can be manually wiped).
 clean-derived:
-	rm -rf ~/Library/Developer/Xcode/DerivedData/PulseCoffeeApp-*
-	@echo "DerivedData cache cleared. Next build will be from scratch."
+	@DERIVED="$$HOME/Library/Developer/Xcode/DerivedData"; \
+	if [ ! -d "$$DERIVED" ]; then \
+		echo "DerivedData directory not found — already clean."; \
+		exit 0; \
+	fi; \
+	cd "$$DERIVED" || exit 0; \
+	found=0; \
+	for d in PulseCoffeeApp-*; do \
+		[ -d "$$d" ] || continue; \
+		found=1; \
+		trash="$$d.trash.$$(date +%s).$$$$"; \
+		if mv "$$d" "$$trash" 2>/dev/null; then \
+			rm -rf "$$trash" 2>/dev/null || true; \
+		else \
+			echo "Note: $$d could not be renamed (Xcode may be holding the directory itself). Close Xcode and retry if needed."; \
+		fi; \
+	done; \
+	if [ "$$found" -eq 1 ]; then \
+		echo "DerivedData cleared. Next build will be from scratch."; \
+		echo "(Any leftover .trash dirs in DerivedData are harmless and will be removed at next reboot.)"; \
+	else \
+		echo "No PulseCoffeeApp DerivedData found — already clean."; \
+	fi
