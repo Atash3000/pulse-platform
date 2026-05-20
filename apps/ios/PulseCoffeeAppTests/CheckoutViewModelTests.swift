@@ -156,6 +156,33 @@ final class CheckoutViewModelTests: XCTestCase {
         }
     }
 
+    /// Regression: a Stripe-passed-through 401 from /checkout used to
+    /// kick the user back to the login screen. Now it should produce a
+    /// `.failed` state with a generic "temporarily unavailable" message
+    /// — no logout, no Stripe-key leakage in the user-visible copy.
+    func test_placeOrder_downstream401_surfacesGenericCopy_andDoesNotLogout() async {
+        StubURLProtocol.stub(
+            statusCode: 401,
+            body: #"{"statusCode":401,"message":"Invalid API Key provided: sk_test_..."}"#
+        )
+        let (vm, cart, appState) = makeVMLoggedIn()
+        cart.add(item: makeItem())
+
+        await vm.placeOrder()
+
+        if case .failed(let message) = vm.state {
+            XCTAssertTrue(message.contains("temporarily unavailable"), "got: \(message)")
+            XCTAssertFalse(message.contains("API Key"), "User-visible copy must not leak Stripe key prefixes")
+            XCTAssertFalse(message.contains("sk_test"), "User-visible copy must not leak Stripe key prefixes")
+        } else {
+            XCTFail("Expected .failed, got \(vm.state)")
+        }
+
+        // The user must still be logged in — APIClient correctly
+        // identified this as a non-JWT 401.
+        XCTAssertNotEqual(appState.authState, .loggedOut)
+    }
+
     func test_placeOrder_429_surfacesRateLimitedCopy() async {
         StubURLProtocol.stub(statusCode: 429, body: "{}")
         let (vm, cart, _) = makeVMLoggedIn()

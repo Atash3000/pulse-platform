@@ -234,11 +234,24 @@ final class CheckoutViewModel: ObservableObject {
                 // Validation error: backend rejected the cart shape
                 // or pricing input. Surface the structured message.
                 return serverError.message
+            case 401:
+                // Downstream-service 401 that APIClient correctly
+                // identified as non-JWT (otherwise we'd be on the
+                // `.authRequired` branch). The backend's response
+                // message may leak implementation details (Stripe API
+                // key prefixes, internal service names) — don't
+                // surface the raw text to the customer.
+                return "Checkout is temporarily unavailable. Please try again in a moment."
             case 409:
                 // PAYMENT_IN_FLIGHT — the idempotency key matches an
                 // in-progress payment from another tap. User shouldn't
                 // see this normally (the button-lock prevents it).
                 return "A payment is already in progress for this order. Please wait a moment."
+            case 500..<600:
+                // Internal server errors — backend bug or downstream
+                // outage. Generic copy; the operator-facing detail
+                // is in Sentry via the breadcrumb trail.
+                return "Checkout failed on the server side. Please try again in a moment."
             default:
                 return serverError.message
             }

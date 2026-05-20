@@ -2389,3 +2389,72 @@ The script does NOT invalidate the in-memory menu cache (Redis). The README docu
 - Cache invalidation: pub/sub from seed scripts so the backend doesn't need restart.
 - `seed:menu-modifiers` if the iOS app adds a customization sheet.
 - UNIQUE constraint on `(location_id, name)` once the spec confirms no temporary-renaming pattern is desired.
+
+---
+
+## 2026-05-19 — [iOS] APIClient 401 heuristic — distinguishing JWT failures from downstream-service 401s
+
+**Decision:** `APIClient.perform()` no longer treats every HTTP 401 as a JWT authentication failure. It now decodes the response body and inspects the error message: if it matches NestJS's auth-guard patterns (`"Unauthorized"`, `"jwt expired"`, `"no auth token"`, etc.), the existing refresh-and-retry flow runs. Otherwise the 401 is surfaced as `APIError.serverError(_, 401)` — the user is **not** logged out.
+
+**The bug that prompted this:**
+
+MVP-3 verification revealed that "Proceed to Checkout" was kicking authenticated users back to the Sign In screen. Initial diagnosis assumed an iOS auth bug. Direct curl reproduction against the local backend showed the actual cause:
+
+```
+HTTP 401
+{"statusCode":401,"message":"Invalid API Key provided: sk_test_..."}
+```
+
+The backend's `STRIPE_SECRET_KEY` was a placeholder string (`sk_test_...` literal). The `CheckoutService` tried to create a Stripe PaymentIntent, Stripe rejected the request with 401, and NestJS passed the 401 through to the iOS client without translation. iOS's APIClient saw a 401 and ran the JWT-refresh-and-retry sequence; refresh succeeded but the retry still 401'd (Stripe still rejecting); APIClient marked `isRetry = true` and posted `Notification.Name.authRequired`; AppState observed and called `logout()`. User landed at Sign In with no actionable feedback.
+
+**Why the heuristic is the right layer:**
+
+The root-cause fix is on the backend — Stripe API-key errors should NEVER be returned as 401 to the iOS client (they should be 502 Bad Gateway or 500 with a clear translation). But iOS shouldn't be a single point of failure that turns ANY backend 401 into a force-logout. Two layers of defense beats one:
+
+1. Backend gets fixed (set the real Stripe key, eventually wrap downstream-service errors).
+2. iOS heuristic catches the same class of mis-mapped 401 from any future downstream service (Clover credential errors, AWS SES auth failures, etc.) and surfaces it as an actionable server error instead of a logout.
+
+**The heuristic, in code:**
+
+```swift
+private static func isJWTAuthFailure(_ serverError: ServerError?) -> Bool {
+    guard let message = serverError?.message, !message.isEmpty else {
+        return true  // unparseable / empty → fall back to JWT-failure path (conservative)
+    }
+    let lower = message.lowercased()
+    if lower == "unauthorized" { return true }
+    if lower.contains("jwt") { return true }
+    if lower.contains("no auth token") { return true }
+    if lower.contains("authentication") && !lower.contains("api key") { return true }
+    return false
+}
+```
+
+The four positive patterns cover NestJS's default `UnauthorizedException` ("Unauthorized") and the variants from `passport-jwt` ("jwt expired", "jwt malformed", "jwt signature is invalid", "No auth token"). The `"api key"` exclusion is the discriminator that catches Stripe-style downstream errors.
+
+**Conservative fallback for unparseable bodies:**
+
+If the 401 response body isn't JSON-decodable into `ServerError` (HTML error pages from a misconfigured reverse proxy, etc.), the heuristic returns `true` — i.e., assumes JWT failure and runs the refresh path. Worst case the user pays one extra refresh round-trip on an unrelated error. Better than the old behavior of always logging the user out.
+
+**Why not fix it on the backend only:**
+
+The backend fix is correct and should also happen, but waiting on it would block iOS personal-MVP testing every time the manager hits this class of misconfiguration. The iOS heuristic is local, testable, and protects against an entire category of future bugs — well worth its weight (12 lines of code + 5 regression tests).
+
+**What the user-visible copy now looks like:**
+
+`CheckoutViewModel.message(for: APIError.serverError(_, 401))` returns `"Checkout is temporarily unavailable. Please try again in a moment."` — generic copy. The Stripe error message stays out of the user's face (would have leaked the `sk_test_…` prefix); the diagnostic detail lives in the Sentry breadcrumb with the structured `is_jwt_failure: false` data attribute.
+
+**Tests locked in (5 new in `APIClientTests`):**
+
+- `test_get_401_withStripeDownstreamMessage_doesNotTriggerRefresh` — the exact regression. Asserts the original 401 surfaces as `serverError(401)` AND that no refresh round-trip was made.
+- `test_get_401_withGenericDownstreamServiceError_doesNotTriggerRefresh` — second variant for future downstream services.
+- `test_get_401_withUnauthorizedMessage_triggersRefresh` — verifies real auth failures still refresh.
+- `test_get_401_withJWTExpiredMessage_triggersRefresh` — covers the passport-jwt variant.
+- `test_get_401_withUnparseableBody_triggersRefreshConservatively` — covers the HTML / malformed-body case.
+
+Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surfacesGenericCopy_andDoesNotLogout`) that asserts the user-visible copy is the generic message and `appState.authState` stays `.loggedIn`.
+
+**Cross-references:**
+
+- The two existing tests `test_get_401_thenRefreshFails_throwsAuthRequired` and `test_get_401_thenRefreshSuccess_butRetry401_throwsAuthRequired` were updated to use `{"message":"Unauthorized"}` bodies (not empty `{}`) so they continue to exercise the JWT-failure path under the new heuristic.
+- Backend follow-up (not iOS chat's scope): catch Stripe `AuthenticationError` in `CheckoutService` and translate to a 502 with a clear error code (e.g., `PAYMENT_PROVIDER_AUTH`). Until that lands the heuristic is iOS's only defense.

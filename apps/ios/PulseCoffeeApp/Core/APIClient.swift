@@ -155,25 +155,56 @@ actor APIClient {
             }
 
         case 401:
-            // First 401: ask TokenRefresher for a fresh access token and
-            // retry the original request once. Second 401 (post-retry):
-            // surface `authRequired` so AppState logs the user out.
+            // A 401 from the backend can mean two structurally different
+            // things, and conflating them caused a real bug (see
+            // decision-log "[iOS] APIClient 401 heuristic — distinguishing
+            // JWT failures from downstream 401s"):
             //
-            // `Authorization` header values in this breadcrumb are
-            // redacted by `SentryRedactor.beforeSend` before the event
-            // leaves the device.
+            // 1. **The customer's JWT is bad** (NestJS AuthGuard rejected
+            //    it). Body: `{statusCode:401, message:"Unauthorized"}`.
+            //    Correct response: refresh the token, retry once, and
+            //    log the user out only if the refresh-and-retry path
+            //    also 401s.
+            //
+            // 2. **The backend has a downstream-service 401** (Stripe API
+            //    key misconfigured, Clover credentials wrong, etc.).
+            //    Body example: `{statusCode:401, message:"Invalid API
+            //    Key provided: sk_test_..."}`. The customer's auth is
+            //    fine — kicking them to login is wrong; they'd reach
+            //    the same failure on next login.
+            //
+            // Heuristic: decode the response body and check whether the
+            // message matches NestJS's auth-guard patterns. If not, treat
+            // as a generic `serverError(401)` so the caller can surface
+            // an actionable error without triggering logout.
+            let serverError = try? decoder.decode(ServerError.self, from: data)
+            let looksLikeJWTFailure = Self.isJWTAuthFailure(serverError)
+
             let crumb = Breadcrumb(level: .info, category: "api.auth")
-            crumb.message = isRetry
-                ? "401 from \(method.rawValue) \(path) — second 401, giving up"
-                : "401 from \(method.rawValue) \(path) — attempting refresh"
+            crumb.message = looksLikeJWTFailure
+                ? (isRetry
+                    ? "401 from \(method.rawValue) \(path) — second 401 after refresh, surfacing authRequired"
+                    : "401 from \(method.rawValue) \(path) — JWT failure, attempting refresh")
+                : "401 from \(method.rawValue) \(path) — downstream-service 401 (not a JWT issue), surfacing as serverError"
             crumb.type = "http"
             crumb.data = [
                 "method": method.rawValue,
                 "path": path,
                 "status_code": 401,
                 "is_retry": isRetry,
+                "is_jwt_failure": looksLikeJWTFailure,
             ]
             SentrySDK.addBreadcrumb(crumb)
+
+            if !looksLikeJWTFailure {
+                // Downstream 401 — pass through to the caller as a
+                // server error. Caller's APIError mapping shows a
+                // generic copy; user is NOT logged out.
+                if let serverError {
+                    throw APIError.serverError(serverError, statusCode: 401)
+                }
+                throw APIError.unexpected(statusCode: 401)
+            }
 
             if isRetry {
                 NotificationCenter.default.post(name: .authRequired, object: nil)
@@ -208,6 +239,35 @@ actor APIClient {
             }
             throw APIError.unexpected(statusCode: http.statusCode)
         }
+    }
+
+    /// Returns true if a 401 response body looks like a NestJS AuthGuard
+    /// rejection (JWT missing / invalid / expired). Returns false for
+    /// downstream-service 401s (Stripe API-key error, Clover auth failure,
+    /// etc.) that the backend may have passed through without translation.
+    ///
+    /// Heuristic — matches NestJS's standard auth-failure messages:
+    /// - `"Unauthorized"` — the default AuthGuard reject message.
+    /// - Anything containing `"jwt"` — `"jwt expired"`, `"jwt malformed"`,
+    ///   `"jwt signature is invalid"`, etc. from passport-jwt.
+    /// - `"No auth token"` — common passport variant.
+    ///
+    /// Conservative fallback: if the body is unparseable, treat as a JWT
+    /// failure so the refresh path still runs. Worst case the user gets
+    /// an extra refresh round-trip on an unrelated error; that's strictly
+    /// better than the old behavior of always logging them out.
+    private static func isJWTAuthFailure(_ serverError: ServerError?) -> Bool {
+        guard let message = serverError?.message, !message.isEmpty else {
+            return true
+        }
+        let lower = message.lowercased()
+        if lower == "unauthorized" { return true }
+        if lower.contains("jwt") { return true }
+        if lower.contains("no auth token") { return true }
+        if lower.contains("authentication") && !lower.contains("api key") {
+            return true
+        }
+        return false
     }
 
     private func buildRequest(

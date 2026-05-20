@@ -93,9 +93,10 @@ final class APIClientTests: XCTestCase {
     }
 
     func test_get_401_thenRefreshFails_throwsAuthRequired() async {
-        // Original 401, refresh also 401 → propagate authRequired and
-        // post notification.
-        StubURLProtocol.stub(statusCode: 401, body: "{}")
+        // Original 401 (JWT-failure body, the message must match the
+        // NestJS auth-guard pattern so APIClient triggers refresh),
+        // refresh also 401 → propagate authRequired and post notification.
+        StubURLProtocol.stub(statusCode: 401, body: #"{"statusCode":401,"message":"Unauthorized"}"#)
         StubURLProtocol.stub(statusCode: 401, body: "{}")
 
         let notificationExpectation = expectation(forNotification: .authRequired, object: nil)
@@ -117,10 +118,12 @@ final class APIClientTests: XCTestCase {
     func test_get_401_thenRefreshSuccess_butRetry401_throwsAuthRequired() async {
         // Edge case: refresh produces a new token, but by the time we
         // retry the customer was disabled / token revoked → second 401.
-        // We surface authRequired and post the notification.
-        StubURLProtocol.stub(statusCode: 401, body: "{}")
+        // Both 401 bodies use the NestJS auth-guard pattern so APIClient's
+        // heuristic identifies them as JWT failures. We surface
+        // authRequired and post the notification.
+        StubURLProtocol.stub(statusCode: 401, body: #"{"statusCode":401,"message":"Unauthorized"}"#)
         StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"new"}"#)
-        StubURLProtocol.stub(statusCode: 401, body: "{}")
+        StubURLProtocol.stub(statusCode: 401, body: #"{"statusCode":401,"message":"Unauthorized"}"#)
 
         let notificationExpectation = expectation(forNotification: .authRequired, object: nil)
 
@@ -136,6 +139,109 @@ final class APIClientTests: XCTestCase {
         }
 
         await fulfillment(of: [notificationExpectation], timeout: 1.0)
+    }
+
+    // MARK: - 401 heuristic — JWT failure vs downstream-service 401
+
+    /// Regression for the bug where a Stripe-passed-through 401 kicked
+    /// the user back to the login screen. The Stripe error body
+    /// (`{"message":"Invalid API Key provided: sk_test_..."}`) doesn't
+    /// match the NestJS auth-guard pattern, so APIClient must treat it
+    /// as a generic server error — NOT trigger refresh + retry +
+    /// force-logout.
+    func test_get_401_withStripeDownstreamMessage_doesNotTriggerRefresh() async {
+        StubURLProtocol.stub(
+            statusCode: 401,
+            body: #"{"statusCode":401,"message":"Invalid API Key provided: sk_test_..."}"#
+        )
+        let client = makeClient(token: "valid-jwt", refreshToken: "valid-refresh")
+
+        do {
+            let _: RefreshResponse = try await client.get("/checkout")
+            XCTFail("Expected APIError.serverError")
+        } catch APIError.serverError(let inner, let code) {
+            XCTAssertEqual(code, 401)
+            XCTAssertTrue(inner.message.contains("Invalid API Key"))
+        } catch {
+            XCTFail("Expected APIError.serverError, got \(error)")
+        }
+
+        // CRITICAL: only ONE request — refresh path must NOT have fired.
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1,
+                       "Downstream 401 should NOT trigger a refresh round-trip")
+    }
+
+    /// Same regression, second variant: a 401 with a long-form downstream
+    /// service auth message (e.g., hypothetical Clover credential error)
+    /// that doesn't contain "Unauthorized" or "jwt" must also pass through.
+    func test_get_401_withGenericDownstreamServiceError_doesNotTriggerRefresh() async {
+        StubURLProtocol.stub(
+            statusCode: 401,
+            body: #"{"statusCode":401,"message":"POS credentials rejected by merchant API"}"#
+        )
+        let client = makeClient(token: "valid-jwt", refreshToken: "valid-refresh")
+
+        do {
+            let _: RefreshResponse = try await client.get("/orders/abc")
+            XCTFail("Expected APIError.serverError")
+        } catch APIError.serverError(_, let code) {
+            XCTAssertEqual(code, 401)
+        } catch {
+            XCTFail("Expected APIError.serverError, got \(error)")
+        }
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
+    }
+
+    /// Verifies the heuristic still does the right thing for genuine
+    /// NestJS auth-guard 401s — refresh path runs, retry follows.
+    func test_get_401_withUnauthorizedMessage_triggersRefresh() async throws {
+        StubURLProtocol.stub(statusCode: 401, body: #"{"statusCode":401,"message":"Unauthorized"}"#)
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"new"}"#)
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"final"}"#)
+
+        let client = makeClient(token: "expired", refreshToken: "valid-refresh")
+        let response: RefreshResponse = try await client.get("/protected")
+
+        XCTAssertEqual(response.accessToken, "final")
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 3,
+                       "JWT-failure 401 should trigger original → refresh → retry (3 requests)")
+    }
+
+    /// Verifies that JWT-expiry-style messages from passport-jwt also
+    /// trigger refresh (case-insensitive `"jwt"` substring match).
+    func test_get_401_withJWTExpiredMessage_triggersRefresh() async throws {
+        StubURLProtocol.stub(statusCode: 401, body: #"{"statusCode":401,"message":"jwt expired"}"#)
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"new"}"#)
+        StubURLProtocol.stub(statusCode: 200, body: #"{"access_token":"final"}"#)
+
+        let client = makeClient(token: "expired", refreshToken: "valid-refresh")
+        let response: RefreshResponse = try await client.get("/protected")
+
+        XCTAssertEqual(response.accessToken, "final")
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 3)
+    }
+
+    /// Verifies that a 401 with NO decodable body (e.g., HTML error page
+    /// from a misconfigured reverse proxy) falls back to the
+    /// conservative refresh path. Worst case is one extra refresh
+    /// round-trip on an unparseable error; better than silently
+    /// surfacing a generic error and missing a real token expiry.
+    func test_get_401_withUnparseableBody_triggersRefreshConservatively() async {
+        StubURLProtocol.stub(statusCode: 401, body: "<html>502 Bad Gateway</html>")
+        StubURLProtocol.stub(statusCode: 401, body: "{}") // refresh also fails
+
+        let client = makeClient(token: "expired", refreshToken: "expired")
+
+        do {
+            let _: RefreshResponse = try await client.get("/protected")
+            XCTFail("Expected APIError.authRequired")
+        } catch APIError.authRequired {
+            // expected — refresh attempt fired and also failed
+        } catch {
+            XCTFail("Expected APIError.authRequired, got \(error)")
+        }
+        XCTAssertGreaterThanOrEqual(StubURLProtocol.capturedRequests.count, 2,
+                                    "Unparseable 401 should still attempt refresh")
     }
 
     // MARK: - 429 → rateLimited
