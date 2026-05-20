@@ -51,6 +51,7 @@ The fix is manual: open the generated migration, delete the duplicate `CREATE TY
 ```bash
 npm run seed:feature-flags    # 12 flags from spec 3.5. Idempotent.
 npm run seed:dev              # 1 location with hours/settings/pricing rule. Idempotent.
+npm run seed:menu             # 1 Coffee category + 9 standard drinks + inventory. Idempotent.
 ```
 
 `seed:dev` creates "Pulse Coffee — Main St" with:
@@ -58,7 +59,37 @@ npm run seed:dev              # 1 location with hours/settings/pricing rule. Ide
 - `current_wait_minutes=5`, `scheduled_ordering=true`, `max_schedule_days=7`
 - Pricing rule: `tax_rate_bps=888` (≈8.875% NYC), `tip_options=[15, 18, 20, 25]`
 
-Both seeds are idempotent — safe to re-run; they upsert by natural key.
+`seed:menu` creates one **Coffee** category and nine items for the
+seeded location (Espresso, Americano, Macchiato, Cortado, Cappuccino,
+Cold Brew, Latte, Mocha, Oat Milk Latte). Inventory rows are created
+on first run with `available=true`; subsequent runs **leave inventory
+alone** so that operator-managed sold-out state (set via the admin
+dashboard) is never clobbered. Depends on `seed:dev` having run first
+(it looks up the location by name).
+
+All three seeds are idempotent — safe to re-run; they upsert by natural
+key. Items, however, are upserted as the source of truth (re-running
+the seed will update prices/descriptions to match the script).
+
+After `seed:menu`, restart the backend or flush Redis (`docker exec
+pulse-redis redis-cli FLUSHDB`) before `GET /api/v1/menu` reflects the
+new data — the in-memory menu cache holds a 60-second TTL.
+
+### Cleaning up duplicate categories (dev-only)
+
+```bash
+npm run cleanup:duplicate-categories
+```
+
+If your local dev DB has duplicate `menu_categories` rows for the same
+`(location_id, name)` pair (a hazard of manual SQL inserts during iOS
+testing), this script keeps the lowest-`sort_order` row, re-points any
+items in the orphan rows, and deletes the orphans — all in a single
+transaction. Idempotent: on a clean DB it exits with "no duplicates
+found" and zero changes. **Not a TypeORM migration** — never runs in
+production; safe-to-skip on fresh databases. See the decision-log
+entry "Menu seed + duplicate-category cleanup pattern" for the full
+design rationale.
 
 ## Environment variables
 

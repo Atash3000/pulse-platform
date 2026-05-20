@@ -2243,3 +2243,149 @@ Both paths also throw `APIError.authRequired` for the caller's flow control. The
 - When real profile content arrives (payment methods, address book, dietary preferences, order history), reintroduce the tab. The toolbar gear can absorb it as a "Settings" entry meanwhile, or be deleted in favor of the tab.
 
 **Tradeoff acknowledged:** the spec's Part 6 project structure ([`PulsCoffee_Final_Spec.pdf` page 22]) lists a `Features/Profile/ProfileView.swift`. Skipping it for personal-MVP is a deliberate divergence, not a typo — captured here so a future reader doesn't think it was a forgotten directory.
+
+---
+
+## 2026-05-19 — [iOS] MVP-3 — cart + Apple Pay checkout
+
+**Decision:** MVP-3 lands the in-memory cart, Stripe `PaymentSheet` checkout with Apple Pay capability, idempotency-key generation, and the success / failure / replay state machine. The cart is `@StateObject` at the App root and propagated via `@EnvironmentObject`. The checkout flow is gated by `isProcessing` for double-tap protection, uses a stable idempotency key for network-blip retries, and never marks orders paid — that's the backend webhook's job (Golden Rule #3).
+
+**What ships:**
+
+- `Core/CartManager.swift` — in-memory `@MainActor ObservableObject` holding `[CartManager.Line]`. Add (with quantity-merge for same-item-same-modifiers), set-quantity (zero removes the line), remove, clear. Computed: `lineCount`, `totalItemCount`, `isEmpty`, `itemIds` (used by the idempotency key generator), `toCheckoutItems()` (wire-format conversion).
+- `Core/IdempotencyKey.swift` — `SHA256(userId + sorted(cartItemIds).joined("|") + timestamp)` → 64-char hex. Sort step makes the key independent of cart-line ordering; same input always produces the same output. Locked in by 9 tests in `IdempotencyKeyTests`.
+- `Features/Cart/CartView.swift` — sectioned list of cart lines with per-row quantity steppers + swipe-to-remove. Empty state with "Browse Menu" CTA. "Proceed to Checkout" button. **No locally-computed total** — Golden Rule #8 forbids client-side money math; cart shows per-line `displayPrice` only, and the real subtotal / tax / tip / total appear on `CheckoutView` from the backend response.
+- `Features/Checkout/CheckoutViewModel.swift` — 5-state machine (`idle / creatingOrder / ready / paying / success / failed`). Generates idempotency key once per "Place Order" tap and reuses it across retries until success or cart change.
+- `Features/Checkout/CheckoutView.swift` — totals summary + `PaymentSheet.PaymentButton`. Success screen with order ID + total. Failure screen with "Try Again" (reuses idempotency key).
+- `Models/CheckoutRequest.swift`, `Models/CheckoutResponse.swift` — Codable wire types with explicit CodingKeys per convention.
+- `Features/Menu/ItemDetailView.swift` — wired "Add to Cart" button: tap adds to cart, button flashes "Added!" for 700ms, then auto-dismisses to menu. Disabled when item is sold-out (`!item.available`).
+- `Features/Menu/MenuView.swift` — toolbar gains a cart icon with item-count badge (red capsule, "cart.fill" glyph when non-empty, "cart" when empty). Tap opens `CartView` as a sheet.
+- `PulseCoffeeApp.entitlements` — Apple Pay capability with merchant ID `merchant.com.pulsecoffee.app`. Build compiles regardless of whether the merchant is registered in Apple Developer; the runtime Apple Pay sheet just won't show as a payment option until the merchant ID exists and is linked to Stripe.
+- `AppConfig.swift` — `DEBUG_API_BASE_URL` environment-variable override for the Debug build's API URL. Lets a sideload-to-iPhone test point at an ngrok / Cloudflare tunnel without editing code.
+
+**31 new tests** across `CartManagerTests` (13), `IdempotencyKeyTests` (9), `CheckoutViewModelTests` (9). Total iOS suite: **108 / 108 passing**.
+
+**Idempotency key — the timestamp-stability invariant:**
+
+Golden Rule #4 protects against double-charges from network blips. The protection only works if the iOS-generated idempotency key is **stable across retries of the same user action**. `CheckoutViewModel` enforces this by capturing the key once per "Place Order" tap into `self.idempotencyKey` and reusing it on subsequent calls until either:
+
+- A success is reached (idempotency key cleared on `.success` transition; next attempt is a new payment).
+- The cart contents change (caller calls `resetIdempotencyKey()`; the cart-modify path naturally invalidates the previous key because the cart line IDs differ).
+
+Locked in by `test_placeOrder_retryAfterFailure_reusesSameIdempotencyKey` which fails 500 / 500 / 200 against the same `placeOrder()` invocation and asserts all three captured request bodies carry the same `idempotencyKey` value.
+
+**iOS never marks orders paid — Golden Rule #3:**
+
+`PaymentSheet`'s `.completed` result means Stripe accepted the confirmation. The actual `order_status = PAID` transition happens on the backend's `stripe.webhook` handler — completely server-to-server. iOS just routes to a success screen with the order ID; MVP-4 (next commit) adds the status-polling loop that watches the order transition `PAID → ACCEPTED → IN_PROGRESS → READY`.
+
+**Apple Pay merchant ID — placeholder workflow:**
+
+The entitlement file ships with `merchant.com.pulsecoffee.app` hardcoded. Manager registers this exact ID in Apple Developer (Identifiers → Merchant IDs), links it to Stripe (Stripe dashboard → Settings → Payment methods → Apple Pay), and generates the Apple Pay Payment Processing Certificate. **No code change needed at any point in the merchant-setup flow** — the value the entitlement names is the same value the manager registers. The build compiles immediately; the runtime Apple Pay sheet starts working when the three setup steps complete.
+
+This pattern avoids a "placeholder vs production" swap and the risk of forgetting to flip the swap before TestFlight.
+
+**`DEBUG_API_BASE_URL` environment-variable override:**
+
+`AppConfig.apiBaseURL` in Debug builds checks `ProcessInfo.processInfo.environment["DEBUG_API_BASE_URL"]` first, falling back to `http://localhost:3000/api/v1`. Use case: sideloading to a real iPhone via Xcode for end-to-end Apple Pay testing — the phone can't reach `http://localhost` on the dev's Mac, but it can reach an ngrok / Cloudflare tunnel pointed at the Mac. Set `DEBUG_API_BASE_URL=https://abc123.ngrok.app/api/v1` in the Xcode scheme; no code change needed.
+
+The ATS exception in `Info.plist` only allows `localhost`; tunnel URLs must be HTTPS (which both ngrok and Cloudflare provide by default, no extra config).
+
+**What MVP-3 does NOT include — explicit gaps:**
+
+- **Order status polling.** Lands in MVP-4. The success screen today shows the order ID and total but doesn't display live status. The customer will know their order is being made because they ordered it; staff sees it appear in their Telegram alert. Polling closes the customer-facing loop ("your coffee is ready").
+- **Modifier selection UI.** Items with `modifierGroups[].required == true` will fail at backend checkout validation (`MODIFIER_GROUP_REQUIRED` error code). The MenuViewModel renders the error verbatim. Adding modifier selection is a Phase-2 polish step; the personal-MVP scope assumes items being tested don't require user selection.
+- **Tip selector UI.** `CheckoutViewModel.tipPercent` defaults to 0 and is never set from the UI. Tip can be added at the counter (cash) or as a polish step later. The CheckoutView's "Order summary" section shows a "Tip" line with "$0.00" — correct backend output for a zero-tip order.
+- **Saved cards / Apple Pay default selection.** Stripe's PaymentSheet handles its own user defaults; we don't try to influence it.
+
+---
+
+## 2026-05-19 — Menu seed + duplicate-category cleanup pattern
+
+**Decision:** add `npm run seed:menu` (idempotent menu seeder) and `npm run cleanup:duplicate-categories` (one-time dev-DB hygiene tool) under `apps/api/scripts/`. The cleanup tool is **deliberately not a TypeORM migration** — it is a standalone script that production deploys never run, because the duplicate `menu_categories` rows it cleans up have only ever appeared in local-dev databases (created during iOS Commit A verification via manual SQL inserts).
+
+**Why the cleanup is a script, not a migration:**
+
+TypeORM migrations run automatically at boot in production via the Phase 2 deploy workflow. A "cleanup duplicates" migration would be a no-op against production (production has never had duplicates) but it builds the wrong mental model — "this codebase routinely needs to deduplicate its own data." Migrations should be schema changes and one-way data transforms; ad-hoc local-state repair belongs in a script. The `package.json` `cleanup:duplicate-categories` script never appears in any CI or deploy step.
+
+This decision composes with the `engines.node` and CI-pin entries: production gets only the strict subset of operations (migrations, builds, tests), local dev gets the loose set (cleanup, seed:menu, seed:dev).
+
+**Why not add a UNIQUE constraint on `(location_id, name)`:**
+
+A UNIQUE index would have prevented the duplicates from ever being created. We considered and rejected it for now:
+
+- The spec allows future operational patterns like a temporary "Latte (Holiday)" category that gets renamed back to "Latte" — a UNIQUE constraint blocks that flow mid-rename.
+- The duplicate pattern is from a deprecated manual-insert workflow that `seed:menu` itself replaces. Once devs stop hand-rolling SQL, the duplicate failure mode disappears at its root.
+- Adding the constraint via migration is a schema change that should be a separate decision (with its own rollback plan if a Phase 2 feature wants the relaxed shape back).
+
+The seed:menu script uses upsert-by-(location_id, name) which enforces uniqueness in *practice* without enforcing it at the *schema* level — same outcome, fewer foreclosed futures.
+
+**`seed:menu` idempotency strategy:**
+
+Follows the `seed-dev-data.ts` pattern (find-by-natural-key + update-or-insert). Three different idempotency rules apply per table:
+
+| Table | Natural key | On hit |
+|---|---|---|
+| `menu_categories` | `(location_id, name)` | Update `sort_order` + `active`; the seed is the source of truth for these. |
+| `menu_items` | `(category_id, name)` | Update `description` + `base_price_cents` + `active`; the seed is the source of truth for menu pricing. |
+| `inventory` | `(item_id, location_id)` (UNIQUE-enforced) | **Leave alone.** Inventory carries operator-managed state — a barista marking "Oat Milk Latte" sold out via the admin dashboard must NOT be undone by re-running the seed. The seed only INSERTs missing inventory rows. |
+
+The inventory asymmetry is the subtle bit and is the most likely place a future engineer "tidies up" by adding a `.save(...)` call. The script comment names this explicitly to prevent that regression.
+
+**`seed:menu` items:**
+
+Nine drinks, all in a single `Coffee` category:
+
+| Item | Price (¢) | Notes |
+|---|---|---|
+| Espresso | 350 | |
+| Americano | 450 | |
+| Macchiato | 500 | |
+| Cortado | 500 | |
+| Cappuccino | 550 | |
+| Cold Brew | 550 | |
+| Latte | 650 | |
+| Mocha | 600 | |
+| Oat Milk Latte | 725 | Standard +$0.75 oat surcharge over Latte. Separate item rather than a modifier — matches the iOS flat-tile UX. |
+
+**No `modifier_groups` seeded.** The schema supports size/milk modifiers but the Phase 1 menu is intentionally flat: Oat Milk Latte is its own item, not "Latte + oat milk modifier." If/when the iOS UX gains a customization sheet, a separate `seed:menu-modifiers` lands.
+
+**Cleanup algorithm — determinism over speed:**
+
+Picks the keeper by `ORDER BY sort_order ASC, id ASC`. Tiebreaker on UUID lexicographic order is arbitrary but stable — running the cleanup twice always picks the same keeper. The `menu_categories` table has no `created_at` column, so "earliest created" is not available as a tiebreaker; sort_order is the only chronological-ish signal.
+
+Re-points orphan items BEFORE deleting orphan categories. Order matters: the FK from `menu_items.category_id → menu_categories.id` has ON DELETE CASCADE, so deleting categories first would cascade-delete the items. Wrapped in a single transaction so partial failure (e.g., a unique-constraint violation if a hand-rolled SQL added one) leaves nothing dangling.
+
+**Item-level dedup is OUT OF SCOPE:**
+
+The schema also has no unique constraint on `(category_id, name)`, but the iOS-Commit-A bug only created duplicate categories, not duplicate items. The cleanup script is scoped to categories; if/when item-level dupes appear, a follow-up tool would handle them — same find-keeper-repoint-delete pattern but with `orders.menu_item_id` references to re-point too (more complex; defer until needed).
+
+**Acceptance verification (run on dev DB during this commit):**
+
+- Cleanup on dirty DB → reports 1 duplicate group resolved, 1 orphan deleted, 1 item re-pointed.
+- Cleanup on clean DB → reports "no duplicates found", zero changes.
+- `seed:menu` 1st run → categories: inserted=0 updated=1 (Coffee category already existed post-cleanup); items: inserted=4 updated=5 (4 new items: Macchiato, Cortado, Cold Brew, Mocha); inventory: inserted=4 left_alone=5.
+- `seed:menu` 2nd run → categories: 0 inserts; items: 0 inserts, 9 updates; inventory: 0 inserts, 9 left alone.
+- Post-`seed:menu` `GET /api/v1/menu?locationId=…` returns one Coffee category with all 9 items.
+- **Operator-state preservation pinned**: Oat Milk Latte's `inventory.available=false` (set before the seed ran) survives both seed runs.
+
+**Cache invalidation:**
+
+The script does NOT invalidate the in-memory menu cache (Redis). The README documents the fix: restart the backend or `redis-cli FLUSHDB`. A future enhancement could publish a Redis pub/sub message that `MenuCache` subscribes to — out of scope for a one-off seed.
+
+**Files added:**
+
+- `apps/api/scripts/seed-menu.ts`
+- `apps/api/scripts/cleanup-duplicate-categories.ts`
+- `apps/api/package.json` — added `seed:menu` and `cleanup:duplicate-categories` npm scripts
+- `apps/api/README.md` — Seeds section updated
+
+**No tests added.** Existing seed scripts (`feature-flags.seed.ts`, `seed-dev-data.ts`) have no spec files; idempotency is verified by running the script twice and observing identical counts. Adding a unit spec just for these would be inconsistent with the codebase convention. The acceptance check is documented in this entry and lives alongside the seed:dev convention.
+
+**Total test count unchanged (347):** this commit is dev-tooling, not application logic.
+
+**Future follow-ups (not blocking iOS Phase 1):**
+
+- Item-level cleanup tool if duplicate items ever appear.
+- Cache invalidation: pub/sub from seed scripts so the backend doesn't need restart.
+- `seed:menu-modifiers` if the iOS app adds a customization sheet.
+- UNIQUE constraint on `(location_id, name)` once the spec confirms no temporary-renaming pattern is desired.

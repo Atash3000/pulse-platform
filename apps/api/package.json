@@ -23,7 +23,9 @@
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
     "migration:show": "typeorm-ts-node-commonjs migration:show -d src/database/data-source.ts",
     "seed:feature-flags": "ts-node -r tsconfig-paths/register src/database/seeds/feature-flags.seed.ts",
-    "seed:dev": "ts-node -r tsconfig-paths/register scripts/seed-dev-data.ts"
+    "seed:dev": "ts-node -r tsconfig-paths/register scripts/seed-dev-data.ts",
+    "seed:menu": "ts-node -r tsconfig-paths/register scripts/seed-menu.ts",
+    "cleanup:duplicate-categories": "ts-node -r tsconfig-paths/register scripts/cleanup-duplicate-categories.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.10",
