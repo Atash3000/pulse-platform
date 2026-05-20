@@ -186,13 +186,89 @@ final class CheckoutViewModel: ObservableObject {
             addBreadcrumb(level: .info, message: "checkout.payment_canceled orderId=\(orderId)")
 
         case .failed(let error):
-            state = .failed(message: error.localizedDescription)
-            SentrySDK.capture(error: error)
+            // Stripe SDK's `error.localizedDescription` is its canonical
+            // user-facing copy ("There was an unexpected error..."), which
+            // is too generic to debug from. Pull more detail out of the
+            // NSError bridge so the Sentry event + user-visible message
+            // both carry the actual signal.
+            let detail = Self.extractPaymentFailureDetail(from: error)
+
+            state = .failed(message: detail.userMessage)
+
+            // Attach Stripe-specific context to the Sentry event so the
+            // CTO chat can pivot on `stripe.error_code` when triaging.
+            SentrySDK.capture(error: error) { scope in
+                scope.setTag(value: detail.errorCode ?? "unknown", key: "stripe.error_code")
+                scope.setTag(value: detail.errorDomain, key: "stripe.error_domain")
+                scope.setExtra(value: orderId, key: "order_id")
+                if let underlying = detail.underlyingDescription {
+                    scope.setExtra(value: underlying, key: "stripe.underlying")
+                }
+            }
+
             addBreadcrumb(
                 level: .error,
-                message: "checkout.payment_failed orderId=\(orderId) error=\(error.localizedDescription)"
+                message: "checkout.payment_failed orderId=\(orderId) " +
+                         "domain=\(detail.errorDomain) code=\(detail.errorCode ?? "?") " +
+                         "msg=\(detail.userMessage)"
             )
         }
+    }
+
+    /// Decomposes a `PaymentSheetError`'s underlying NSError so the iOS
+    /// UI and Sentry events both carry better context than Stripe's
+    /// generic localized description.
+    private static func extractPaymentFailureDetail(
+        from error: Error
+    ) -> PaymentFailureDetail {
+        let ns = error as NSError
+        let domain = ns.domain
+        let codeString = "\(ns.code)"
+
+        // Stripe SDK error domains we care about:
+        // - `STPErrorDomain`              — top-level Stripe errors
+        // - `com.stripe.lib`              — older Stripe error domain
+        // - `PKPassKitErrorDomain`        — Apple Pay configuration errors
+        //                                   (e.g. merchant ID not registered)
+        // - `NSURLErrorDomain`            — network failures during PaymentSheet
+        let isApplePayConfigError = domain.contains("PassKit")
+            || domain.contains("PKPaymentError")
+            || (ns.userInfo["STPCardErrorCodeKey"] as? String) == "invalid_request_error"
+                && (ns.userInfo["NSLocalizedFailureReason"] as? String)?
+                    .lowercased().contains("apple pay") == true
+
+        let isNetworkError = domain == NSURLErrorDomain
+
+        let userMessage: String
+        if isApplePayConfigError {
+            // Most common cause in personal-MVP: merchant ID
+            // `merchant.com.pulsecoffee.app` isn't registered in Apple
+            // Developer + linked to Stripe yet. Card entry should still
+            // work as a fallback inside the same PaymentSheet.
+            userMessage = "Apple Pay isn't configured for this device yet. Try paying with a card in the same sheet."
+        } else if isNetworkError {
+            userMessage = "Couldn't reach the payment server. Check your connection and try again."
+        } else {
+            // Stripe-side error (declined card, expired PI, etc.). Show
+            // the failure-reason if available; otherwise fall back to
+            // the SDK's generic localized description.
+            let reason = ns.userInfo[NSLocalizedFailureReasonErrorKey] as? String
+            userMessage = reason ?? error.localizedDescription
+        }
+
+        return PaymentFailureDetail(
+            userMessage: userMessage,
+            errorDomain: domain,
+            errorCode: ns.userInfo["STPErrorCodeKey"] as? String ?? codeString,
+            underlyingDescription: (ns.userInfo[NSUnderlyingErrorKey] as? NSError)?.localizedDescription
+        )
+    }
+
+    private struct PaymentFailureDetail {
+        let userMessage: String
+        let errorDomain: String
+        let errorCode: String?
+        let underlyingDescription: String?
     }
 
     /// Resets the idempotency key — call this when the cart contents

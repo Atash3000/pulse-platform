@@ -115,7 +115,14 @@ struct CheckoutView: View {
                     )
                 }
             ) {
-                Text("Pay with Apple Pay  •  \(response.display.total)")
+                // Label says "Pay" generically — Stripe's PaymentSheet
+                // opens with Apple Pay AND card entry as options, and
+                // the user picks. Earlier "Pay with Apple Pay" copy
+                // was misleading when Apple Pay isn't actually
+                // available (no card in Wallet, merchant ID not
+                // registered, etc.) — the sheet still opens but only
+                // shows card entry, contradicting the button text.
+                Text("Pay \(response.display.total)")
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
