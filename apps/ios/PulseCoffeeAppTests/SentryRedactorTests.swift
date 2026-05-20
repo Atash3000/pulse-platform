@@ -89,7 +89,12 @@ final class SentryRedactorTests: XCTestCase {
 
     func test_redact_appliesToEventRequestHeaders() {
         let event = Event()
-        let request = Request()
+        // sentry-cocoa 8.58.2's Obj-C `SentryRequest` is exposed to Swift
+        // under its Obj-C name — verified by inspecting
+        // `SourcePackages/checkouts/sentry-cocoa/Sources/Sentry/Public/SentryRequest.h`
+        // which has `@interface SentryRequest : NSObject` with no
+        // `NS_SWIFT_NAME(Request)` binding. Bare `Request` does not resolve.
+        let request = SentryRequest()
         request.headers = ["Authorization": "Bearer eyJ.secret", "Accept": "application/json"]
         event.request = request
 

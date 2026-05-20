@@ -16,14 +16,12 @@ struct MenuView: View {
             content
                 .navigationTitle(title)
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button("Sign Out", role: .destructive) {
-                                Task { await appState.logout() }
-                            }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(role: .destructive) {
+                            Task { await appState.logout() }
                         } label: {
-                            Image(systemName: "gearshape")
-                                .accessibilityLabel("Settings")
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .accessibilityLabel("Sign Out")
                         }
                     }
                 }

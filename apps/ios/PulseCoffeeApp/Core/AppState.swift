@@ -30,7 +30,14 @@ final class AppState: ObservableObject {
     @Published private(set) var authState: AuthState = .loggedOut
 
     private let api: APIClient
-    private var authRequiredObserver: NSObjectProtocol?
+
+    /// `nonisolated(unsafe)` because `NSObjectProtocol` is not Sendable
+    /// and `deinit` runs on an unspecified executor — without the
+    /// annotation, Swift 6 strict concurrency flags the deinit access
+    /// as an error. The access pattern is genuinely safe: the property
+    /// is written once in `init` (on the MainActor), then read once in
+    /// `deinit` after the actor is being torn down. No concurrent access.
+    nonisolated(unsafe) private var authRequiredObserver: NSObjectProtocol?
 
     init(api: APIClient = .shared) {
         self.api = api

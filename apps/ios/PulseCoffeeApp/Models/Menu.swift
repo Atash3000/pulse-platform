@@ -38,7 +38,7 @@ struct MenuCategory: Decodable, Identifiable, Equatable {
     }
 }
 
-struct MenuItem: Decodable, Identifiable, Equatable {
+struct MenuItem: Decodable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     let description: String?
@@ -75,7 +75,7 @@ struct MenuItem: Decodable, Identifiable, Equatable {
     }
 }
 
-struct ModifierGroup: Decodable, Identifiable, Equatable {
+struct ModifierGroup: Decodable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     let required: Bool
@@ -93,7 +93,7 @@ struct ModifierGroup: Decodable, Identifiable, Equatable {
     }
 }
 
-struct Modifier: Decodable, Identifiable, Equatable {
+struct Modifier: Decodable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     /// Price delta in integer cents (can be 0).

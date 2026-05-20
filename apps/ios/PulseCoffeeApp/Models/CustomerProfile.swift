@@ -9,7 +9,12 @@ import Foundation
 /// — they will be added when the corresponding screen needs them and the
 /// backend endpoint actually returns them (no `GET /customers/me` exists today;
 /// see decision-log "[iOS] Contracts source of truth").
-struct CustomerProfile: Decodable, Equatable {
+/// `Codable` (Decodable + Encodable). The Encodable half is used by
+/// `Keychain.saveCustomer` so the profile can be persisted alongside
+/// the access + refresh tokens — `AppState.bootstrap()` reads it back
+/// synchronously on launch to populate `.loggedIn(profile)` without a
+/// network round-trip.
+struct CustomerProfile: Codable, Equatable {
     let id: String
     let email: String
     let fullName: String
