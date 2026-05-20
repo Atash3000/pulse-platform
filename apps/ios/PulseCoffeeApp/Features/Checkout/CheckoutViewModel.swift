@@ -128,15 +128,20 @@ final class CheckoutViewModel: ObservableObject {
                 return
             }
 
-            // Construct PaymentSheet with the clientSecret + Apple Pay
-            // configuration. PaymentSheet handles Apple Pay + card
-            // entry uniformly; we don't build the card fallback.
+            // Construct PaymentSheet with the clientSecret. Apple Pay
+            // is **opt-in via `AppConfig.applePayEnabled`** because
+            // enabling it before the merchant ID is registered + linked
+            // to Stripe causes PaymentSheet to fail with a generic
+            // "unexpected error" instead of cleanly falling back to
+            // card entry. Default off; flip the flag when setup is done.
             var config = PaymentSheet.Configuration()
             config.merchantDisplayName = "Pulse Coffee"
-            config.applePay = .init(
-                merchantId: "merchant.com.pulsecoffee.app",
-                merchantCountryCode: "US"
-            )
+            if AppConfig.applePayEnabled {
+                config.applePay = .init(
+                    merchantId: "merchant.com.pulsecoffee.app",
+                    merchantCountryCode: "US"
+                )
+            }
 
             paymentSheet = PaymentSheet(
                 paymentIntentClientSecret: response.clientSecret,

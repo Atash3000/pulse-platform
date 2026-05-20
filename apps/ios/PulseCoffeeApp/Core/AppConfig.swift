@@ -93,4 +93,27 @@ enum AppConfig {
         return false
         #endif
     }
+
+    // MARK: - Apple Pay
+    //
+    // Whether to configure `PaymentSheet.Configuration.applePay` with our
+    // merchant ID at checkout. Defaults to **false** because enabling
+    // Apple Pay in iOS while it ISN'T actually set up on the Stripe side
+    // produces PaymentSheet failures with no graceful fallback — Stripe
+    // SDK 23.x's behavior is "unexpected error" instead of "show card
+    // entry instead." See decision-log entry "[iOS] Apple Pay feature
+    // flag — gate on full setup completion".
+    //
+    // To enable Apple Pay, ALL THREE of these must be done first:
+    //   1. `merchant.com.pulsecoffee.app` registered in Apple Developer
+    //      (Identifiers → Merchant IDs).
+    //   2. Merchant ID added to Stripe (Stripe dashboard → Settings →
+    //      Payment methods → Apple Pay → Add merchant ID).
+    //   3. Apple Pay Payment Processing Certificate generated via Stripe
+    //      and uploaded to Apple (Stripe dashboard walks through it).
+    //
+    // After all three: flip this constant to `true`. No other code
+    // changes needed — the entitlement is already in place and
+    // CheckoutViewModel reads this flag at PaymentSheet construction.
+    static let applePayEnabled = false
 }
