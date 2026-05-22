@@ -33,10 +33,10 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// SF Symbol used by the system tab bar.
+    /// Base SF Symbol used by the custom tab bar.
     ///
-    /// Keep SF Symbol fallbacks static. Selected-state swapping belongs in
-    /// a future custom tab bar; the system tab bar should own sizing.
+    /// Keep the fallback static so the selected and brand-specific variants
+    /// can be layered on without changing analytics/deep-link identifiers.
     var tabBarSymbolName: String { symbolName }
 
     /// Asset Catalog icon for brand-specific tabs.
@@ -48,7 +48,7 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     }
 
     /// SF Symbol name for the selected state (filled variant).
-    /// Used by placeholder content and available for a future custom tab bar.
+    /// Used by placeholder content and the custom tab bar.
     var selectedSymbolName: String {
         switch self {
         case .home:    return "house.fill"

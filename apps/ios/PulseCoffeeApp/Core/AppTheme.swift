@@ -21,7 +21,7 @@ enum AppTheme {
     }
 
     enum Metrics {
-        static let tabBarIconSize: CGFloat = 26.4
+        static let tabBarIconSize: CGFloat = 27
         static let tabBarHeight: CGFloat = 72
         static let menuItemIconSize: CGFloat = 56
         static let menuItemIconPadding: CGFloat = 8

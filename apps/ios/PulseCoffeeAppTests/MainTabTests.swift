@@ -24,9 +24,9 @@ final class MainTabTests: XCTestCase {
     }
 
     func test_selectedSymbol_differsFromUnselected() {
-        // The filled / outlined variants are the visual cue that a tab
-        // can use if a future custom tab bar lands. The system tab bar
-        // itself uses tabBarSymbolName so iOS owns selected-state layout.
+        // The filled / outlined variants are the visual cue the custom
+        // tab bar uses for selected state while `tabBarSymbolName` stays
+        // as the stable base symbol.
         for tab in MainTab.allCases {
             XCTAssertNotEqual(tab.symbolName, tab.selectedSymbolName,
                               "tab \(tab.rawValue) selected/unselected symbols must differ")
