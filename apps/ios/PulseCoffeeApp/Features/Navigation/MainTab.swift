@@ -55,4 +55,28 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .account: return "star.circle.fill"
         }
     }
+
+    /// When non-nil, this tab renders its icon from
+    /// `Assets.xcassets/<name>.imageset` instead of an SF Symbol.
+    /// Used for brand-specific tab icons that can't be expressed as
+    /// SF Symbols (the Pulse "P" + cup logo on Menu).
+    ///
+    /// The SF Symbol fields above stay populated as a fallback path —
+    /// if the Asset Catalog lookup fails for any reason, the
+    /// SF Symbol is still wired in the model and call sites can read
+    /// either side without crashing.
+    ///
+    /// Trade-off, deliberate: the Asset Catalog image is rendered
+    /// `original` (preserves matcha-green + cream brand colors). It
+    /// will NOT tint blue when the tab is selected. Selection state
+    /// for the Menu tab is conveyed through the label text tinting
+    /// blue (Label's text component is tinted independently of the
+    /// image). See `Features/Navigation/README.md` for the design
+    /// rationale.
+    var customAssetName: String? {
+        switch self {
+        case .menu: return "PulseCupMark"
+        default:    return nil
+        }
+    }
 }

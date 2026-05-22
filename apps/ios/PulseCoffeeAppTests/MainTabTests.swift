@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import PulseCoffeeApp
 
 /// Locks down the public contract of the `MainTab` enum that drives the
@@ -46,5 +47,29 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.menu.rawValue,    "menu")
         XCTAssertEqual(MainTab.orders.rawValue,  "orders")
         XCTAssertEqual(MainTab.account.rawValue, "account")
+    }
+
+    func test_customAssetName_onlyMenuOverridesSFSymbol() {
+        // Only the Menu tab swaps the SF Symbol for a brand asset
+        // today (PulseCupMark in Assets.xcassets). The other three
+        // intentionally stay on SF Symbols. If we ever brand the
+        // remaining tabs, update this test alongside the model.
+        XCTAssertEqual(MainTab.menu.customAssetName, "PulseCupMark")
+        XCTAssertNil(MainTab.home.customAssetName)
+        XCTAssertNil(MainTab.orders.customAssetName)
+        XCTAssertNil(MainTab.account.customAssetName)
+    }
+
+    func test_customAsset_existsInBundle() {
+        // Catches a forgotten file rename / missing Asset Catalog
+        // entry. UIImage(named:) returns nil if the image set is
+        // missing from the compiled asset bundle.
+        for tab in MainTab.allCases {
+            guard let assetName = tab.customAssetName else { continue }
+            XCTAssertNotNil(
+                UIImage(named: assetName),
+                "Asset \"\(assetName)\" referenced by .\(tab.rawValue) is missing from Assets.xcassets"
+            )
+        }
     }
 }

@@ -52,8 +52,17 @@ struct MainTabView: View {
 
     @ViewBuilder
     private func label(for tab: MainTab) -> some View {
-        let symbol = selection == tab ? tab.selectedSymbolName : tab.symbolName
-        Label(tab.title, systemImage: symbol)
+        if let assetName = tab.customAssetName {
+            // Brand-specific Asset Catalog icon (e.g. Menu's Pulse
+            // logo). Renders `original` — keeps its colors and does
+            // NOT tint blue when selected. The "Menu" text label
+            // beneath the icon still tints blue on selection, so the
+            // active-tab cue stays legible.
+            Label(tab.title, image: assetName)
+        } else {
+            let symbol = selection == tab ? tab.selectedSymbolName : tab.symbolName
+            Label(tab.title, systemImage: symbol)
+        }
     }
 
     /// Global `UITabBar` appearance override, computed exactly once

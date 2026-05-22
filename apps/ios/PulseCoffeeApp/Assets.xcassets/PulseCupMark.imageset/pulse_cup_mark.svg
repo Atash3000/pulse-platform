@@ -1,0 +1,36 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Pulse Coffee P Cup Icon</title>
+  <desc>Stylized Pulse Coffee letter P with takeaway cup and straw. Tab-bar-rendered variant — app-icon circle background removed per source SVG comment.</desc>
+  <defs>
+    <linearGradient id="matcha" x1="260" y1="190" x2="760" y2="850" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A7C957"/>
+      <stop offset="1" stop-color="#5E7F2D"/>
+    </linearGradient>
+    <linearGradient id="cream" x1="390" y1="575" x2="615" y2="650" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF5D6"/>
+      <stop offset="1" stop-color="#F2D49B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Big stylized P -->
+  <path d="M343 213H560C700 213 800 309 800 443C800 579 701 672 559 672H458V823H343V213Z" fill="url(#matcha)"/>
+  <path d="M458 322V563H552C632 563 686 516 686 443C686 369 632 322 552 322H458Z" fill="#F6F4EF"/>
+
+  <!-- Cup body cut into P -->
+  <path d="M391 500H625L590 782C586 815 559 840 526 840H490C457 840 430 815 426 782L391 500Z" fill="#F6F4EF" stroke="#5E7F2D" stroke-width="28" stroke-linejoin="round"/>
+
+  <!-- Cup lid -->
+  <path d="M359 489C359 457 385 431 417 431H599C631 431 657 457 657 489V508H359V489Z" fill="#F6F4EF" stroke="#5E7F2D" stroke-width="28" stroke-linejoin="round"/>
+  <path d="M335 522H681" stroke="#5E7F2D" stroke-width="32" stroke-linecap="round"/>
+  <path d="M383 476H633" stroke="#5E7F2D" stroke-width="24" stroke-linecap="round"/>
+
+  <!-- Straw -->
+  <path d="M566 300C566 300 520 308 520 364V433" stroke="#5E7F2D" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M520 364H571" stroke="#5E7F2D" stroke-width="30" stroke-linecap="round"/>
+
+  <!-- Cream / matcha wave inside cup -->
+  <path d="M426 610C470 650 536 650 590 610V681C548 710 475 711 436 681L426 610Z" fill="url(#cream)"/>
+
+  <!-- Bottom cup curve -->
+  <path d="M465 790C491 801 526 801 552 790" stroke="#5E7F2D" stroke-width="24" stroke-linecap="round"/>
+</svg>
