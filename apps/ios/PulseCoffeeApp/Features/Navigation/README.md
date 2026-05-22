@@ -16,17 +16,17 @@ ContentView                       ← root auth gate
 | File | Purpose |
 |---|---|
 | `MainTab.swift` | Typed enum (`home`, `menu`, `orders`, `account`) with title + SF Symbols. One source of truth for the tab bar, deep-links, and analytics. |
-| `MainTabView.swift` | The `TabView` itself. Hosts a tab item per `MainTab` case. Menu is the launch tab. |
+| `MainTabView.swift` | The signed-in tab host plus custom bottom bar. Menu is the launch tab. |
 | `Placeholders.swift` | `HomeView`, `OrdersView`, `AccountView` — minimal stubs (title + icon + caption). Promote to their own files when real content lands. |
 
 ## Design choices
 
-- **Each tab owns its own `NavigationStack`.** Standard iOS pattern — switching tabs preserves each tab's back-stack independently. `MenuView` already has its own stack, so the Menu tab inherits that; the placeholders wrap themselves so they're ready for content.
+- **Each tab owns its own `NavigationStack`.** `MenuView` already has its own stack, and the placeholders wrap themselves so they're ready for content.
 - **`MainTab` rawValues are stable.** They're consumed as analytics property values and (eventually) by the deep-link router. `MainTabTests.test_rawValues_areStableForAnalytics` exists to make accidental renames loud at review time.
 - **`@State` selection, not `@AppStorage`.** Sign-out tears down the entire tab tree, so persisting selection across sign-outs would surprise users who expect a fresh slate. Re-evaluate if we add a "stay logged in across launches" UX requirement.
 - **Menu is the launch tab.** It's the only tab with real content in MVP-3, and the customer's job-to-be-done at launch is "order a coffee."
-- **Selected tabs tint blue.** `.tint(.blue)` on the `TabView` makes the active tab's icon and label render blue — matches Luckin's selected-state accent. System `TabView` applies the tint to whichever tab is active, not per-tab, so all selected tabs share the blue accent. A fully custom "blue circle behind icon" treatment (exact Luckin look) would require a hand-rolled tab bar — see Follow-ups.
-- **Icons are SF Symbols (Apple's icon library).** Built into iOS 16+, ~5,000 icons, no third-party SPM dependency, automatically themed for dynamic type / accessibility / dark mode. The four chosen symbols (`house.fill`, `cup.and.saucer.fill`, `bag.fill`, `person.crop.circle.fill`) carry the semantic load we need. A third-party illustrated set (Phosphor, Lucide, Iconoir — all MIT-licensed) is a follow-up if/when product wants a more branded look. See `docs/decision-log.md` entry "[iOS] SF Symbols over third-party icon library for tab bar" for the full reasoning.
+- **Selected tabs tint blue.** The custom bottom bar uses `AppTheme.Colors.accent` for selected tab labels/icons and draws no per-tab selected background, avoiding the iOS 18+ system selected-pill treatment. The bar is full-width and bottom-anchored like a native app tab strip rather than a floating capsule.
+- **Icons are SF Symbols plus the Pulse menu mark.** Home / Orders / Account use SF Symbols (`house`, `bag`, `person.crop.circle`). Menu uses the Pulse `P` cup SVG from `Assets.xcassets/PulseCupMark.imageset`, stored as a 24x24 SVG with a cropped viewBox so the visible logo fills the system tab icon slot instead of shrinking inside the original app-icon canvas. A third-party illustrated set (Phosphor, Lucide, Iconoir — all MIT-licensed) is a follow-up if/when product wants a broader custom icon set. See `docs/decision-log.md` entry "[iOS] SF Symbols over third-party icon library for tab bar" for the full reasoning.
 
 ## Tests
 

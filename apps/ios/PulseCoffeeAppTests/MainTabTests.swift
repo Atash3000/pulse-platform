@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import PulseCoffeeApp
 
 /// Locks down the public contract of the `MainTab` enum that drives the
@@ -24,12 +25,30 @@ final class MainTabTests: XCTestCase {
 
     func test_selectedSymbol_differsFromUnselected() {
         // The filled / outlined variants are the visual cue that a tab
-        // is active; if a future edit collapses them to the same string
-        // we lose the affordance silently. Pin it.
+        // can use if a future custom tab bar lands. The system tab bar
+        // itself uses tabBarSymbolName so iOS owns selected-state layout.
         for tab in MainTab.allCases {
             XCTAssertNotEqual(tab.symbolName, tab.selectedSymbolName,
                               "tab \(tab.rawValue) selected/unselected symbols must differ")
         }
+    }
+
+    func test_tabBarSymbols_areStableBaseSymbols() {
+        XCTAssertEqual(MainTab.home.tabBarSymbolName, "house")
+        XCTAssertEqual(MainTab.menu.tabBarSymbolName, "cup.and.saucer")
+        XCTAssertEqual(MainTab.orders.tabBarSymbolName, "bag")
+        XCTAssertEqual(MainTab.account.tabBarSymbolName, "person.crop.circle")
+    }
+
+    func test_customAssetName_onlyMenuOverridesSFSymbol() {
+        XCTAssertNil(MainTab.home.customAssetName)
+        XCTAssertEqual(MainTab.menu.customAssetName, "PulseCupMark")
+        XCTAssertNil(MainTab.orders.customAssetName)
+        XCTAssertNil(MainTab.account.customAssetName)
+    }
+
+    func test_customAsset_existsInBundle() {
+        XCTAssertNotNil(UIImage(named: "PulseCupMark"))
     }
 
     func test_idMatchesRawValue() {
