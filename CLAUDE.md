@@ -179,7 +179,3 @@ If Claude is about to change code that looks unusual and there's no decision-log
 ---
 
 ## 5. Communication Protocol With The Manager
-
-### 5.1 Pre-Push Reports
-
-Every commit gets a pre-push report before the manager pulls it. Format:
