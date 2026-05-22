@@ -2477,11 +2477,39 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 
 - For four tab icons, adding any SPM dependency is disproportionate. Each new package is a version pin, a Package.resolved diff, a future-migration cost, and a bundle-size hit. Golden Rule #15 (ship boring and reliable first) argues against it at this stage.
 - SF Symbols ship with iOS. Always current with OS, automatically themed for Dynamic Type / accessibility / dark mode / locale. The four chosen symbols carry the semantic load (house = home, coffee cup = menu, bag = orders, person = account) clearly.
-- Selected-state visual polish is achieved with `.tint(.blue)` on the `TabView` — system-styled, zero deps, matches the Luckin "selected = blue accent" affordance without copying the exact illustrated look.
+- Selected-state visual polish is achieved in the custom bottom bar with `AppTheme.Colors.accent` and semibold selected labels/icons. This keeps the Luckin "selected = blue accent" affordance without copying the exact illustrated look.
 
 **Trade-offs:**
 
 - Visual style is "Apple-standard" rather than "branded illustration." If product later decides the brand needs illustrated icons, we revisit and add one SPM package (Phosphor is the recommended choice in that case — most icons, most active).
-- The Luckin-exact "blue circle behind selected icon" treatment is not possible with the system `TabView` and is explicitly deferred — would require a hand-rolled custom tab bar. See `apps/ios/PulseCoffeeApp/Features/Navigation/README.md` "Follow-ups."
+- The Luckin-exact "blue circle behind selected icon" treatment is intentionally not used right now because the manager asked to remove selected background shapes. A custom tab bar gives us the option to add that back later if product wants it.
 
 **Revisit when:** product gives a "brand identity" directive that says the system look is off-brand, or when the design system formalizes a custom icon set.
+
+**Update 2026-05-22 — Pulse menu mark as tab-sized Asset Catalog SVG:** The Menu tab now uses the manager-provided Pulse `P` cup SVG from `/Users/atamurad/Downloads/pulse_p_cup_icon.svg`, stored as `Assets.xcassets/PulseCupMark.imageset/pulse_cup_mark.svg`. The tab variant removes the optional app-icon circle background, sets SVG `width`/`height` to `24`, and crops the viewBox to the visible mark (`300 180 550 700`) so the logo fills the navigation icon slot instead of shrinking inside the original 1024px app-icon canvas. Home / Orders / Account stay on SF Symbols; Menu uses the original-rendered `PulseCupMark` asset inside the custom bottom bar so the matcha/cream brand colors survive. Trade-off: the Menu icon itself does not tint blue; selected state is carried by the Menu label color and the custom bar's semibold selected text.
+
+## 2026-05-22 — [iOS] AppTheme visual tokens
+
+**Decision:** Add `Core/AppTheme.swift` as the shared place for app-wide SwiftUI colors and small visual metrics. Navigation tint, menu placeholder icon color, badge foreground/background, warning color, and menu row icon sizing now read from `AppTheme`.
+
+**Context:** The manager asked for global variables for colors like icon colors so changing one value updates the app consistently.
+
+**Alternatives considered:** Keep using literal `.blue`, `.secondary`, `.orange`, `.red`, and numeric icon dimensions at each call site. Rejected because visual changes become scattered and easy to miss. Add a full design-system package. Rejected as too heavy for the current Phase 1 app.
+
+**Reasoning:** A tiny enum-based token file matches the current SwiftUI codebase: no new dependency, no environment plumbing, and no architectural churn. It gives us a clear home for colors now and can grow into semantic tokens as the visual identity settles.
+
+**Trade-offs:** This is not yet a complete design system. Existing screens still have some local styling where the value is not yet a shared token. Future visual-polish commits should move repeated values into `AppTheme` as they touch those areas.
+
+## 2026-05-22 — [iOS] Custom bottom tab bar for icon sizing
+
+**Decision:** Replace the system SwiftUI `TabView` tab item bar with a small custom bottom bar in `MainTabView`.
+
+**Context:** The manager asked to make the tab icons 10% larger and remove the gray selected background pill shown by the iOS 26 simulator.
+
+**Alternatives considered:** Continue using system `TabView` and try to tune `UITabBarAppearance`. Rejected because SwiftUI's `.tabItem` does not expose reliable per-icon sizing, and the selected-pill styling varies by OS. A custom bar gives deterministic icon sizing and no selected background.
+
+**Reasoning:** The custom bar is intentionally narrow in scope: it keeps the existing Home/Menu/Orders/Account views, uses the same `MainTab` enum, centralizes icon size in `AppTheme.Metrics.tabBarIconSize`, and reserves bottom safe-area space via `safeAreaInset`. Selection is now communicated with accent color and semibold text/icon weight only.
+
+**Trade-offs:** This is less native than the system tab bar and may need manual polish for future badges or deep links. The upside is predictable branding control, which is now needed for the Pulse SVG mark.
+
+**Update 2026-05-22 — bottom-anchored bar:** The custom bar is now full-width and bottom-anchored instead of a floating rounded capsule. It uses `AppTheme.Colors.tabBarBackground` plus a top divider, with no bottom padding, to match the reference app's app-tab-strip placement more closely.

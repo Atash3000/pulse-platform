@@ -63,10 +63,10 @@ struct MenuView: View {
                 Image(systemName: "cart.fill")
                 Text("\(cart.totalItemCount)")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppTheme.Colors.onBadge)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(.red, in: Capsule())
+                    .background(AppTheme.Colors.destructive, in: Capsule())
                     .offset(x: 10, y: -10)
             }
         } else {
@@ -115,7 +115,7 @@ struct MenuView: View {
             VStack(spacing: 16) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.largeTitle)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppTheme.Colors.warning)
                 Text("Could not load the menu")
                     .font(.headline)
                 Text(message)
@@ -137,7 +137,7 @@ struct MenuView: View {
         VStack(spacing: 12) {
             Image(systemName: "cup.and.saucer")
                 .font(.largeTitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Colors.iconSecondary)
             Text("Menu is empty")
                 .font(.headline)
             Text("No items configured for this location yet.")
@@ -162,12 +162,13 @@ private struct MenuItemRow: View {
                     Image(systemName: "cup.and.saucer.fill")
                         .resizable()
                         .scaledToFit()
-                        .padding(8)
-                        .foregroundStyle(.secondary)
+                        .padding(AppTheme.Metrics.menuItemIconPadding)
+                        .foregroundStyle(AppTheme.Colors.iconSecondary)
                 }
             }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .frame(width: AppTheme.Metrics.menuItemIconSize,
+                   height: AppTheme.Metrics.menuItemIconSize)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Metrics.cardCornerRadius))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name)
@@ -181,11 +182,11 @@ private struct MenuItemRow: View {
                 if !item.available {
                     Text("Sold out")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(AppTheme.Colors.warning)
                 } else if let left = item.quantityLeft, left <= 5 {
                     Text("Only \(left) left")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(AppTheme.Colors.warning)
                 }
             }
 
