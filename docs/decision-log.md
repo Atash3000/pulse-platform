@@ -2513,3 +2513,15 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 **Trade-offs:** This is less native than the system tab bar and may need manual polish for future badges or deep links. The upside is predictable branding control, which is now needed for the Pulse SVG mark.
 
 **Update 2026-05-22 — bottom-anchored bar:** The custom bar is now full-width and bottom-anchored instead of a floating rounded capsule. It uses `AppTheme.Colors.tabBarBackground` plus a top divider, with no bottom padding, to match the reference app's app-tab-strip placement more closely.
+
+## 2026-05-22 — [iOS] Custom tab bar QA follow-up
+
+**Decision:** Tighten the custom bottom tab bar after QA review: add selected accessibility traits, remove empty accessibility values, explicitly render the Pulse mark as original, round the base icon size to 27pt, scale bar/icon metrics with Dynamic Type, animate selection changes, and extend the tab bar background into the bottom safe area.
+
+**Context:** QA flagged trade-offs from replacing system `TabView` with a custom bar. The current app needs the custom bar for deterministic icon sizing and no selected pill, but the custom implementation should preserve native accessibility and safe-area behavior where possible.
+
+**Alternatives considered:** Revert to system `TabView`. Rejected because it would reintroduce the selected background shape and limit control over the Pulse SVG sizing. Defer all QA notes. Rejected because several fixes are tiny and reduce App Store/accessibility risk.
+
+**Reasoning:** These changes keep the custom navigation architecture while closing the cheapest correctness gaps. Larger behavior parity items are tracked as TODOs/follow-ups: lazy mounting before inactive tabs fetch or poll, repeat-tap pop-to-root/scroll-to-top behavior, and snapshot coverage.
+
+**Trade-offs:** `@ScaledMetric` can grow the bar at accessibility sizes, which is preferable to clipped text. Full native tab semantics still require either a system `TabView` or more custom accessibility work later.

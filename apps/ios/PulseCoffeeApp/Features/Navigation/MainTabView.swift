@@ -12,11 +12,14 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack {
+            // TODO: Before Home / Orders / Account start API fetches or polling,
+            // lazy-mount inactive tabs or gate their tasks on `selection`.
             tabContent(.home) { HomeView() }
             tabContent(.menu) { MenuView() }
             tabContent(.orders) { OrdersView() }
             tabContent(.account) { AccountView() }
         }
+        .animation(.easeInOut(duration: 0.15), value: selection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             PulseTabBar(selection: $selection)
         }
@@ -37,22 +40,28 @@ struct MainTabView: View {
 private struct PulseTabBar: View {
     @Binding var selection: MainTab
 
+    @ScaledMetric(relativeTo: .caption) private var iconSize = AppTheme.Metrics.tabBarIconSize
+    @ScaledMetric(relativeTo: .caption) private var barHeight = AppTheme.Metrics.tabBarHeight
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(MainTab.allCases) { tab in
+                let isSelected = selection == tab
                 Button {
+                    // TODO: Restore native repeat-tap behaviour once tabs have
+                    // deep navigation: pop selected tab to root / scroll to top.
                     selection = tab
                 } label: {
-                    tabLabel(tab)
+                    tabLabel(tab, isSelected: isSelected)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.title)
-                .accessibilityValue(selection == tab ? "Selected" : "")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .frame(height: AppTheme.Metrics.tabBarHeight)
+        .frame(height: barHeight)
         .padding(.horizontal, 18)
-        .background(AppTheme.Colors.tabBarBackground)
+        .background(AppTheme.Colors.tabBarBackground.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(AppTheme.Colors.divider.opacity(0.35))
@@ -60,9 +69,8 @@ private struct PulseTabBar: View {
         }
     }
 
-    private func tabLabel(_ tab: MainTab) -> some View {
-        let isSelected = selection == tab
-        return VStack(spacing: 3) {
+    private func tabLabel(_ tab: MainTab, isSelected: Bool) -> some View {
+        VStack(spacing: 3) {
             icon(for: tab, isSelected: isSelected)
             Text(tab.title)
                 .font(.caption.weight(isSelected ? .semibold : .regular))
@@ -76,13 +84,13 @@ private struct PulseTabBar: View {
     private func icon(for tab: MainTab, isSelected: Bool) -> some View {
         if let assetName = tab.customAssetName {
             Image(assetName)
+                .renderingMode(.original)
                 .resizable()
                 .scaledToFit()
-                .frame(width: AppTheme.Metrics.tabBarIconSize,
-                       height: AppTheme.Metrics.tabBarIconSize)
+                .frame(width: iconSize, height: iconSize)
         } else {
             Image(systemName: isSelected ? tab.selectedSymbolName : tab.tabBarSymbolName)
-                .font(.system(size: AppTheme.Metrics.tabBarIconSize,
+                .font(.system(size: iconSize,
                               weight: isSelected ? .semibold : .regular))
         }
     }
