@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Bottom tab bar shown after sign-in. Hosts the four top-level
 /// destinations declared in `MainTab`. Each tab owns its own
@@ -11,6 +12,16 @@ import SwiftUI
 struct MainTabView: View {
 
     @State private var selection: MainTab = .menu
+
+    init() {
+        // Suppress the iOS 18+ default "capsule pill behind the
+        // selected tab" treatment. We want a flat tab bar: selection
+        // is conveyed by `.tint(.blue)` on the icon + label alone,
+        // no background shape. The static `let` below is computed
+        // exactly once; this call re-references it cheaply on every
+        // re-instantiation of `MainTabView`.
+        _ = Self.appearanceConfigured
+    }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -44,6 +55,31 @@ struct MainTabView: View {
         let symbol = selection == tab ? tab.selectedSymbolName : tab.symbolName
         Label(tab.title, systemImage: symbol)
     }
+
+    /// Global `UITabBar` appearance override, computed exactly once
+    /// (Swift's static-let-with-side-effects pattern). Triggered from
+    /// `init()` so the override is in place before the first body
+    /// evaluation creates the underlying `UITabBar`.
+    ///
+    /// Why this exists: iOS 18+ ships a new selected-state treatment
+    /// for `TabView` items — a filled capsule sits behind the selected
+    /// icon + label. We want a flatter look (icon + label go blue when
+    /// selected, no background shape). Clearing
+    /// `selectionIndicatorTintColor` AND assigning an empty
+    /// `selectionIndicatorImage` removes the capsule on every iOS
+    /// version that ships with it; older iOS versions silently ignore
+    /// these properties (already had no selection capsule).
+    private static let appearanceConfigured: Bool = {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor.systemBackground
+        appearance.selectionIndicatorTintColor = .clear
+        appearance.selectionIndicatorImage = UIImage()
+
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+        return true
+    }()
 }
 
 #Preview {
