@@ -18,10 +18,16 @@ enum AppTheme {
         static let pulseMatcha = Color(red: 94 / 255, green: 127 / 255, blue: 45 / 255)
         static let pulseMatchaLight = Color(red: 167 / 255, green: 201 / 255, blue: 87 / 255)
         static let pulseCream = Color(red: 246 / 255, green: 244 / 255, blue: 239 / 255)
+        static let tabIconBrand = pulseMatcha
+        static let orderReady = Color.green
+        static let orderPreparing = Color.yellow
     }
 
     enum Metrics {
         static let tabBarIconSize: CGFloat = 27
+        // Brand SVGs have less optical padding than SF Symbols, so they
+        // render slightly larger while the system icons keep native sizing.
+        static let brandedTabIconScale: CGFloat = 1.05
         static let tabBarHeight: CGFloat = 72
         static let menuItemIconSize: CGFloat = 56
         static let menuItemIconPadding: CGFloat = 8

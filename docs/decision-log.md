@@ -2525,3 +2525,21 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 **Reasoning:** These changes keep the custom navigation architecture while closing the cheapest correctness gaps. Larger behavior parity items are tracked as TODOs/follow-ups: lazy mounting before inactive tabs fetch or poll, repeat-tap pop-to-root/scroll-to-top behavior, and snapshot coverage.
 
 **Trade-offs:** `@ScaledMetric` can grow the bar at accessibility sizes, which is preferable to clipped text. Full native tab semantics still require either a system `TabView` or more custom accessibility work later.
+
+## 2026-05-22 — [iOS] Pulse Orders tab mark
+
+**Decision:** Add the manager-provided Pulse orders bag/cup SVG as two template-rendered Asset Catalog image sets and use them for the Orders tab.
+
+**Context:** The tab bar already supports brand-specific original-rendered SVG assets for tabs. The manager provided `orders_glossy.svg`, `pulse_orders_bag_sparkle.svg`, and a PNG reference for the Orders tab icon.
+
+**Alternatives considered:** Use the PNG directly. Rejected because vector assets scale better across iPhone sizes and Dynamic Type-driven tab bar scaling. Use `orders_glossy.svg`. Rejected for now because `pulse_orders_bag_sparkle.svg` matches the provided PNG's branded bag/cup/sparkle composition more closely.
+
+**Reasoning:** The bag/sparkle layer is stored as `Assets.xcassets/PulseOrdersMark.imageset/pulse_orders_mark.svg`, and the cup layer is stored as `Assets.xcassets/PulseOrdersCupState.imageset/pulse_orders_cup_state.svg`. Both SVGs use tab-sized `width`/`height` values and cropped viewBoxes, and both render as templates so SwiftUI can apply theme/status colors. Splitting the artwork lets the bag follow `AppTheme.Colors.tabIconBrand` while the inner cup can later reflect backend-backed order state.
+
+**Trade-offs:** The Orders icon needs two asset layers instead of one simple image. The cup state remains hard-coded until the Orders tab gets a backend-backed status model. Selection is still communicated by the Orders label color, semibold label, and accessibility selected trait.
+
+**Update 2026-05-22 — Orders icon color state:** The Orders tab icon composes `PulseOrdersMark` for the bag/sparkles and `PulseOrdersCupState` for the cup inside the bag. The bag uses `AppTheme.Colors.tabIconBrand` so changing the shared tab icon brand token changes the Orders bag color with the rest of the branded navigation treatment. The inner cup is temporarily hard-coded in `PulseTabBar`: `.empty` draws no cup overlay, `.preparing` maps to `AppTheme.Colors.orderPreparing`, and `.ready` maps to `AppTheme.Colors.orderReady`. This stays hard-coded until MVP-4 Orders status polling supplies real order state.
+
+**Update 2026-05-22 — Orders empty state and branded tab icon scale:** The temporary Orders tab state is now `.empty`, so the cup-status layer is not drawn until backend-backed order status exists. This keeps the empty state quiet in both light and dark mode. Menu and Orders custom brand icons now render at `AppTheme.Metrics.brandedTabIconScale` (`1.05`) over the base tab icon size, while SF Symbol tabs keep the base size.
+
+**Update 2026-05-22 — Orders tab QA follow-up:** QA caught that a literal white empty-state cup becomes visually loud on a dark tab bar. Empty now maps to no cup overlay instead of a color token, while `.preparing` and `.ready` keep explicit status colors. `OrdersTabState` is internal so tests can pin the empty-state behavior, and the decorative SVG layers are accessibility-hidden because the parent tab button owns the accessible label.

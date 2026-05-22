@@ -47,8 +47,16 @@ final class MainTabTests: XCTestCase {
         XCTAssertNil(MainTab.account.customAssetName)
     }
 
-    func test_customAsset_existsInBundle() {
+    func test_customAssets_existInBundle() {
         XCTAssertNotNil(UIImage(named: "PulseCupMark"))
+        XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
+        XCTAssertNotNil(UIImage(named: "PulseOrdersCupState"))
+    }
+
+    func test_ordersTabState_emptyDoesNotDrawCupOverlay() {
+        XCTAssertNil(OrdersTabState.empty.cupColor)
+        XCTAssertNotNil(OrdersTabState.preparing.cupColor)
+        XCTAssertNotNil(OrdersTabState.ready.cupColor)
     }
 
     func test_idMatchesRawValue() {

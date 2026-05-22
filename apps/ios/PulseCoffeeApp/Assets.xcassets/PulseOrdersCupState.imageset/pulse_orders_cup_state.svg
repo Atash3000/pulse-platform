@@ -1,0 +1,9 @@
+<svg width="24" height="24" viewBox="220 120 720 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Pulse Coffee Orders Cup State</title>
+  <desc>Template-rendered cup layer for Orders tab state coloring.</desc>
+
+  <path d="M425 500H599L570 676C566 700 546 717 522 717H502C478 717 458 700 454 676L425 500Z" fill="#000000"/>
+  <path d="M418 453H606C623 453 637 467 637 484C637 501 623 515 606 515H418C401 515 387 501 387 484C387 467 401 453 418 453Z" fill="#000000"/>
+  <path d="M453 453V429C453 412 467 398 484 398H540C557 398 571 412 571 429V453" fill="#000000"/>
+  <path d="M449 578C485 611 531 618 577 568C552 583 526 578 501 559C479 542 461 547 449 578Z" fill="#000000"/>
+</svg>

@@ -43,6 +43,14 @@ private struct PulseTabBar: View {
     @ScaledMetric(relativeTo: .caption) private var iconSize = AppTheme.Metrics.tabBarIconSize
     @ScaledMetric(relativeTo: .caption) private var barHeight = AppTheme.Metrics.tabBarHeight
 
+    // TODO: Replace this with the latest order status once Orders has
+    // a backend-backed view model. For now the manager wants empty shown.
+    private let ordersState: OrdersTabState = .empty
+
+    private var brandedIconSize: CGFloat {
+        iconSize * AppTheme.Metrics.brandedTabIconScale
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(MainTab.allCases) { tab in
@@ -82,16 +90,59 @@ private struct PulseTabBar: View {
 
     @ViewBuilder
     private func icon(for tab: MainTab, isSelected: Bool) -> some View {
-        if let assetName = tab.customAssetName {
+        if tab == .orders {
+            PulseOrdersTabIcon(state: ordersState)
+                .frame(width: brandedIconSize, height: brandedIconSize)
+        } else if let assetName = tab.customAssetName {
             Image(assetName)
                 .renderingMode(.original)
                 .resizable()
                 .scaledToFit()
-                .frame(width: iconSize, height: iconSize)
+                .frame(width: brandedIconSize, height: brandedIconSize)
         } else {
             Image(systemName: isSelected ? tab.selectedSymbolName : tab.tabBarSymbolName)
                 .font(.system(size: iconSize,
                               weight: isSelected ? .semibold : .regular))
+        }
+    }
+}
+
+enum OrdersTabState {
+    case empty
+    case preparing
+    case ready
+
+    var cupColor: Color? {
+        switch self {
+        case .empty:     return nil
+        case .preparing: return AppTheme.Colors.orderPreparing
+        case .ready:     return AppTheme.Colors.orderReady
+        }
+    }
+}
+
+private struct PulseOrdersTabIcon: View {
+    let state: OrdersTabState
+
+    var body: some View {
+        ZStack {
+            // Keep the Orders artwork split into template layers: the bag follows
+            // the shared brand token, while the cup can reflect order status.
+            Image("PulseOrdersMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(AppTheme.Colors.tabIconBrand)
+                .accessibilityHidden(true)
+
+            if let cupColor = state.cupColor {
+                Image("PulseOrdersCupState")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(cupColor)
+                    .accessibilityHidden(true)
+            }
         }
     }
 }
