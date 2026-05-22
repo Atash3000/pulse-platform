@@ -28,10 +28,17 @@ apps/ios/
 ├── Makefile                             make project / resolve / build / test
 ├── PulseCoffeeApp/
 │   ├── PulseCoffeeApp.swift            @main entry point — Sentry + PostHog init
-│   ├── ContentView.swift                placeholder screen — reads AppConfig
+│   ├── ContentView.swift                root auth gate: Login ↔ MainTabView
 │   ├── PulseCoffeeApp.entitlements     push capability
-│   ├── Core/
-│   │   └── AppConfig.swift              compile-time config (DSN, key, baseURL, env)
+│   ├── Core/                            AppState, APIClient, Keychain, CartManager…
+│   ├── Features/
+│   │   ├── Auth/                        Sign-in + register
+│   │   ├── Navigation/                  MainTabView (bottom tab bar) — see folder README
+│   │   ├── Menu/                        Menu list + item detail
+│   │   ├── Cart/                        Cart sheet
+│   │   └── Checkout/                    Stripe PaymentSheet wiring
+│   ├── Models/                          Codables for backend DTOs
+│   ├── Services/                        Side-effecting clients (Stripe, etc.)
 │   ├── Assets.xcassets/                 AppIcon + AccentColor (placeholders)
 │   └── Preview Content/                 SwiftUI preview-only assets
 └── PulseCoffeeAppTests/                 XCTest bundle
@@ -82,7 +89,8 @@ The bundled `seed:dev` script creates one location but no menu items. To order a
 | 3 | APIClient, Keychain, Codable models, ATS exception | ✅ Landed |
 | Housekeeping | Package.resolved, PostHog rename, make clean-derived | ✅ Landed |
 | MVP-2 | Menu screen (location + menu fetch, sectioned list) | ✅ Landed |
-| Commit A | Auth feature — AppState, TokenRefresher, Login/Register UI, 401 retry | (this commit) |
+| Commit A | Auth feature — AppState, TokenRefresher, Login/Register UI, 401 retry | ✅ Landed |
+| FE DEV-2 | `MainTabView` bottom tab navigator (Home / Menu / Orders / Account), blue selected tint, SF Symbols icons | (this commit) |
 | MVP-3 | Cart + Apple Pay checkout + idempotency | (planned) |
 | MVP-4 | Order status polling + receipt screen | (planned) |
 | MVP-5 | Apple Pay merchant ID entitlement + TestFlight prep | (planned) |

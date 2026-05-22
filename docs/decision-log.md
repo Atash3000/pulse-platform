@@ -2458,3 +2458,30 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 
 - The two existing tests `test_get_401_thenRefreshFails_throwsAuthRequired` and `test_get_401_thenRefreshSuccess_butRetry401_throwsAuthRequired` were updated to use `{"message":"Unauthorized"}` bodies (not empty `{}`) so they continue to exercise the JWT-failure path under the new heuristic.
 - Backend follow-up (not iOS chat's scope): catch Stripe `AuthenticationError` in `CheckoutService` and translate to a 502 with a clear error code (e.g., `PAYMENT_PROVIDER_AUTH`). Until that lands the heuristic is iOS's only defense.
+
+
+## 2026-05-22 — [iOS] SF Symbols over third-party icon library for tab bar
+
+**Decision:** The `MainTabView` bottom tab bar uses SF Symbols (`house.fill`, `cup.and.saucer.fill`, `bag.fill`, `person.crop.circle.fill`) for its four tab icons. No third-party icon SPM package is added.
+
+**Context:** Frontend brief asked for "Luckin-style icons" and "free icon library" for the new tab navigator. Luckin's tab icons are illustrated / branded; SF Symbols are line-art / system-themed.
+
+**Alternatives considered:**
+
+- **Phosphor Swift** (`phosphor-icons/swift`, MIT, ~1500 icons) — strongest third-party candidate. Has SwiftPM package, SwiftUI `Image` extension.
+- **Lucide** (MIT, SwiftUI port exists) — similar surface to Phosphor.
+- **Iconoir** (MIT, has Swift package).
+- **Custom SVG assets in `Assets.xcassets`** — fully on-brand but blocks on design.
+
+**Reasoning:**
+
+- For four tab icons, adding any SPM dependency is disproportionate. Each new package is a version pin, a Package.resolved diff, a future-migration cost, and a bundle-size hit. Golden Rule #15 (ship boring and reliable first) argues against it at this stage.
+- SF Symbols ship with iOS. Always current with OS, automatically themed for Dynamic Type / accessibility / dark mode / locale. The four chosen symbols carry the semantic load (house = home, coffee cup = menu, bag = orders, person = account) clearly.
+- Selected-state visual polish is achieved with `.tint(.blue)` on the `TabView` — system-styled, zero deps, matches the Luckin "selected = blue accent" affordance without copying the exact illustrated look.
+
+**Trade-offs:**
+
+- Visual style is "Apple-standard" rather than "branded illustration." If product later decides the brand needs illustrated icons, we revisit and add one SPM package (Phosphor is the recommended choice in that case — most icons, most active).
+- The Luckin-exact "blue circle behind selected icon" treatment is not possible with the system `TabView` and is explicitly deferred — would require a hand-rolled custom tab bar. See `apps/ios/PulseCoffeeApp/Features/Navigation/README.md` "Follow-ups."
+
+**Revisit when:** product gives a "brand identity" directive that says the system look is off-brand, or when the design system formalizes a custom icon set.
