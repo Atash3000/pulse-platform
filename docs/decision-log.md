@@ -2545,3 +2545,15 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 **Update 2026-05-22 — Orders tab QA follow-up:** QA caught that a literal white empty-state cup becomes visually loud on a dark tab bar. Empty now maps to no cup overlay instead of a color token, while `.preparing` and `.ready` keep explicit status colors. `OrdersTabState` is internal so tests can pin the empty-state behavior, and the decorative SVG layers are accessibility-hidden because the parent tab button owns the accessible label.
 
 **Update 2026-05-23 — Orders status color contrast follow-up:** QA caught that SwiftUI's default `.green` and `.yellow` fail the 3:1 UI-icon contrast threshold on a white tab bar. `AppTheme.Colors.orderReady` and `orderPreparing` now read from `OrderReadyColor` and `OrderPreparingColor` asset-catalog color sets with light/dark variants, and `MainTabTests` pins both the state-to-color mapping and minimum contrast against `AppTheme.Colors.tabBarBackground`. The small sparkle strokes in `PulseOrdersMark` were also thickened to avoid subpixel blur at the default branded tab icon size.
+
+## 2026-05-23 — [iOS] Pulse Home tab mark
+
+**Decision:** Add the manager-provided Pulse matcha house SVG as an Asset Catalog image set and use it for the Home tab.
+
+**Context:** Home still used the SF Symbol house while Menu and Orders had moved to Pulse-branded SVG marks. The manager provided `pulse_home_matcha_house_icon.svg` plus a PNG reference for the Home tab icon.
+
+**Alternatives considered:** Use the PNG directly. Rejected because vector assets scale cleanly with the custom tab bar's Dynamic Type-driven icon sizing. Use the provided 1024x1024 SVG unchanged. Rejected because the rounded-square app-icon background would make the tab icon shrink inside the original canvas.
+
+**Reasoning:** The tab variant lives at `Assets.xcassets/PulseHomeMark.imageset/pulse_home_mark.svg`. It removes the app-icon rounded-square background and shadow, keeps the house/leaf/P mark artwork original-rendered so the gradients survive, and crops the viewBox around the visible mark so it fills the branded tab slot consistently with the Menu mark.
+
+**Trade-offs:** Like the Menu mark, the Home icon itself does not tint blue when selected. Selection remains communicated by the Home label color, semibold label, and accessibility selected trait.

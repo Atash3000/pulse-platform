@@ -42,6 +42,7 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     /// Asset Catalog icon for brand-specific tabs.
     var customAssetName: String? {
         switch self {
+        case .home: return "PulseHomeMark"
         case .menu: return "PulseCupMark"
         default:    return nil
         }

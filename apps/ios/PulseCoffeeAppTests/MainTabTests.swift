@@ -41,14 +41,15 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.account.tabBarSymbolName, "person.crop.circle")
     }
 
-    func test_customAssetName_onlyMenuOverridesSFSymbol() {
-        XCTAssertNil(MainTab.home.customAssetName)
+    func test_customAssetName_brandTabsOverrideSFSymbol() {
+        XCTAssertEqual(MainTab.home.customAssetName, "PulseHomeMark")
         XCTAssertEqual(MainTab.menu.customAssetName, "PulseCupMark")
         XCTAssertNil(MainTab.orders.customAssetName)
         XCTAssertNil(MainTab.account.customAssetName)
     }
 
     func test_customAssets_existInBundle() {
+        XCTAssertNotNil(UIImage(named: "PulseHomeMark"))
         XCTAssertNotNil(UIImage(named: "PulseCupMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersCupState"))

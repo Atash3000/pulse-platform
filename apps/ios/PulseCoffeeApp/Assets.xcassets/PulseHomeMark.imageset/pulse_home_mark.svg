@@ -1,0 +1,21 @@
+<svg width="24" height="24" viewBox="180 150 665 665" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Pulse Coffee Home Mark</title>
+  <desc>Tab-bar-sized Pulse home mark, cropped from the manager-provided matcha house SVG.</desc>
+  <defs>
+    <linearGradient id="house" x1="256" y1="236" x2="768" y2="810" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3D2B1F"/>
+      <stop offset="1" stop-color="#1A1208"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="456" y1="250" x2="644" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#BFD8A8"/>
+      <stop offset="0.55" stop-color="#7E9C7A"/>
+      <stop offset="1" stop-color="#4E7A48"/>
+    </linearGradient>
+  </defs>
+
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M512 178L212 444C188 465 203 504 235 504H275V745C275 769 294 788 318 788H430V565C430 541 449 522 473 522H551C575 522 594 541 594 565V788H706C730 788 749 769 749 745V504H789C821 504 836 465 812 444L512 178Z" fill="url(#house)"/>
+  <path d="M509 548H584C651 548 701 593 701 652C701 712 650 756 584 756H509V548Z" fill="#F5EFE3"/>
+  <path d="M594 608C623 608 642 624 642 650C642 676 623 692 594 692H566V608H594Z" fill="url(#house)"/>
+  <path d="M530 236C618 291 649 363 617 435C591 494 533 536 486 609C494 519 435 476 457 391C475 320 520 286 530 236Z" fill="url(#leaf)"/>
+  <path d="M491 252C529 329 523 405 474 473C451 505 438 535 437 570" stroke="#FFF4DB" stroke-width="24" stroke-linecap="round"/>
+</svg>
