@@ -54,5 +54,17 @@
       "Bash(git branch -D main)",
       "Bash(git branch -D master)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
   }
 }
