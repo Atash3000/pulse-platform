@@ -19,8 +19,8 @@ enum AppTheme {
         static let pulseMatchaLight = Color(red: 167 / 255, green: 201 / 255, blue: 87 / 255)
         static let pulseCream = Color(red: 246 / 255, green: 244 / 255, blue: 239 / 255)
         static let tabIconBrand = pulseMatcha
-        static let orderReady = Color.green
-        static let orderPreparing = Color.yellow
+        static let orderReady = Color("OrderReadyColor")
+        static let orderPreparing = Color("OrderPreparingColor")
     }
 
     enum Metrics {

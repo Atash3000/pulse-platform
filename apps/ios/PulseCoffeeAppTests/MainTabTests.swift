@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import SwiftUI
 @testable import PulseCoffeeApp
 
 /// Locks down the public contract of the `MainTab` enum that drives the
@@ -55,8 +56,24 @@ final class MainTabTests: XCTestCase {
 
     func test_ordersTabState_emptyDoesNotDrawCupOverlay() {
         XCTAssertNil(OrdersTabState.empty.cupColor)
-        XCTAssertNotNil(OrdersTabState.preparing.cupColor)
-        XCTAssertNotNil(OrdersTabState.ready.cupColor)
+    }
+
+    func test_ordersTabState_usesExpectedCupColors() {
+        assertColor(OrdersTabState.preparing.cupColor,
+                    equals: AppTheme.Colors.orderPreparing)
+        assertColor(OrdersTabState.ready.cupColor,
+                    equals: AppTheme.Colors.orderReady)
+    }
+
+    func test_orderStatusColors_passTabBarContrastInLightAndDark() {
+        assertMinimumIconContrast(AppTheme.Colors.orderPreparing,
+                                  userInterfaceStyle: .light)
+        assertMinimumIconContrast(AppTheme.Colors.orderPreparing,
+                                  userInterfaceStyle: .dark)
+        assertMinimumIconContrast(AppTheme.Colors.orderReady,
+                                  userInterfaceStyle: .light)
+        assertMinimumIconContrast(AppTheme.Colors.orderReady,
+                                  userInterfaceStyle: .dark)
     }
 
     func test_idMatchesRawValue() {
@@ -73,5 +90,108 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.menu.rawValue,    "menu")
         XCTAssertEqual(MainTab.orders.rawValue,  "orders")
         XCTAssertEqual(MainTab.account.rawValue, "account")
+    }
+
+    private func assertColor(
+        _ actual: Color?,
+        equals expected: Color,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let actual else {
+            XCTFail("Expected a color, got nil", file: file, line: line)
+            return
+        }
+
+        assertUIColor(UIColor(actual),
+                      equals: UIColor(expected),
+                      userInterfaceStyle: .light,
+                      file: file,
+                      line: line)
+        assertUIColor(UIColor(actual),
+                      equals: UIColor(expected),
+                      userInterfaceStyle: .dark,
+                      file: file,
+                      line: line)
+    }
+
+    private func assertMinimumIconContrast(
+        _ foreground: Color,
+        userInterfaceStyle: UIUserInterfaceStyle,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let traits = UITraitCollection(userInterfaceStyle: userInterfaceStyle)
+        let foregroundColor = UIColor(foreground).resolvedColor(with: traits)
+        let backgroundColor = UIColor(AppTheme.Colors.tabBarBackground).resolvedColor(with: traits)
+        let ratio = contrastRatio(foregroundColor, backgroundColor)
+
+        XCTAssertGreaterThanOrEqual(ratio,
+                                    3.0,
+                                    "Order status tab icon color must pass 3:1 UI contrast in \(userInterfaceStyle)",
+                                    file: file,
+                                    line: line)
+    }
+
+    private func assertUIColor(
+        _ actual: UIColor,
+        equals expected: UIColor,
+        userInterfaceStyle: UIUserInterfaceStyle,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let traits = UITraitCollection(userInterfaceStyle: userInterfaceStyle)
+        let actualComponents = rgbaComponents(actual.resolvedColor(with: traits),
+                                              file: file,
+                                              line: line)
+        let expectedComponents = rgbaComponents(expected.resolvedColor(with: traits),
+                                                file: file,
+                                                line: line)
+
+        XCTAssertEqual(actualComponents.red, expectedComponents.red, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actualComponents.green, expectedComponents.green, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actualComponents.blue, expectedComponents.blue, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actualComponents.alpha, expectedComponents.alpha, accuracy: 0.001, file: file, line: line)
+    }
+
+    private func contrastRatio(_ lhs: UIColor, _ rhs: UIColor) -> CGFloat {
+        let lhsLuminance = relativeLuminance(lhs)
+        let rhsLuminance = relativeLuminance(rhs)
+        let lighter = max(lhsLuminance, rhsLuminance)
+        let darker = min(lhsLuminance, rhsLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private func relativeLuminance(_ color: UIColor) -> CGFloat {
+        let components = rgbaComponents(color)
+        let red = linearizedColorComponent(components.red)
+        let green = linearizedColorComponent(components.green)
+        let blue = linearizedColorComponent(components.blue)
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    }
+
+    private func linearizedColorComponent(_ component: CGFloat) -> CGFloat {
+        component <= 0.03928
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
+    }
+
+    private func rgbaComponents(
+        _ color: UIColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        XCTAssertTrue(color.getRed(&red,
+                                   green: &green,
+                                   blue: &blue,
+                                   alpha: &alpha),
+                      "Expected RGB-compatible color",
+                      file: file,
+                      line: line)
+        return (red, green, blue, alpha)
     }
 }

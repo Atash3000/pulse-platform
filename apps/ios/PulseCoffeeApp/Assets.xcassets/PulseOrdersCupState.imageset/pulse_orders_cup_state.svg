@@ -1,6 +1,7 @@
 <svg width="24" height="24" viewBox="220 120 720 720" fill="none" xmlns="http://www.w3.org/2000/svg">
   <title>Pulse Coffee Orders Cup State</title>
   <desc>Template-rendered cup layer for Orders tab state coloring.</desc>
+  <!-- Keep this viewBox in sync with PulseOrdersMark; SwiftUI layers them directly. -->
 
   <path d="M425 500H599L570 676C566 700 546 717 522 717H502C478 717 458 700 454 676L425 500Z" fill="#000000"/>
   <path d="M418 453H606C623 453 637 467 637 484C637 501 623 515 606 515H418C401 515 387 501 387 484C387 467 401 453 418 453Z" fill="#000000"/>

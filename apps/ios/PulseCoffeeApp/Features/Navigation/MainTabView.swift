@@ -107,7 +107,7 @@ private struct PulseTabBar: View {
     }
 }
 
-enum OrdersTabState {
+enum OrdersTabState: Equatable, Hashable {
     case empty
     case preparing
     case ready
