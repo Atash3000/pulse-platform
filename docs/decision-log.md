@@ -2557,3 +2557,15 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 **Reasoning:** The tab variant lives at `Assets.xcassets/PulseHomeMark.imageset/pulse_home_mark.svg`. It removes the app-icon rounded-square background and shadow, keeps the house/leaf/P mark artwork original-rendered so the gradients survive, and crops the viewBox around the visible mark so it fills the branded tab slot consistently with the Menu mark.
 
 **Trade-offs:** Like the Menu mark, the Home icon itself does not tint blue when selected. Selection remains communicated by the Home label color, semibold label, and accessibility selected trait.
+
+## 2026-05-23 — [iOS] Pulse Account tab mark
+
+**Decision:** Add the manager-provided Pulse account SVG as a template-rendered Asset Catalog image set and use it for the Account tab.
+
+**Context:** Account was the last tab still using a plain SF Symbol. The manager provided `pulse-account-active.svg` and asked that tab SVGs follow consistent icon-system rules: matching optical weight, corner-radius logic, stroke family, visual density, and active/inactive behavior.
+
+**Alternatives considered:** Use the provided active SVG exactly as-is. Rejected because its 1.7pt stroke was lighter than the emerging tab icon family. Convert all existing Home/Menu/Orders marks to the same active/inactive stroke system in this PR. Rejected because Home/Menu intentionally preserve supplied multi-color gradients, and Orders carries order-status state; redesigning those would be a separate visual-system pass.
+
+**Reasoning:** `PulseAccountMark` uses a 24x24 template SVG with 2.1pt rounded strokes, rounded line caps, and rounded joins. `MainTab.customAssetRendering` now distinguishes original-rendered brand marks from template-rendered marks. Template marks use `AppTheme.Colors.tabIconActive` for selected state and `AppTheme.Colors.tabIconInactive` for inactive state, with contrast tests covering both colors in light and dark mode.
+
+**Trade-offs:** The current tab set still mixes original-rendered logo marks (Home/Menu), an order-state composite mark (Orders), and a template mark (Account). This keeps the supplied brand artwork intact while establishing the reusable active/inactive template path for future icons.

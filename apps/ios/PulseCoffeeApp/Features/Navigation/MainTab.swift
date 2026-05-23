@@ -44,7 +44,19 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: return "PulseHomeMark"
         case .menu: return "PulseCupMark"
+        case .account: return "PulseAccountMark"
         default:    return nil
+        }
+    }
+
+    /// Rendering mode for brand-specific tab assets.
+    ///
+    /// Original-rendered assets keep multi-color logo gradients. Template
+    /// assets opt into the shared active/inactive tab icon color system.
+    var customAssetRendering: TabAssetRendering {
+        switch self {
+        case .account: return .template
+        default:       return .original
         }
     }
 
@@ -58,4 +70,9 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .account: return "person.crop.circle.fill"
         }
     }
+}
+
+enum TabAssetRendering: Equatable {
+    case original
+    case template
 }

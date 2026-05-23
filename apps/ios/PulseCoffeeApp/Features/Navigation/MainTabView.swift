@@ -94,11 +94,21 @@ private struct PulseTabBar: View {
             PulseOrdersTabIcon(state: ordersState)
                 .frame(width: brandedIconSize, height: brandedIconSize)
         } else if let assetName = tab.customAssetName {
-            Image(assetName)
-                .renderingMode(.original)
-                .resizable()
-                .scaledToFit()
-                .frame(width: brandedIconSize, height: brandedIconSize)
+            switch tab.customAssetRendering {
+            case .original:
+                Image(assetName)
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: brandedIconSize, height: brandedIconSize)
+            case .template:
+                Image(assetName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(isSelected ? AppTheme.Colors.tabIconActive : AppTheme.Colors.tabIconInactive)
+                    .frame(width: brandedIconSize, height: brandedIconSize)
+            }
         } else {
             Image(systemName: isSelected ? tab.selectedSymbolName : tab.tabBarSymbolName)
                 .font(.system(size: iconSize,

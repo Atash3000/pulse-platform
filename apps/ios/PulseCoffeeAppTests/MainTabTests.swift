@@ -45,7 +45,13 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.home.customAssetName, "PulseHomeMark")
         XCTAssertEqual(MainTab.menu.customAssetName, "PulseCupMark")
         XCTAssertNil(MainTab.orders.customAssetName)
-        XCTAssertNil(MainTab.account.customAssetName)
+        XCTAssertEqual(MainTab.account.customAssetName, "PulseAccountMark")
+    }
+
+    func test_customAssetRendering_isStableForBrandTabs() {
+        XCTAssertEqual(MainTab.home.customAssetRendering, .original)
+        XCTAssertEqual(MainTab.menu.customAssetRendering, .original)
+        XCTAssertEqual(MainTab.account.customAssetRendering, .template)
     }
 
     func test_customAssets_existInBundle() {
@@ -53,6 +59,7 @@ final class MainTabTests: XCTestCase {
         XCTAssertNotNil(UIImage(named: "PulseCupMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersCupState"))
+        XCTAssertNotNil(UIImage(named: "PulseAccountMark"))
     }
 
     func test_ordersTabState_emptyDoesNotDrawCupOverlay() {
@@ -74,6 +81,17 @@ final class MainTabTests: XCTestCase {
         assertMinimumIconContrast(AppTheme.Colors.orderReady,
                                   userInterfaceStyle: .light)
         assertMinimumIconContrast(AppTheme.Colors.orderReady,
+                                  userInterfaceStyle: .dark)
+    }
+
+    func test_templateTabIconColors_passTabBarContrastInLightAndDark() {
+        assertMinimumIconContrast(AppTheme.Colors.tabIconActive,
+                                  userInterfaceStyle: .light)
+        assertMinimumIconContrast(AppTheme.Colors.tabIconActive,
+                                  userInterfaceStyle: .dark)
+        assertMinimumIconContrast(AppTheme.Colors.tabIconInactive,
+                                  userInterfaceStyle: .light)
+        assertMinimumIconContrast(AppTheme.Colors.tabIconInactive,
                                   userInterfaceStyle: .dark)
     }
 
@@ -129,7 +147,7 @@ final class MainTabTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(ratio,
                                     3.0,
-                                    "Order status tab icon color must pass 3:1 UI contrast in \(userInterfaceStyle)",
+                                    "Tab icon color must pass 3:1 UI contrast in \(userInterfaceStyle)",
                                     file: file,
                                     line: line)
     }

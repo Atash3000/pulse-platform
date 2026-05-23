@@ -18,6 +18,8 @@ enum AppTheme {
         static let pulseMatcha = Color(red: 94 / 255, green: 127 / 255, blue: 45 / 255)
         static let pulseMatchaLight = Color(red: 167 / 255, green: 201 / 255, blue: 87 / 255)
         static let pulseCream = Color(red: 246 / 255, green: 244 / 255, blue: 239 / 255)
+        static let tabIconActive = Color(red: 154 / 255, green: 107 / 255, blue: 0 / 255)
+        static let tabIconInactive = Color(red: 122 / 255, green: 102 / 255, blue: 75 / 255)
         static let tabIconBrand = pulseMatcha
         static let orderReady = Color("OrderReadyColor")
         static let orderPreparing = Color("OrderPreparingColor")
