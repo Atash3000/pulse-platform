@@ -179,3 +179,104 @@ If Codex is about to change code that looks unusual and there's no decision-log 
 ---
 
 ## 5. Communication Protocol With The Manager
+
+---
+
+## 6. Branch Naming Convention
+
+Every new branch Codex creates follows this shape:
+
+```
+<type>/<scope>/<short-kebab-name>
+```
+
+### `<type>` — matches commit-message prefixes
+
+| Type | When to use |
+|---|---|
+| `feat` | New user-facing feature or capability |
+| `fix` | Bug fix |
+| `chore` | Tooling, dependencies, build config, AI workflow |
+| `docs` | Documentation only |
+| `refactor` | Code restructure with no behavior change |
+| `test` | Tests only |
+| `perf` | Performance change |
+| `ci` | CI/CD configuration |
+| `revert` | Reverting a prior commit |
+
+### `<scope>` — pick the most specific that applies
+
+In priority order, use the **highest** one available:
+
+1. **GitHub issue number** if the work has a tracked issue: `7`, `42`, `123` (just the digit — no `#`).
+2. **External tracker ID** if the project is using one (Jira, Linear): `DEV-123`, `PUL-45`. Keep the tracker's case.
+3. **Surface code** if no ticket exists:
+
+| Code | Surface |
+|---|---|
+| `ios` | iOS app (`apps/ios/`) |
+| `api` | NestJS backend (`apps/api/`) |
+| `dashboard` | Staff dashboard (`apps/dashboard/`, once it lands) |
+| `worker` | Background workers (`apps/api/src/workers/`) |
+| `infra` | Render / Terraform / IaC |
+| `tooling` | Dev tooling, AI workflow, scripts |
+| `docs` | Documentation (`docs/`) |
+| `shared` | Code shared across surfaces (DTOs, types, contracts) |
+| `android` | *(reserved)* Future Android app |
+| `web` | *(reserved)* Future customer web app, if separate from dashboard |
+| `telegram` | *(reserved)* Telegram bot (per spec Part 9) |
+
+4. **`no-ticket`** as a fallback sentinel for trivial work with no ticket and no single surface.
+
+### `<short-kebab-name>`
+
+- 2–6 words
+- All lowercase, kebab-case (`order-status-race-condition`, not `orderStatusRaceCondition`)
+- Describes the **outcome** of the change, not the process (`add-stripe-webhook` ✅ — `working-on-payments` ❌)
+- ≤ 40 chars after the slashes
+
+### Examples
+
+| Branch | What it means |
+|---|---|
+| `feat/7-orders-tab-icon` | New feature, tracked as GitHub issue #7 |
+| `feat/ios/menu-search-bar` | New iOS feature, no issue |
+| `feat/api/menu-bulk-update` | New backend feature, no issue |
+| `fix/42-stripe-webhook-double-process` | Bug fix for GitHub issue #42 |
+| `fix/api/order-status-race-condition` | Backend bug fix, no issue |
+| `fix/ios/checkout-button-disabled-state` | iOS bug fix, no issue |
+| `chore/tooling/sentry-mcp-integration` | Tooling change |
+| `docs/no-ticket/onboarding-readme` | Docs only, no surface |
+| `refactor/api/extract-pricing-module` | Pure refactor |
+| `perf/api/menu-query-eager-load` | Performance fix |
+
+**When the scope IS an issue number, drop the second slash:** `feat/7-orders-tab-icon` (not `feat/7/ios/orders-tab-icon`). The issue itself owns the surface metadata.
+
+### Recommended workflow for tickets: GitHub Issues
+
+Pulse Coffee uses GitHub Issues as the lightweight ticket tracker. Before starting non-trivial work:
+
+```bash
+gh issue create --title "..." --body "..."
+```
+
+GitHub returns an issue number. Use that number as the branch scope (`feat/7-orders-tab-icon`) and reference it in the PR body with `Closes #7` so the issue auto-closes on merge.
+
+For trivial work, skip the issue and use the surface code or `no-ticket`.
+
+### Anti-patterns — do not do these
+
+- ❌ `feature/IOS/no-ticket-nav-polish` — uses `feature` (mismatch with commit prefix `feat()`), uppercase scope, four-segment structure
+- ❌ `Feat/Ios/Nav-Polish` — any uppercase outside the ticket ID
+- ❌ `feat/ios/nav_polish` — underscores
+- ❌ `feat/ios/working-on-nav` — describes process, not outcome
+- ❌ `feat/#7/nav-polish` — the `#` confuses git tooling
+
+### Branches not covered
+
+- `main` — protected default branch
+- `claude/*` and `codex/*` — AI agent scratch worktrees, never promoted to PR branches
+
+### Enforcement
+
+Convention only — no git hook today. Per Golden Rule #15 ("ship boring and reliable first"), enforcement infrastructure can wait until the team grows beyond solo. If a branch lands that violates this, rename it (`git branch -m <new-name>`) before opening the PR.

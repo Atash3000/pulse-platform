@@ -84,4 +84,4 @@ Workflow — follow in order:
     - Risk matrix table (severity / item / action)
     - Final verdict: **approve / approve-with-changes / block**, plus the 1–3 items that gate it
 
-If the user later replies "fix it" or similar, then (and only then) implement the 🔴 and 🟠 items in a follow-up commit and report what changed.
+If the user later replies "fix it" or similar, then (and only then) implement the 🔴 and 🟠 items in a follow-up commit and report what changed. When the fix is large enough to warrant its own branch instead of an additional commit on the existing PR, name it per CLAUDE.md §7 — `<type>/<scope>/<short-kebab-name>` (e.g. `fix/<pr-number>-checkout-idempotency-followup`).
