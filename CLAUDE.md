@@ -15,8 +15,8 @@ The manager (a non-technical founder) relies on Claude to apply senior-engineer 
 Before making ANY code change, Claude must:
 
 1. Read `docs/decision-log.md` end-to-end. Every architectural decision in this project is documented there. If the manager's prompt conflicts with a logged decision, surface that conflict before changing anything.
-2. Read all `README.md` files in the relevant area (project root, `apps/api/`, `apps/ios/`, `apps/dashboard/`, etc.).
-3. Read `PulseCoffee_Final_Spec_v4.pdf` (or the latest spec version) at minimum the relevant Part for the area being changed. Spec parts are: 1 Overview, 2 Architecture, 3 Database, 4 Backend, 5 Core Flows, 6 iOS, 7 Roadmap, 8 AI, 9 Dashboard + Telegram, 10 Infra/Security, 11 Build Plan, 12 Costs, 13 Golden Rules, 14 Decision Log, 15 v3→v4 Changes.
+2. Read all `README.md` files in the relevant area (project root, `apps/api/`, `apps/ios/`, and `apps/dashboard/` once it lands).
+3. Read the in-repo engineering documentation that covers the area being changed. The canonical sources are `docs/architecture.md` (system shape), `docs/golden-rules.md` (the 15 rules in §3), `docs/glossary.md` (project vocabulary), and `docs/troubleshooting.md` (known-good fixes). The full product spec (`PulseCoffee_Final_Spec_v4.pdf`) lives outside the repo — if the manager has shared it for this session, read at minimum the Part relevant to the area being changed (Parts: 1 Overview, 2 Architecture, 3 Database, 4 Backend, 5 Core Flows, 6 iOS, 7 Roadmap, 8 AI, 9 Dashboard + Telegram, 10 Infra/Security, 11 Build Plan, 12 Costs, 13 Golden Rules, 14 Decision Log, 15 v3→v4 Changes). If the spec is not available in the session, rely on the in-repo docs above and flag any gap before shipping a change that depends on un-checked spec content.
 4. Read inline code comments in the files being modified, plus their direct dependencies. Comments often explain why code looks unusual.
 5. Read the relevant test files. The tests are the executable specification of what the code is required to do.
 6. Read `docs/ai-onboarding/` if it exists — it contains surface-specific guidance (backend.md, ios.md, dashboard.md, devops.md).
@@ -178,4 +178,10 @@ If Claude is about to change code that looks unusual and there's no decision-log
 
 ---
 
-## 5. Communication Protocol With The Manager
+## 5. Project Slash Commands
+
+Repeatable workflows live in `.claude/commands/` and are invoked by typing `/<name>` in a Claude Code session opened against this repo. Slash commands are **opt-in** — they only run when you type them, they do not auto-trigger. Available today:
+
+- **`/qa-review <github-url>`** — runs a FAANG-tier QA review of any branch, PR, or commit URL. Fetches the remote, reads the diff plus surrounding files, re-runs the project's test suite, evaluates correctness / performance / accessibility (WCAG) / i18n / dark mode / Dynamic Type / threading / memory / error paths / test quality / scope discipline / future-proofing / repo hygiene, cites `file:line` for every claim, and risk-tiers findings. Definition: `.claude/commands/qa-review.md`.
+
+Add a new command by dropping a new `.md` file into `.claude/commands/`. The filename (minus `.md`) becomes the command name. See the existing `qa-review.md` for the frontmatter pattern (`description`, `argument-hint`) and the `$ARGUMENTS` substitution.
