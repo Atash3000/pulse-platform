@@ -182,6 +182,13 @@ If Claude is about to change code that looks unusual and there's no decision-log
 
 Repeatable workflows live in `.claude/commands/` and are invoked by typing `/<name>` in a Claude Code session opened against this repo. Slash commands are **opt-in** — they only run when you type them, they do not auto-trigger. Available today:
 
-- **`/qa-review <github-url>`** — runs a FAANG-tier QA review of any branch, PR, or commit URL. Fetches the remote, reads the diff plus surrounding files, re-runs the project's test suite, evaluates correctness / performance / accessibility (WCAG) / i18n / dark mode / Dynamic Type / threading / memory / error paths / test quality / scope discipline / future-proofing / repo hygiene, cites `file:line` for every claim, and risk-tiers findings. Definition: `.claude/commands/qa-review.md`.
+- **`/qa <github-url>`** — runs a FAANG-tier QA review of any branch, PR, or commit URL. Fetches the remote, reads the diff plus surrounding files, re-runs the project's test suite, evaluates correctness / performance / accessibility (WCAG) / i18n / dark mode / Dynamic Type / threading / memory / error paths / test quality / scope discipline / future-proofing / repo hygiene, cites `file:line` for every claim, and risk-tiers findings. Definition: `.claude/commands/qa.md`.
+- **`/review-pr <pr-number>`** — same FAANG-tier review, but takes just a PR number (e.g. `/review-pr 7`). Uses `gh pr view` to fetch metadata, CI status, and prior reviewer comments before reading the diff. Auto-spawns the `payment-reviewer` sub-agent if the diff touches Stripe / checkout / order-state-machine paths. Definition: `.claude/commands/review-pr.md`.
 
-Add a new command by dropping a new `.md` file into `.claude/commands/`. The filename (minus `.md`) becomes the command name. See the existing `qa-review.md` for the frontmatter pattern (`description`, `argument-hint`) and the `$ARGUMENTS` substitution.
+Add a new command by dropping a new `.md` file into `.claude/commands/`. The filename (minus `.md`) becomes the command name. See the existing `qa.md` for the frontmatter pattern (`description`, `argument-hint`) and the `$ARGUMENTS` substitution.
+
+## 6. Project Sub-Agents
+
+Specialist sub-agents live in `.claude/agents/`. They have their own system prompts and a restricted tool list, so they can review or analyze a narrow domain without the risk of editing outside it. Available today:
+
+- **`payment-reviewer`** — read-only specialist for Stripe / checkout / order-state-machine / money-handling code. Auto-invoked by `/review-pr` when a PR touches payment-scoped paths. Enforces Golden Rules #2, #3, #4, #5, #6, #7, #8, #14 cold. Definition: `.claude/agents/payment-reviewer.md`. The agent's tool list excludes `Edit`, `Write`, and `NotebookEdit` — it physically cannot modify files, only produce written reviews.
