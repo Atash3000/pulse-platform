@@ -7,20 +7,18 @@ import SwiftUI
 /// across feature screens.
 enum AppTheme {
     enum Colors {
-        static let accent = Color.blue
         static let iconSecondary = Color.secondary
         static let warning = Color.orange
         static let destructive = Color.red
         static let onBadge = Color.white
-        static let tabBarBackground = Color(.systemBackground)
-        static let divider = Color(.separator)
+        static let tabBarBackground = Color(red: 251 / 255, green: 247 / 255, blue: 240 / 255)
+        static let divider = Color(red: 122 / 255, green: 92 / 255, blue: 68 / 255)
 
-        static let pulseMatcha = Color(red: 94 / 255, green: 127 / 255, blue: 45 / 255)
-        static let pulseMatchaLight = Color(red: 167 / 255, green: 201 / 255, blue: 87 / 255)
-        static let pulseCream = Color(red: 246 / 255, green: 244 / 255, blue: 239 / 255)
-        static let tabIconBrand = pulseMatcha
-        static let orderReady = Color("OrderReadyColor")
-        static let orderPreparing = Color("OrderPreparingColor")
+        static let tabIconActive = Color(red: 184 / 255, green: 131 / 255, blue: 30 / 255)
+        static let tabIconInactive = Color(red: 122 / 255, green: 102 / 255, blue: 75 / 255)
+        static let tabIconMatchaAccent = Color(red: 111 / 255, green: 139 / 255, blue: 112 / 255)
+        static let tabLabelActive = Color(red: 26 / 255, green: 18 / 255, blue: 8 / 255)
+        static let tabLabelInactive = tabIconInactive
     }
 
     enum Metrics {

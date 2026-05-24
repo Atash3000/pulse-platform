@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "pulse_cup_mark.svg",
+      "filename" : "pulse_home_leaf_accent.svg",
       "idiom" : "universal"
     }
   ],
@@ -11,6 +11,6 @@
   },
   "properties" : {
     "preserves-vector-representation" : true,
-    "template-rendering-intent" : "original"
+    "template-rendering-intent" : "template"
   }
 }

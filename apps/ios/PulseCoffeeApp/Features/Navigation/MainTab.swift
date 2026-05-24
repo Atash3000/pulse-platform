@@ -39,10 +39,28 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     /// can be layered on without changing analytics/deep-link identifiers.
     var tabBarSymbolName: String { symbolName }
 
-    /// Asset Catalog icon for brand-specific tabs.
+    /// Layered Asset Catalog icons for brand-specific tabs that need a
+    /// separate matcha accent in the selected state.
+    var layeredAssetNames: LayeredTabAsset? {
+        switch self {
+        case .home:
+            return LayeredTabAsset(baseName: "PulseHomeMark",
+                                   accentName: "PulseHomeLeafAccent")
+        case .menu:
+            return LayeredTabAsset(baseName: "PulseMenuMark",
+                                   accentName: "PulseMenuAccent")
+        case .orders:
+            return LayeredTabAsset(baseName: "PulseOrdersMark",
+                                   accentName: "PulseOrdersAccent")
+        default:
+            return nil
+        }
+    }
+
+    /// Single-layer Asset Catalog icon for brand-specific tabs.
     var customAssetName: String? {
         switch self {
-        case .menu: return "PulseCupMark"
+        case .account: return "PulseAccountMark"
         default:    return nil
         }
     }
@@ -57,4 +75,9 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .account: return "person.crop.circle.fill"
         }
     }
+}
+
+struct LayeredTabAsset: Equatable {
+    let baseName: String
+    let accentName: String?
 }

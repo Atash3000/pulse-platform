@@ -1,13 +1,7 @@
-<svg width="24" height="24" viewBox="220 120 720 720" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <title>Pulse Coffee Orders Bag Mark</title>
-  <desc>Template-rendered tab-bar Pulse orders bag and sparkles. Derived from manager-provided pulse_orders_bag_sparkle.svg.</desc>
-  <!-- Keep this viewBox in sync with PulseOrdersCupState; SwiftUI layers them directly. -->
-
-  <path d="M279 780C251 780 230 755 234 727L292 336C297 306 322 284 352 284H672C702 284 727 306 732 336L790 727C794 755 773 780 745 780H279Z" fill="#000000" stroke="#000000" stroke-width="18" stroke-linejoin="round"/>
-
-  <path d="M396 313V264C396 198 448 146 512 146C576 146 628 198 628 264V313" stroke="#000000" stroke-width="58" stroke-linecap="round"/>
-  <path d="M396 313V264C396 198 448 146 512 146C576 146 628 198 628 264V313" stroke="#000000" stroke-width="34" stroke-linecap="round"/>
-
-  <path d="M800 304C825 376 844 395 916 420C844 445 825 464 800 536C775 464 756 445 684 420C756 395 775 376 800 304Z" fill="#000000" stroke="#000000" stroke-width="18" stroke-linejoin="round"/>
-  <path d="M734 154C750 199 762 211 807 227C762 243 750 255 734 300C718 255 706 243 661 227C706 211 718 199 734 154Z" fill="#000000" stroke="#000000" stroke-width="18" stroke-linejoin="round"/>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Pulse Coffee Orders Mark</title>
+  <desc>Template-rendered shopping bag base layer for the Orders tab icon.</desc>
+  <path d="M6 8.5H18V18C18 19.3807 16.8807 20.5 15.5 20.5H8.5C7.1193 20.5 6 19.3807 6 18Z" stroke="#000000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6 8.5L7.6 5.7H16.4L18 8.5" stroke="#000000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9.4 12C9.4 13.6 10.6 14.6 12 14.6C13.4 14.6 14.6 13.6 14.6 12" stroke="#000000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
