@@ -71,19 +71,45 @@ final class MainTabTests: XCTestCase {
         XCTAssertNotNil(UIImage(named: "PulseAccountMark"))
     }
 
-    func test_navBarSpecColors_areStable() {
+    func test_navBarColors_areStable() {
         assertColor(AppTheme.Colors.tabIconActive,
-                    equals: Color(red: 200 / 255, green: 151 / 255, blue: 58 / 255))
+                    equals: Color(red: 184 / 255, green: 131 / 255, blue: 30 / 255))
         assertColor(AppTheme.Colors.tabIconInactive,
-                    equals: Color(red: 168 / 255, green: 140 / 255, blue: 114 / 255))
+                    equals: Color(red: 122 / 255, green: 102 / 255, blue: 75 / 255))
         assertColor(AppTheme.Colors.tabIconMatchaAccent,
-                    equals: Color(red: 139 / 255, green: 168 / 255, blue: 136 / 255))
+                    equals: Color(red: 111 / 255, green: 139 / 255, blue: 112 / 255))
         assertColor(AppTheme.Colors.tabLabelActive,
                     equals: Color(red: 26 / 255, green: 18 / 255, blue: 8 / 255))
         assertColor(AppTheme.Colors.tabLabelInactive,
                     equals: AppTheme.Colors.tabIconInactive)
         assertColor(AppTheme.Colors.tabBarBackground,
                     equals: Color(red: 251 / 255, green: 247 / 255, blue: 240 / 255))
+    }
+
+    func test_navBarIconColors_passMinimumContrastAgainstCreamBar() {
+        assertMinimumContrast(AppTheme.Colors.tabIconActive,
+                              against: AppTheme.Colors.tabBarBackground,
+                              threshold: 3.0,
+                              purpose: "active tab icon")
+        assertMinimumContrast(AppTheme.Colors.tabIconInactive,
+                              against: AppTheme.Colors.tabBarBackground,
+                              threshold: 3.0,
+                              purpose: "inactive tab icon")
+        assertMinimumContrast(AppTheme.Colors.tabIconMatchaAccent,
+                              against: AppTheme.Colors.tabBarBackground,
+                              threshold: 3.0,
+                              purpose: "active matcha accent")
+    }
+
+    func test_navBarLabelColors_passTextContrastAgainstCreamBar() {
+        assertMinimumContrast(AppTheme.Colors.tabLabelActive,
+                              against: AppTheme.Colors.tabBarBackground,
+                              threshold: 4.5,
+                              purpose: "active tab label")
+        assertMinimumContrast(AppTheme.Colors.tabLabelInactive,
+                              against: AppTheme.Colors.tabBarBackground,
+                              threshold: 4.5,
+                              purpose: "inactive tab label")
     }
 
     func test_idMatchesRawValue() {
@@ -139,6 +165,48 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(actualComponents.green, expectedComponents.green, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(actualComponents.blue, expectedComponents.blue, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(actualComponents.alpha, expectedComponents.alpha, accuracy: 0.001, file: file, line: line)
+    }
+
+    private func assertMinimumContrast(
+        _ foreground: Color,
+        against background: Color,
+        threshold: CGFloat,
+        purpose: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let traits = UITraitCollection(userInterfaceStyle: .light)
+        let foregroundColor = UIColor(foreground).resolvedColor(with: traits)
+        let backgroundColor = UIColor(background).resolvedColor(with: traits)
+        let ratio = contrastRatio(foregroundColor, backgroundColor)
+
+        XCTAssertGreaterThanOrEqual(ratio,
+                                    threshold,
+                                    "\(purpose) contrast must be at least \(threshold):1 against the fixed cream tab bar",
+                                    file: file,
+                                    line: line)
+    }
+
+    private func contrastRatio(_ lhs: UIColor, _ rhs: UIColor) -> CGFloat {
+        let lhsLuminance = relativeLuminance(lhs)
+        let rhsLuminance = relativeLuminance(rhs)
+        let lighter = max(lhsLuminance, rhsLuminance)
+        let darker = min(lhsLuminance, rhsLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private func relativeLuminance(_ color: UIColor) -> CGFloat {
+        let components = rgbaComponents(color)
+        let red = linearizedColorComponent(components.red)
+        let green = linearizedColorComponent(components.green)
+        let blue = linearizedColorComponent(components.blue)
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    }
+
+    private func linearizedColorComponent(_ component: CGFloat) -> CGFloat {
+        component <= 0.03928
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
     }
 
     private func rgbaComponents(
