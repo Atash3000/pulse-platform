@@ -49,13 +49,14 @@ final class MainTabTests: XCTestCase {
     }
 
     func test_customAssetRendering_isStableForBrandTabs() {
-        XCTAssertEqual(MainTab.home.customAssetRendering, .original)
+        XCTAssertEqual(MainTab.home.customAssetRendering, .template)
         XCTAssertEqual(MainTab.menu.customAssetRendering, .original)
         XCTAssertEqual(MainTab.account.customAssetRendering, .template)
     }
 
     func test_customAssets_existInBundle() {
         XCTAssertNotNil(UIImage(named: "PulseHomeMark"))
+        XCTAssertNotNil(UIImage(named: "PulseHomeLeafAccent"))
         XCTAssertNotNil(UIImage(named: "PulseCupMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersCupState"))
@@ -84,15 +85,19 @@ final class MainTabTests: XCTestCase {
                                   userInterfaceStyle: .dark)
     }
 
-    func test_templateTabIconColors_passTabBarContrastInLightAndDark() {
-        assertMinimumIconContrast(AppTheme.Colors.tabIconActive,
-                                  userInterfaceStyle: .light)
-        assertMinimumIconContrast(AppTheme.Colors.tabIconActive,
-                                  userInterfaceStyle: .dark)
-        assertMinimumIconContrast(AppTheme.Colors.tabIconInactive,
-                                  userInterfaceStyle: .light)
-        assertMinimumIconContrast(AppTheme.Colors.tabIconInactive,
-                                  userInterfaceStyle: .dark)
+    func test_navBarSpecColors_areStable() {
+        assertColor(AppTheme.Colors.tabIconActive,
+                    equals: Color(red: 200 / 255, green: 151 / 255, blue: 58 / 255))
+        assertColor(AppTheme.Colors.tabIconInactive,
+                    equals: Color(red: 168 / 255, green: 140 / 255, blue: 114 / 255))
+        assertColor(AppTheme.Colors.tabIconMatchaAccent,
+                    equals: Color(red: 139 / 255, green: 168 / 255, blue: 136 / 255))
+        assertColor(AppTheme.Colors.tabLabelActive,
+                    equals: Color(red: 26 / 255, green: 18 / 255, blue: 8 / 255))
+        assertColor(AppTheme.Colors.tabLabelInactive,
+                    equals: AppTheme.Colors.tabIconInactive)
+        assertColor(AppTheme.Colors.tabBarBackground,
+                    equals: Color(red: 251 / 255, green: 247 / 255, blue: 240 / 255))
     }
 
     func test_idMatchesRawValue() {
@@ -122,6 +127,24 @@ final class MainTabTests: XCTestCase {
             return
         }
 
+        assertUIColor(UIColor(actual),
+                      equals: UIColor(expected),
+                      userInterfaceStyle: .light,
+                      file: file,
+                      line: line)
+        assertUIColor(UIColor(actual),
+                      equals: UIColor(expected),
+                      userInterfaceStyle: .dark,
+                      file: file,
+                      line: line)
+    }
+
+    private func assertColor(
+        _ actual: Color,
+        equals expected: Color,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         assertUIColor(UIColor(actual),
                       equals: UIColor(expected),
                       userInterfaceStyle: .light,

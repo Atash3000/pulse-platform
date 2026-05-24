@@ -55,8 +55,8 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     /// assets opt into the shared active/inactive tab icon color system.
     var customAssetRendering: TabAssetRendering {
         switch self {
-        case .account: return .template
-        default:       return .original
+        case .home, .account: return .template
+        default:             return .original
         }
     }
 

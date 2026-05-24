@@ -2546,17 +2546,19 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 
 **Update 2026-05-23 — Orders status color contrast follow-up:** QA caught that SwiftUI's default `.green` and `.yellow` fail the 3:1 UI-icon contrast threshold on a white tab bar. `AppTheme.Colors.orderReady` and `orderPreparing` now read from `OrderReadyColor` and `OrderPreparingColor` asset-catalog color sets with light/dark variants, and `MainTabTests` pins both the state-to-color mapping and minimum contrast against `AppTheme.Colors.tabBarBackground`. The small sparkle strokes in `PulseOrdersMark` were also thickened to avoid subpixel blur at the default branded tab icon size.
 
+**Update 2026-05-23 — Pulse nav palette:** The Orders bag layer now follows the selected tab palette (`#C8973A` active, `#A88C72` inactive) instead of the earlier matcha brand token. The cup-status overlay remains separate so backend-backed order state can still show preparing/ready colors later. Because the nav bar background is now fixed to the warm cream spec in both appearances, the order-status color assets use their darker accessible variants in both light and dark mode.
+
 ## 2026-05-23 — [iOS] Pulse Home tab mark
 
-**Decision:** Add the manager-provided Pulse matcha house artwork as an Asset Catalog SVG image set and use it for the Home tab.
+**Decision:** Add the manager-provided flat Pulse home nav icon as Asset Catalog SVG layers and use it for the Home tab.
 
-**Context:** Home still used the SF Symbol house while Menu and Orders had moved to Pulse-branded SVG marks. The manager provided `pulse_home_matcha_house_icon.svg` plus a PNG reference for the Home tab icon.
+**Context:** Home still used the SF Symbol house while Menu and Orders had moved to Pulse-branded SVG marks. The manager provided `pulse-home-active.svg`, `pulse-home-navicon-preview.png`, and `pulse-navbar-spec.png` as the final flat nav direction.
 
-**Alternatives considered:** Use the PNG directly. Rejected because vector assets scale cleanly with the custom tab bar's Dynamic Type-driven icon sizing. Use the earlier cropped house-only SVG. Rejected after product selected the PNG composition with the cream rounded-square tile. Use the provided 1024x1024 SVG unchanged. Rejected because the tab asset should be a small, hand-trimmed vector without raster-only shadow details.
+**Alternatives considered:** Use the PNG preview directly. Rejected because vector assets scale cleanly with the custom tab bar's Dynamic Type-driven icon sizing. Keep the earlier cream tile icon. Rejected because the new nav spec calls for a flat linear icon at actual tab size. Store separate active and inactive full SVGs. Rejected because two template layers let SwiftUI apply state colors without duplicating the path data.
 
-**Reasoning:** The tab variant lives at `Assets.xcassets/PulseHomeMark.imageset/pulse_home_mark.svg`. It vectorizes the selected PNG composition as a 24x24 original-rendered asset: cream rounded-square tile, dark house, matcha leaf, and cream steam/P cutout. Keeping it in SVG avoids adding a raster icon while preserving the chosen visual composition at tab size.
+**Reasoning:** The Home icon now uses `PulseHomeMark` for the house/P layer and `PulseHomeLeafAccent` for the curl layer. Both are 24x24 template SVGs with 1.7pt rounded strokes matching the provided source. The custom tab bar now follows the supplied nav palette: active icon `#C8973A`, inactive icon/label `#A88C72`, Home active curl `#8BA888`, active label `#1A1208`, and bar background `#FBF7F0` at 92% opacity.
 
-**Trade-offs:** Like the Menu mark, the Home icon itself does not tint blue when selected. Selection remains communicated by the Home label color, semibold label, and accessibility selected trait.
+**Trade-offs:** The selected icon gold is the product-specified color rather than the darker contrast-safe gold previously used for template tabs. Tests now pin exact spec tokens instead of asserting a 3:1 contrast threshold for these brand navigation colors. Order-status colors keep separate contrast tests because those colors communicate operational state.
 
 ## 2026-05-23 — [iOS] Pulse Account tab mark
 
@@ -2566,6 +2568,6 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 
 **Alternatives considered:** Use the provided active SVG exactly as-is. Rejected because its 1.7pt stroke was lighter than the emerging tab icon family. Convert all existing Home/Menu/Orders marks to the same active/inactive stroke system in this PR. Rejected because Home/Menu intentionally preserve supplied multi-color gradients, and Orders carries order-status state; redesigning those would be a separate visual-system pass.
 
-**Reasoning:** `PulseAccountMark` uses a 24x24 template SVG with 2.1pt rounded strokes, rounded line caps, and rounded joins. `MainTab.customAssetRendering` now distinguishes original-rendered brand marks from template-rendered marks. Template marks use `AppTheme.Colors.tabIconActive` for selected state and `AppTheme.Colors.tabIconInactive` for inactive state, with contrast tests covering both colors in light and dark mode.
+**Reasoning:** `PulseAccountMark` uses a 24x24 template SVG with 2.1pt rounded strokes, rounded line caps, and rounded joins. `MainTab.customAssetRendering` now distinguishes original-rendered brand marks from template-rendered marks. Template marks use `AppTheme.Colors.tabIconActive` for selected state and `AppTheme.Colors.tabIconInactive` for inactive state, with tests pinning the product-specified nav palette.
 
 **Trade-offs:** The current tab set still mixes original-rendered logo marks (Home/Menu), an order-state composite mark (Orders), and a template mark (Account). This keeps the supplied brand artwork intact while establishing the reusable active/inactive template path for future icons.

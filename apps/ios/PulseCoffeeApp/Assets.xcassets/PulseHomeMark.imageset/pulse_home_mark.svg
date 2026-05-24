@@ -1,28 +1,7 @@
-<svg width="24" height="24" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <title>Pulse Coffee Home Mark</title>
-  <desc>Tab-bar-sized Pulse home tile vectorized from the manager-provided PNG reference.</desc>
-  <defs>
-    <radialGradient id="tile" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 470) rotate(90) scale(560)">
-      <stop stop-color="#FFF7E6"/>
-      <stop offset="0.55" stop-color="#F8E8BE"/>
-      <stop offset="1" stop-color="#F1D79C"/>
-    </radialGradient>
-    <linearGradient id="house" x1="250" y1="250" x2="760" y2="820" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3B2A1D"/>
-      <stop offset="0.55" stop-color="#2C1B10"/>
-      <stop offset="1" stop-color="#160E07"/>
-    </linearGradient>
-    <linearGradient id="leaf" x1="540" y1="205" x2="615" y2="522" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#B9D29C"/>
-      <stop offset="0.55" stop-color="#7F9B45"/>
-      <stop offset="1" stop-color="#4F7B32"/>
-    </linearGradient>
-  </defs>
-
-  <rect x="38" y="38" width="948" height="948" rx="210" fill="url(#tile)"/>
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M512 208L223 464C199 485 214 524 246 524H286V760C286 785 306 805 331 805H429V566C429 542 448 523 472 523H551C575 523 594 542 594 566V805H693C718 805 738 785 738 760V524H778C810 524 825 485 801 464L512 208Z" fill="url(#house)"/>
-  <path d="M509 528H588C660 528 712 577 712 641C712 706 659 754 588 754H509V528Z" fill="#FFF3D7"/>
-  <path d="M592 600C621 600 640 617 640 642C640 668 621 685 592 685H565V600H592Z" fill="url(#house)"/>
-  <path d="M526 211C617 262 656 338 629 414C605 482 542 524 487 614C496 520 438 483 458 396C474 323 516 281 526 211Z" fill="url(#leaf)"/>
-  <path d="M493 220C531 307 525 393 476 461C449 499 435 543 437 592" stroke="#FFF3D7" stroke-width="24" stroke-linecap="round"/>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Pulse Coffee Home House Mark</title>
+  <desc>Template-rendered house and P layer for the Home tab icon.</desc>
+  <path d="M3 11L12 3.2L21 11V20C21 20.5523 20.5523 21 20 21H4C3.4477 21 3 20.5523 3 20Z" fill="none" stroke="#000000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12.4 11.2H14.8C16.2359 11.2 17.4 12.3641 17.4 13.8C17.4 15.2359 16.2359 16.4 14.8 16.4H12.4" fill="none" stroke="#000000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12.4 11.2V21" fill="none" stroke="#000000" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

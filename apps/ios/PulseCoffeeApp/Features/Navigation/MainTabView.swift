@@ -69,10 +69,10 @@ private struct PulseTabBar: View {
         }
         .frame(height: barHeight)
         .padding(.horizontal, 18)
-        .background(AppTheme.Colors.tabBarBackground.ignoresSafeArea(edges: .bottom))
+        .background(AppTheme.Colors.tabBarBackground.opacity(0.92).ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(AppTheme.Colors.divider.opacity(0.35))
+                .fill(AppTheme.Colors.divider.opacity(0.10))
                 .frame(height: 1)
         }
     }
@@ -81,17 +81,20 @@ private struct PulseTabBar: View {
         VStack(spacing: 3) {
             icon(for: tab, isSelected: isSelected)
             Text(tab.title)
-                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .font(.caption.weight(isSelected ? .semibold : .medium))
         }
-        .foregroundStyle(isSelected ? AppTheme.Colors.accent : .primary)
+        .foregroundStyle(isSelected ? AppTheme.Colors.tabLabelActive : AppTheme.Colors.tabLabelInactive)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private func icon(for tab: MainTab, isSelected: Bool) -> some View {
-        if tab == .orders {
-            PulseOrdersTabIcon(state: ordersState)
+        if tab == .home {
+            PulseHomeTabIcon(isSelected: isSelected)
+                .frame(width: brandedIconSize, height: brandedIconSize)
+        } else if tab == .orders {
+            PulseOrdersTabIcon(state: ordersState, isSelected: isSelected)
                 .frame(width: brandedIconSize, height: brandedIconSize)
         } else if let assetName = tab.customAssetName {
             switch tab.customAssetRendering {
@@ -112,7 +115,39 @@ private struct PulseTabBar: View {
         } else {
             Image(systemName: isSelected ? tab.selectedSymbolName : tab.tabBarSymbolName)
                 .font(.system(size: iconSize,
-                              weight: isSelected ? .semibold : .regular))
+                              weight: isSelected ? .semibold : .medium))
+        }
+    }
+}
+
+private struct PulseHomeTabIcon: View {
+    let isSelected: Bool
+
+    private var baseColor: Color {
+        isSelected ? AppTheme.Colors.tabIconActive : AppTheme.Colors.tabIconInactive
+    }
+
+    private var leafColor: Color {
+        isSelected ? AppTheme.Colors.tabIconMatchaAccent : AppTheme.Colors.tabIconInactive
+    }
+
+    var body: some View {
+        ZStack {
+            // The Home mark is split into template layers so the active state can
+            // keep the matcha curl while inactive collapses to the taupe stroke.
+            Image("PulseHomeMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(baseColor)
+                .accessibilityHidden(true)
+
+            Image("PulseHomeLeafAccent")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(leafColor)
+                .accessibilityHidden(true)
         }
     }
 }
@@ -133,6 +168,7 @@ enum OrdersTabState: Equatable, Hashable {
 
 private struct PulseOrdersTabIcon: View {
     let state: OrdersTabState
+    let isSelected: Bool
 
     var body: some View {
         ZStack {
@@ -142,7 +178,7 @@ private struct PulseOrdersTabIcon: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(AppTheme.Colors.tabIconBrand)
+                .foregroundStyle(isSelected ? AppTheme.Colors.tabIconActive : AppTheme.Colors.tabIconInactive)
                 .accessibilityHidden(true)
 
             if let cupColor = state.cupColor {
