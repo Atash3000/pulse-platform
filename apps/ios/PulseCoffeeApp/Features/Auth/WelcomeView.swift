@@ -46,6 +46,11 @@ struct WelcomeView: View {
     @State private var showRegister = false
     @State private var showLogin = false
 
+    // Bottom reserve under the scroll content so the sticky CTA bar never
+    // overlaps the last perk. Scaled so it grows in step with the (now
+    // Dynamic-Type-aware) action bar at large text sizes.
+    @ScaledMetric(relativeTo: .body) private var actionBarReserve: CGFloat = 180
+
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView {
@@ -66,7 +71,7 @@ struct WelcomeView: View {
                 // Reserve room so the sticky CTA bar never sits on top of
                 // perk rows when the user scrolls to the bottom. Matches
                 // the action-bar height + cream gradient padding below.
-                .padding(.bottom, 180)
+                .padding(.bottom, actionBarReserve)
             }
             .scrollIndicators(.hidden)
             .background(Pulse.cream)
@@ -552,14 +557,14 @@ private struct WelcomeActionBar: View {
                             .foregroundStyle(Pulse.brown)
                             .underline()
                     }
-                    .font(.system(size: 13.5, weight: .semibold))
+                    .font(.system(size: signInSize, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
                 }
 
                 // Legal microcopy.
                 Text("By continuing you agree to Pulse's Terms & Privacy Policy. We'll never share your order history.")
-                    .font(.system(size: 10))
+                    .font(.system(size: legalSize))
                     .foregroundStyle(Pulse.mid)
                     .lineSpacing(2)
                     .multilineTextAlignment(.center)
