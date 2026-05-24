@@ -1,14 +1,22 @@
 import SwiftUI
 
-/// Bottom tab bar shown after sign-in. Hosts the four top-level
-/// destinations declared in `MainTab`.
+/// Bottom tab bar shown after sign-in (and now, for guests, as the
+/// cold-open shell with the Account tab pre-selected — see
+/// `ContentView`). Hosts the four top-level destinations declared in
+/// `MainTab`.
 ///
-/// Menu is the launch tab: it's the only one with real content in
-/// MVP-3. Home / Orders / Account are placeholders pending later
-/// commits (see this folder's README for the build sequence).
+/// `initialTab` controls which tab is selected on first appearance:
+/// - Signed-in users open to Menu (their job-to-be-done at launch).
+/// - Guests open to Account, which renders `WelcomeView` (the join
+///   surface). `AccountView` routes on `AppState.authState` so the same
+///   tab swaps to the real profile UI the moment the user signs in.
 struct MainTabView: View {
 
-    @State private var selection: MainTab = .menu
+    @State private var selection: MainTab
+
+    init(initialTab: MainTab = .menu) {
+        _selection = State(initialValue: initialTab)
+    }
 
     var body: some View {
         ZStack {

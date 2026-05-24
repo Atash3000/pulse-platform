@@ -45,10 +45,25 @@ SwiftUI view rendering itself is not unit-tested (would require a snapshot harne
 | Home | placeholder | Featured drinks + nearest-location card |
 | Menu | shipped (MVP-2 + MVP-3) | Left-sidebar category picker (Luckin-style) |
 | Orders | placeholder | Order-status polling list (MVP-4) |
-| Account | placeholder | Profile + sign-out (currently sign-out lives in `MenuView` toolbar — moves here when real content lands) |
+| Account | **guest: `WelcomeView` cold-open / join surface; logged-in: placeholder** | Profile + sign-out for logged-in users (currently sign-out lives in `MenuView` toolbar — moves here when real content lands) |
+
+## Auth-state routing
+
+`ContentView` now opens `MainTabView` for **both** logged-in and logged-out users — the difference is the initial tab.
+
+| Auth state | `initialTab` | Account-tab content |
+|---|---|---|
+| `.loggedOut` | `.account` | `WelcomeView` (Features/Auth/WelcomeView.swift). Sheets present `LoginView` / `RegisterView`. |
+| `.loggedIn` | `.menu` | Existing placeholder, until the real profile screen lands. |
+
+`AccountView` reads `AppState.authState` directly and branches between `WelcomeView` and the placeholder, so a successful sign-in transitions the tab content in place without a full router re-render of the tab tree.
 
 ## Follow-ups
 
+- **Guest-gate the non-Account tabs.** With `ContentView` now letting logged-out users into `MainTabView`, the Menu tab works (public endpoint), but Cart / checkout / Orders / Home aren't yet aware of guest state. Next commits should: (a) replace the Cart's "Checkout" button with a "Sign in to checkout" CTA when guest, (b) show a "Sign in to see your orders" empty state in `OrdersView`, (c) hide or stub the streak / rewards strips on the Home tab when guest. Each is one focused commit per §1.6.
+- **Real Welcome hero asset.** `WelcomeView` currently uses 🍵 + a gradient. Replace with `WelcomeHero.imageset` (real photo) when brand supplies one.
+- **Fraunces + DM Sans fonts.** Welcome and Home-v3 both want custom typography. Bundle the font files, register in `project.yml`, swap `.system(.serif)` call-sites in a single typography commit.
+- **Loyalty copy on Welcome screen is hardcoded.** The "50 beats welcome gift", "10 beats ≈ $1", and "free birthday drink" promises in `WelcomeView` are unmocked stubs awaiting the backend loyalty module — see decision-log entry "[iOS] WelcomeView ships hardcoded loyalty marketing copy" for the override of the 2026-05-14 loyalty-placeholder decision and the swap-when-backend-lands TODOs.
 - **Move "Sign Out" off the Menu toolbar onto Account.** The toolbar button in `Features/Menu/MenuView.swift` is left untouched for now to keep this commit scope-clean; it should be deleted once the Account tab gains real content. Tracking as a separate commit.
 - **Cart icon placement.** The cart button currently lives in `MenuView`'s toolbar. Once Orders/Account gain content the bag may want to be tab-bar-adjacent (Luckin floats a checkout bar above the tab bar). Defer until the cart UX is revisited.
 - **Lazy tab mounting before real Home / Orders / Account data work.** `MainTabView` keeps all four tab roots alive and hides inactive tabs with opacity so the custom bar can own selection. That is fine while only Menu does real work, but before other tabs add API fetches or polling we should lazy-mount inactive tabs or gate their `.task` bodies on the selected tab.

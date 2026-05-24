@@ -2585,3 +2585,43 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 **Trade-offs:** The nav icon no longer carries order-preparing/order-ready state. MVP-4 should use a badge or separate order-status affordance once the Orders tab has real backend-backed state.
 
 **Update 2026-05-24 — QA contrast follow-up:** QA caught that the raw nav swatches failed the project's contrast expectations on the cream bar and that contrast assertions had been removed. The active gold, inactive taupe, and matcha accent tokens were darkened to accessible brand-adjacent values, `PulseAccountMark` was normalized from 2.1pt to the flat set's 1.7pt stroke weight, and `MainTabTests` now enforces 3:1 icon contrast plus 4.5:1 text contrast against the fixed cream tab bar.
+
+## 2026-05-24 — [iOS] WelcomeView ships hardcoded loyalty marketing copy
+
+**Decision:** Ship the new cold-open `WelcomeView` (Account tab content for guests) with hardcoded loyalty marketing copy — specifically the "Start with 50 beats" welcome gift, "10 beats ≈ $1" earn ratio, and "free drink on your birthday" perks. Every backend-coupled value carries an inline `TODO(loyalty):` comment naming the exact endpoint / config / column needed for the swap.
+
+`ContentView` is also reshaped: instead of switching between `LoginView` and `MainTabView` based on auth state, it now always shows `MainTabView` and only changes the `initialTab` (`.account` for guests so they land on Welcome, `.menu` for signed-in users). The `AccountView` placeholder branches on `AppState.authState` and shows `WelcomeView` for guests, the existing placeholder for signed-in users.
+
+**Context:** The manager supplied a `pulse-welcome-v2.html` mockup with the gift / perks / trust strip pattern and asked for it landed in the Account tab today, with hardcoded values + TODOs so that wiring to the real loyalty system is a mechanical follow-up commit when the backend module ships.
+
+This **partially overrides** the 2026-05-24 (above) — sorry, the 2026-05-14 entry "[iOS] Loyalty view ships placeholder copy in Phase 1" — which rejected mocked loyalty data on the LoyaltyView. The earlier decision's concern was: *"'I earned 50 points!' that resets to zero when real loyalty ships is worse than a 'rewards on their way' placeholder from day one."*
+
+**Alternatives considered:**
+
+| Option | Why rejected |
+|---|---|
+| Ship `WelcomeView` with the loyalty copy literally stripped (no beats, no perks, just "Join Pulse" CTA) | Matches the precedent but destroys the conversion mechanic the manager designed the screen around. Welcome screens without a "what's in it for me" hook convert worse than no welcome screen at all. |
+| Ship `WelcomeView` with the loyalty copy and **also** ship a real loyalty backend module first | Couples two surfaces (iOS + backend loyalty) and slips both. The manager wants visual progress today; backend loyalty work is multiple commits away on a separate chat. |
+| **Ship `WelcomeView` with copy as-mocked + concrete `TODO(loyalty):` markers** at every coupling point, **drop the fake star rating** (App Store §2.3.1 risk), **enable a guest Account tab** to host it | Chosen. Preserves design intent, isolates the swap, and the override is documented here so future readers know it was deliberate. |
+| Show `WelcomeView` as the full-screen logged-out root (replacing `LoginView`) instead of as the Account tab | Smaller architectural change but doesn't match the manager's "Account tab for unregistered users" framing. Rejected per literal ask. |
+
+**Reasoning:**
+
+1. **The earlier decision's specific failure mode does not apply here.** That entry worried about a customer-visible running total (`"earned 50 points"`) that would later read zero. `WelcomeView` shows the same static marketing copy on every cold open until the user registers — it's a promise, not a balance. The 2026-05-14 entry's *"mocked data that resets to zero"* concern is about post-registration state pollution. Welcome is pre-registration.
+2. **Every coupling point is explicit.** Searching `TODO(loyalty)` in the codebase yields the exact list of swaps needed when backend loyalty ships. No hidden mocks.
+3. **The fake star rating from the mockup (`★★★★★ Loved by regulars`) was dropped.** That's not a TODO — fabricated star ratings are an Apple App Review Guideline 2.3.1 risk (misleading marketing). It can return when there's a real testimonial source.
+4. **The override mechanic.** Per CLAUDE.md §3: "If the manager insists, Claude documents the override in the decision-log so future readers know it was deliberate." This entry is that record.
+5. **One commit, one concern (§1.6).** The companion follow-ups (font assets, hero photo, guest-gating Cart/Orders, real loyalty wiring) each ship in their own commits referenced in `apps/ios/PulseCoffeeApp/Features/Navigation/README.md`.
+
+**Trade-offs:**
+
+- **If a user registers from this screen and the LoyaltyView still shows "rewards on their way" placeholder**, they will feel duped. The "claim 50 beats" CTA badge in particular makes a specific numeric promise. **Mitigation:** the backend loyalty module + welcome-bonus mint MUST ship before public launch. Until then this screen is only visible in personal-MVP Simulator builds. Treat this as a blocker on Phase-1 launch readiness.
+- The welcome bonus + birthday perk advertise mechanics the backend has not designed yet — the eventual schema (ledger granularity, idempotency on welcome mint, birthday timezone handling) must remain consistent with the copy here, or the copy must change.
+- The fake-rating omission narrows the conversion appeal of the screen vs. the mockup. Acceptable trade for App Store safety.
+
+**Follow-ups:**
+
+- Backend chat: design + ship the loyalty module (`loyalty_accounts`, `beats_ledger`, `GET /loyalty/my`, welcome-bonus mint, beats-per-dollar config).
+- iOS chat: when the above lands, do a single swap commit removing every `TODO(loyalty):` marker in `WelcomeView.swift` and `LoyaltyView` (placeholder per 2026-05-14 entry) in lockstep.
+- Product: decide whether the birthday perk stays — if yes, add `birthday` column on `customers` + a worker that mints rewards; if no, drop the perk row before launch.
+
