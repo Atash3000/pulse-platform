@@ -56,7 +56,9 @@ SwiftUI view rendering itself is not unit-tested (would require a snapshot harne
 | `.loggedOut` | `.account` | `WelcomeView` (Features/Auth/WelcomeView.swift). Sheets present `LoginView` / `RegisterView`. |
 | `.loggedIn` | `.menu` | Existing placeholder, until the real profile screen lands. |
 
-`AccountView` reads `AppState.authState` directly and branches between `WelcomeView` and the placeholder, so a successful sign-in transitions the tab content in place without a full router re-render of the tab tree.
+`AccountView` reads `AppState.authState` directly and branches between `WelcomeView` and the placeholder, so the Account tab shows the right content in either tree.
+
+Note that auth changes do trigger a full re-render: `ContentView`'s `switch` re-instantiates `MainTabView` with the new `initialTab` when `authState` flips, tearing down the old tab tree. A guest who signs in therefore lands on **Menu** (the new tree's `initialTab`), not back on the Account tab — and that teardown is what clears the in-memory cart / view-model state on logout. The `AccountView` branch is still needed because `AccountView` is mounted in both trees and must render the correct content in each; it is not the mechanism that swaps content "in place."
 
 ## Follow-ups
 

@@ -8,8 +8,16 @@ import SwiftUI
 /// `initialTab` controls which tab is selected on first appearance:
 /// - Signed-in users open to Menu (their job-to-be-done at launch).
 /// - Guests open to Account, which renders `WelcomeView` (the join
-///   surface). `AccountView` routes on `AppState.authState` so the same
-///   tab swaps to the real profile UI the moment the user signs in.
+///   surface).
+///
+/// Auth changes are handled by `ContentView`, not here: a sign-in (or a
+/// logout) flips `AppState.authState`, `ContentView`'s `switch`
+/// re-instantiates `MainTabView` with the new `initialTab`, and the old
+/// tab tree is torn down. So a guest who signs in lands on **Menu** (the
+/// fresh tree's `initialTab`), not back on Account — and that teardown is
+/// what clears the in-memory cart / view-model state on logout. `selection`
+/// is `@State` set once from `initialTab`; it is not re-synced on later
+/// auth changes because the whole view is rebuilt instead.
 struct MainTabView: View {
 
     @State private var selection: MainTab

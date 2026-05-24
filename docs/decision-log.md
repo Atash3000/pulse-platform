@@ -2594,7 +2594,7 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 
 **Context:** The manager supplied a `pulse-welcome-v2.html` mockup with the gift / perks / trust strip pattern and asked for it landed in the Account tab today, with hardcoded values + TODOs so that wiring to the real loyalty system is a mechanical follow-up commit when the backend module ships.
 
-This **partially overrides** the 2026-05-24 (above) — sorry, the 2026-05-14 entry "[iOS] Loyalty view ships placeholder copy in Phase 1" — which rejected mocked loyalty data on the LoyaltyView. The earlier decision's concern was: *"'I earned 50 points!' that resets to zero when real loyalty ships is worse than a 'rewards on their way' placeholder from day one."*
+This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships placeholder copy in Phase 1" — which rejected mocked loyalty data on the LoyaltyView. The earlier decision's concern was: *"'I earned 50 points!' that resets to zero when real loyalty ships is worse than a 'rewards on their way' placeholder from day one."*
 
 **Alternatives considered:**
 

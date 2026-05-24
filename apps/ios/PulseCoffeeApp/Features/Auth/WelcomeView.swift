@@ -100,10 +100,20 @@ private enum Pulse {
     static let warmCream  = Color(red: 251/255, green: 247/255, blue: 240/255)
     static let dark       = Color(red:  26/255, green:  18/255, blue:   8/255)
     static let brown      = Color(red:  61/255, green:  43/255, blue:  31/255)
+    // Secondary text color. Was a lighter taupe (168/140/114) but that
+    // landed at ~2.75:1 on `cream` and ~3.15:1 on `cardWhite` — below the
+    // WCAG AA 4.5:1 bar for this body/eyebrow text. `mid` clears AA on both
+    // surfaces (5.3:1 cream, 6.1:1 white), matching the contrast standard the
+    // nav bar was held to (decision-log 2026-05-24 nav-contrast follow-up).
     static let mid        = Color(red: 122/255, green:  92/255, blue:  68/255)
-    static let soft       = Color(red: 168/255, green: 140/255, blue: 114/255)
 
     static let gold       = Color(red: 200/255, green: 151/255, blue:  58/255)
+    // Text-on-light variant of `gold`. The bright `gold` fill is for the
+    // CTA background and gradients (dark text sits on it), but as a *text*
+    // color on `cardWhite` it only reaches ~2.6:1 — below AA. This darker
+    // amber clears 4.5:1 (~5.0:1 on white) for the perk value chip while
+    // staying in the gold family.
+    static let goldText   = Color(red: 150/255, green: 102/255, blue:  20/255)
     static let honey      = Color(red: 217/255, green: 166/255, blue:  91/255)
     static let terracotta = Color(red: 196/255, green: 136/255, blue: 106/255)
     static let matcha     = Color(red: 139/255, green: 168/255, blue: 136/255)
@@ -236,6 +246,12 @@ private struct HeroSteam: View {
 // MARK: - Headline
 
 private struct WelcomeHeadline: View {
+    // `.system(size:)` is a fixed point size that ignores Dynamic Type.
+    // Drive it through `@ScaledMetric` so the headline still scales with
+    // the user's text-size setting (matches the `@ScaledMetric` pattern
+    // in `MainTabView`).
+    @ScaledMetric(relativeTo: .largeTitle) private var headlineSize: CGFloat = 31
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             // TODO(location): Hardcoded "Bedford Ave · Brooklyn" — wire
@@ -246,7 +262,7 @@ private struct WelcomeHeadline: View {
             Text("Bedford Ave · Brooklyn")
                 .font(.caption)
                 .tracking(2.0)
-                .foregroundStyle(Pulse.soft)
+                .foregroundStyle(Pulse.mid)
                 .textCase(.uppercase)
 
             // TODO(fonts): Replace `.system(.serif)` with the Fraunces
@@ -255,7 +271,7 @@ private struct WelcomeHeadline: View {
             // Fraunces is SIL OFL — license-safe to ship.
             (Text("Stone-ground matcha,\n")
                 + Text("slow-whisked daily.").italic())
-                .font(.system(size: 31, weight: .light, design: .serif))
+                .font(.system(size: headlineSize, weight: .light, design: .serif))
                 .foregroundStyle(Pulse.dark)
                 .lineSpacing(2)
                 .multilineTextAlignment(.leading)
@@ -349,7 +365,7 @@ private struct WelcomePerksList: View {
             Text("What you unlock")
                 .font(.caption.weight(.medium))
                 .tracking(1.6)
-                .foregroundStyle(Pulse.soft)
+                .foregroundStyle(Pulse.mid)
                 .textCase(.uppercase)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 2)
@@ -413,6 +429,9 @@ private struct WelcomePerkRow: View {
     let subtitle: String
     let valueChip: String?
 
+    // Fixed `.system(size:)` doesn't honor Dynamic Type — scale it.
+    @ScaledMetric(relativeTo: .subheadline) private var titleSize: CGFloat = 14.5
+
     var body: some View {
         HStack(spacing: 13) {
             ZStack {
@@ -425,18 +444,18 @@ private struct WelcomePerkRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold))
                     .foregroundStyle(Pulse.brown)
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(Pulse.soft)
+                    .foregroundStyle(Pulse.mid)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if let valueChip {
                 Text(valueChip)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(Pulse.gold)
+                    .foregroundStyle(Pulse.goldText)
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
@@ -468,6 +487,14 @@ private struct WelcomeActionBar: View {
     /// Disabled when "reduce motion" is on (accessibility).
     @State private var breathe = false
 
+    // Fixed `.system(size:)` sizes routed through Dynamic Type. The legal
+    // line (`legalSize`) was the worst offender — 10pt that also couldn't
+    // grow — so it matters most that it scales.
+    @ScaledMetric(relativeTo: .headline)     private var joinSize:   CGFloat = 15.5
+    @ScaledMetric(relativeTo: .footnote)     private var badgeSize:  CGFloat = 13
+    @ScaledMetric(relativeTo: .subheadline)  private var signInSize: CGFloat = 13.5
+    @ScaledMetric(relativeTo: .caption2)     private var legalSize:  CGFloat = 10
+
     var body: some View {
         VStack(spacing: 0) {
             // Top fade from transparent → cream so scroll content
@@ -484,13 +511,13 @@ private struct WelcomeActionBar: View {
                 Button(action: onJoin) {
                     HStack(spacing: 8) {
                         Text("Join Pulse")
-                            .font(.system(size: 15.5, weight: .bold))
+                            .font(.system(size: joinSize, weight: .bold))
 
                         // TODO(loyalty): "claim 50 beats" mirrors the
                         // hardcoded welcome bonus above. Drop or rewire
                         // when backend ships the bonus mechanic.
                         Text("claim 50 beats")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: badgeSize, weight: .semibold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
                             .background(Pulse.dark.opacity(0.16))
@@ -533,7 +560,7 @@ private struct WelcomeActionBar: View {
                 // Legal microcopy.
                 Text("By continuing you agree to Pulse's Terms & Privacy Policy. We'll never share your order history.")
                     .font(.system(size: 10))
-                    .foregroundStyle(Pulse.soft)
+                    .foregroundStyle(Pulse.mid)
                     .lineSpacing(2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
