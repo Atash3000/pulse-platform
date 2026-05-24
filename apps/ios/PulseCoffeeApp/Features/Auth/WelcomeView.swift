@@ -141,6 +141,13 @@ private struct WelcomeHero: View {
     // system "reduce motion" preference via the environment below.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // PulseLogoMark size, scales with Dynamic Type relative to `.title3`
+    // so it grows alongside the `Pulse` wordmark text next to it. 26pt
+    // is the resting size — large enough to read the serif `P` inside
+    // the white-chocolate-mousse circle, small enough to not crowd the
+    // hero composition.
+    @ScaledMetric(relativeTo: .title3) private var logoMarkSize: CGFloat = 26
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             // Background: angular gradient + radial matcha glow top-right.
@@ -174,19 +181,30 @@ private struct WelcomeHero: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Pulse wordmark.
-            HStack(spacing: 7) {
-                Text("P")
-                    .font(.system(.title3, design: .serif).weight(.medium))
-                    .foregroundStyle(Pulse.honey)
-                Text("Pulse")
-                    .font(.system(.body, design: .serif))
-                    .foregroundStyle(Pulse.cream)
-            }
-            .padding(.top, 56)   // clears the status bar / Dynamic Island
-            .padding(.trailing, 18)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Pulse Coffee")
+            // Pulse brand mark.
+            //
+            // Stand-alone tan serif `P` glyph — the brand-supplied
+            // `PulseLogoMark` asset
+            // (`Assets.xcassets/PulseLogoMark.imageset/pulse_logo_mark.svg`).
+            // The avatar's original white circle background has been
+            // stripped from the SVG so the mark sits cleanly on the
+            // hero's matcha gradient with no surrounding plate.
+            //
+            // Contents.json sets `template-rendering-intent` to
+            // `original`, so the tan `#D1C0AF` brand color in the SVG
+            // is preserved rather than being collapsed to a SwiftUI
+            // foreground tint.
+            //
+            // Size scales with Dynamic Type via `@ScaledMetric` relative
+            // to `.title3` so the mark grows with accessibility text
+            // sizes alongside the rest of the welcome composition.
+            Image("PulseLogoMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: logoMarkSize, height: logoMarkSize)
+                .padding(.top, 56)   // clears the status bar / Dynamic Island
+                .padding(.trailing, 18)
+                .accessibilityLabel("Pulse Coffee")
 
             // Bottom fade to cream — blends hero into the body content.
             VStack {
