@@ -2571,3 +2571,15 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 **Reasoning:** `PulseAccountMark` uses a 24x24 template SVG with 2.1pt rounded strokes, rounded line caps, and rounded joins. `MainTab.customAssetRendering` now distinguishes original-rendered brand marks from template-rendered marks. Template marks use `AppTheme.Colors.tabIconActive` for selected state and `AppTheme.Colors.tabIconInactive` for inactive state, with tests pinning the product-specified nav palette.
 
 **Trade-offs:** The current tab set still mixes original-rendered logo marks (Home/Menu), an order-state composite mark (Orders), and a template mark (Account). This keeps the supplied brand artwork intact while establishing the reusable active/inactive template path for future icons.
+
+## 2026-05-24 — [iOS] Final flat Menu and Orders nav icons
+
+**Decision:** Replace the older Menu logo mark and Orders bag/cup-status composite with the final flat Menu and Orders SVGs from `files.zip`.
+
+**Context:** Product supplied `menu-active.svg`, `menu-inactive.svg`, `orders-active.svg`, `orders-inactive.svg`, and PNG previews for the final linear nav set. The manager asked to implement these and remove the previous versions.
+
+**Alternatives considered:** Store separate active and inactive SVGs for each tab. Rejected because it duplicates paths and makes future color-token changes harder. Keep the old Orders cup-status overlay. Rejected because the supplied final Orders icon is a simple shopping bag with sparkle, and the older status overlay no longer matches the nav spec.
+
+**Reasoning:** Menu and Orders now follow the same two-layer template pattern as Home: a base SVG layer tinted gold/taupe and a matcha accent layer that becomes matcha only when selected. This preserves the supplied active/inactive visual behavior while keeping colors centralized in `AppTheme`. The old `PulseCupMark`, `PulseOrdersCupState`, and order-status nav color assets were removed.
+
+**Trade-offs:** The nav icon no longer carries order-preparing/order-ready state. MVP-4 should use a badge or separate order-status affordance once the Orders tab has real backend-backed state.

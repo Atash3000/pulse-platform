@@ -41,48 +41,34 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.account.tabBarSymbolName, "person.crop.circle")
     }
 
-    func test_customAssetName_brandTabsOverrideSFSymbol() {
-        XCTAssertEqual(MainTab.home.customAssetName, "PulseHomeMark")
-        XCTAssertEqual(MainTab.menu.customAssetName, "PulseCupMark")
-        XCTAssertNil(MainTab.orders.customAssetName)
-        XCTAssertEqual(MainTab.account.customAssetName, "PulseAccountMark")
+    func test_layeredAssetNames_brandTabsOverrideSFSymbol() {
+        XCTAssertEqual(MainTab.home.layeredAssetNames,
+                       LayeredTabAsset(baseName: "PulseHomeMark",
+                                       accentName: "PulseHomeLeafAccent"))
+        XCTAssertEqual(MainTab.menu.layeredAssetNames,
+                       LayeredTabAsset(baseName: "PulseMenuMark",
+                                       accentName: "PulseMenuAccent"))
+        XCTAssertEqual(MainTab.orders.layeredAssetNames,
+                       LayeredTabAsset(baseName: "PulseOrdersMark",
+                                       accentName: "PulseOrdersAccent"))
+        XCTAssertNil(MainTab.account.layeredAssetNames)
     }
 
-    func test_customAssetRendering_isStableForBrandTabs() {
-        XCTAssertEqual(MainTab.home.customAssetRendering, .template)
-        XCTAssertEqual(MainTab.menu.customAssetRendering, .original)
-        XCTAssertEqual(MainTab.account.customAssetRendering, .template)
+    func test_customAssetName_singleLayerBrandTabsOverrideSFSymbol() {
+        XCTAssertNil(MainTab.home.customAssetName)
+        XCTAssertNil(MainTab.menu.customAssetName)
+        XCTAssertNil(MainTab.orders.customAssetName)
+        XCTAssertEqual(MainTab.account.customAssetName, "PulseAccountMark")
     }
 
     func test_customAssets_existInBundle() {
         XCTAssertNotNil(UIImage(named: "PulseHomeMark"))
         XCTAssertNotNil(UIImage(named: "PulseHomeLeafAccent"))
-        XCTAssertNotNil(UIImage(named: "PulseCupMark"))
+        XCTAssertNotNil(UIImage(named: "PulseMenuMark"))
+        XCTAssertNotNil(UIImage(named: "PulseMenuAccent"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
-        XCTAssertNotNil(UIImage(named: "PulseOrdersCupState"))
+        XCTAssertNotNil(UIImage(named: "PulseOrdersAccent"))
         XCTAssertNotNil(UIImage(named: "PulseAccountMark"))
-    }
-
-    func test_ordersTabState_emptyDoesNotDrawCupOverlay() {
-        XCTAssertNil(OrdersTabState.empty.cupColor)
-    }
-
-    func test_ordersTabState_usesExpectedCupColors() {
-        assertColor(OrdersTabState.preparing.cupColor,
-                    equals: AppTheme.Colors.orderPreparing)
-        assertColor(OrdersTabState.ready.cupColor,
-                    equals: AppTheme.Colors.orderReady)
-    }
-
-    func test_orderStatusColors_passTabBarContrastInLightAndDark() {
-        assertMinimumIconContrast(AppTheme.Colors.orderPreparing,
-                                  userInterfaceStyle: .light)
-        assertMinimumIconContrast(AppTheme.Colors.orderPreparing,
-                                  userInterfaceStyle: .dark)
-        assertMinimumIconContrast(AppTheme.Colors.orderReady,
-                                  userInterfaceStyle: .light)
-        assertMinimumIconContrast(AppTheme.Colors.orderReady,
-                                  userInterfaceStyle: .dark)
     }
 
     func test_navBarSpecColors_areStable() {
@@ -117,29 +103,6 @@ final class MainTabTests: XCTestCase {
     }
 
     private func assertColor(
-        _ actual: Color?,
-        equals expected: Color,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        guard let actual else {
-            XCTFail("Expected a color, got nil", file: file, line: line)
-            return
-        }
-
-        assertUIColor(UIColor(actual),
-                      equals: UIColor(expected),
-                      userInterfaceStyle: .light,
-                      file: file,
-                      line: line)
-        assertUIColor(UIColor(actual),
-                      equals: UIColor(expected),
-                      userInterfaceStyle: .dark,
-                      file: file,
-                      line: line)
-    }
-
-    private func assertColor(
         _ actual: Color,
         equals expected: Color,
         file: StaticString = #filePath,
@@ -155,24 +118,6 @@ final class MainTabTests: XCTestCase {
                       userInterfaceStyle: .dark,
                       file: file,
                       line: line)
-    }
-
-    private func assertMinimumIconContrast(
-        _ foreground: Color,
-        userInterfaceStyle: UIUserInterfaceStyle,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let traits = UITraitCollection(userInterfaceStyle: userInterfaceStyle)
-        let foregroundColor = UIColor(foreground).resolvedColor(with: traits)
-        let backgroundColor = UIColor(AppTheme.Colors.tabBarBackground).resolvedColor(with: traits)
-        let ratio = contrastRatio(foregroundColor, backgroundColor)
-
-        XCTAssertGreaterThanOrEqual(ratio,
-                                    3.0,
-                                    "Tab icon color must pass 3:1 UI contrast in \(userInterfaceStyle)",
-                                    file: file,
-                                    line: line)
     }
 
     private func assertUIColor(
@@ -194,28 +139,6 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(actualComponents.green, expectedComponents.green, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(actualComponents.blue, expectedComponents.blue, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(actualComponents.alpha, expectedComponents.alpha, accuracy: 0.001, file: file, line: line)
-    }
-
-    private func contrastRatio(_ lhs: UIColor, _ rhs: UIColor) -> CGFloat {
-        let lhsLuminance = relativeLuminance(lhs)
-        let rhsLuminance = relativeLuminance(rhs)
-        let lighter = max(lhsLuminance, rhsLuminance)
-        let darker = min(lhsLuminance, rhsLuminance)
-        return (lighter + 0.05) / (darker + 0.05)
-    }
-
-    private func relativeLuminance(_ color: UIColor) -> CGFloat {
-        let components = rgbaComponents(color)
-        let red = linearizedColorComponent(components.red)
-        let green = linearizedColorComponent(components.green)
-        let blue = linearizedColorComponent(components.blue)
-        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
-    }
-
-    private func linearizedColorComponent(_ component: CGFloat) -> CGFloat {
-        component <= 0.03928
-            ? component / 12.92
-            : pow((component + 0.055) / 1.055, 2.4)
     }
 
     private func rgbaComponents(

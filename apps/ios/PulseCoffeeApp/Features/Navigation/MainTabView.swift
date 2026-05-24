@@ -43,10 +43,6 @@ private struct PulseTabBar: View {
     @ScaledMetric(relativeTo: .caption) private var iconSize = AppTheme.Metrics.tabBarIconSize
     @ScaledMetric(relativeTo: .caption) private var barHeight = AppTheme.Metrics.tabBarHeight
 
-    // TODO: Replace this with the latest order status once Orders has
-    // a backend-backed view model. For now the manager wants empty shown.
-    private let ordersState: OrdersTabState = .empty
-
     private var brandedIconSize: CGFloat {
         iconSize * AppTheme.Metrics.brandedTabIconScale
     }
@@ -90,28 +86,17 @@ private struct PulseTabBar: View {
 
     @ViewBuilder
     private func icon(for tab: MainTab, isSelected: Bool) -> some View {
-        if tab == .home {
-            PulseHomeTabIcon(isSelected: isSelected)
-                .frame(width: brandedIconSize, height: brandedIconSize)
-        } else if tab == .orders {
-            PulseOrdersTabIcon(state: ordersState, isSelected: isSelected)
+        if let layeredAssetNames = tab.layeredAssetNames {
+            PulseLayeredTabIcon(assetNames: layeredAssetNames,
+                                isSelected: isSelected)
                 .frame(width: brandedIconSize, height: brandedIconSize)
         } else if let assetName = tab.customAssetName {
-            switch tab.customAssetRendering {
-            case .original:
-                Image(assetName)
-                    .renderingMode(.original)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: brandedIconSize, height: brandedIconSize)
-            case .template:
-                Image(assetName)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(isSelected ? AppTheme.Colors.tabIconActive : AppTheme.Colors.tabIconInactive)
-                    .frame(width: brandedIconSize, height: brandedIconSize)
-            }
+            Image(assetName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(isSelected ? AppTheme.Colors.tabIconActive : AppTheme.Colors.tabIconInactive)
+                .frame(width: brandedIconSize, height: brandedIconSize)
         } else {
             Image(systemName: isSelected ? tab.selectedSymbolName : tab.tabBarSymbolName)
                 .font(.system(size: iconSize,
@@ -120,7 +105,8 @@ private struct PulseTabBar: View {
     }
 }
 
-private struct PulseHomeTabIcon: View {
+private struct PulseLayeredTabIcon: View {
+    let assetNames: LayeredTabAsset
     let isSelected: Bool
 
     private var baseColor: Color {
@@ -133,60 +119,21 @@ private struct PulseHomeTabIcon: View {
 
     var body: some View {
         ZStack {
-            // The Home mark is split into template layers so the active state can
-            // keep the matcha curl while inactive collapses to the taupe stroke.
-            Image("PulseHomeMark")
+            // Multi-color nav icons are split into template layers so the active
+            // state can keep the matcha accent while inactive collapses to taupe.
+            Image(assetNames.baseName)
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
                 .foregroundStyle(baseColor)
                 .accessibilityHidden(true)
 
-            Image("PulseHomeLeafAccent")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(leafColor)
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-enum OrdersTabState: Equatable, Hashable {
-    case empty
-    case preparing
-    case ready
-
-    var cupColor: Color? {
-        switch self {
-        case .empty:     return nil
-        case .preparing: return AppTheme.Colors.orderPreparing
-        case .ready:     return AppTheme.Colors.orderReady
-        }
-    }
-}
-
-private struct PulseOrdersTabIcon: View {
-    let state: OrdersTabState
-    let isSelected: Bool
-
-    var body: some View {
-        ZStack {
-            // Keep the Orders artwork split into template layers: the bag follows
-            // the shared brand token, while the cup can reflect order status.
-            Image("PulseOrdersMark")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(isSelected ? AppTheme.Colors.tabIconActive : AppTheme.Colors.tabIconInactive)
-                .accessibilityHidden(true)
-
-            if let cupColor = state.cupColor {
-                Image("PulseOrdersCupState")
+            if let accentName = assetNames.accentName {
+                Image(accentName)
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(cupColor)
+                    .foregroundStyle(leafColor)
                     .accessibilityHidden(true)
             }
         }
