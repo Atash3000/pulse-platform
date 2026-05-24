@@ -2548,13 +2548,13 @@ Plus 1 new test in `CheckoutViewModelTests` (`test_placeOrder_downstream401_surf
 
 ## 2026-05-23 — [iOS] Pulse Home tab mark
 
-**Decision:** Add the manager-provided Pulse matcha house SVG as an Asset Catalog image set and use it for the Home tab.
+**Decision:** Add the manager-provided Pulse matcha house artwork as an Asset Catalog SVG image set and use it for the Home tab.
 
 **Context:** Home still used the SF Symbol house while Menu and Orders had moved to Pulse-branded SVG marks. The manager provided `pulse_home_matcha_house_icon.svg` plus a PNG reference for the Home tab icon.
 
-**Alternatives considered:** Use the PNG directly. Rejected because vector assets scale cleanly with the custom tab bar's Dynamic Type-driven icon sizing. Use the provided 1024x1024 SVG unchanged. Rejected because the rounded-square app-icon background would make the tab icon shrink inside the original canvas.
+**Alternatives considered:** Use the PNG directly. Rejected because vector assets scale cleanly with the custom tab bar's Dynamic Type-driven icon sizing. Use the earlier cropped house-only SVG. Rejected after product selected the PNG composition with the cream rounded-square tile. Use the provided 1024x1024 SVG unchanged. Rejected because the tab asset should be a small, hand-trimmed vector without raster-only shadow details.
 
-**Reasoning:** The tab variant lives at `Assets.xcassets/PulseHomeMark.imageset/pulse_home_mark.svg`. It removes the app-icon rounded-square background and shadow, keeps the house/leaf/P mark artwork original-rendered so the gradients survive, and crops the viewBox around the visible mark so it fills the branded tab slot consistently with the Menu mark.
+**Reasoning:** The tab variant lives at `Assets.xcassets/PulseHomeMark.imageset/pulse_home_mark.svg`. It vectorizes the selected PNG composition as a 24x24 original-rendered asset: cream rounded-square tile, dark house, matcha leaf, and cream steam/P cutout. Keeping it in SVG avoids adding a raster icon while preserving the chosen visual composition at tab size.
 
 **Trade-offs:** Like the Menu mark, the Home icon itself does not tint blue when selected. Selection remains communicated by the Home label color, semibold label, and accessibility selected trait.
 

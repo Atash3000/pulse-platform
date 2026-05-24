@@ -1,21 +1,28 @@
-<svg width="24" height="24" viewBox="180 150 665 665" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="24" height="24" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <title>Pulse Coffee Home Mark</title>
-  <desc>Tab-bar-sized Pulse home mark, cropped from the manager-provided matcha house SVG.</desc>
+  <desc>Tab-bar-sized Pulse home tile vectorized from the manager-provided PNG reference.</desc>
   <defs>
-    <linearGradient id="house" x1="256" y1="236" x2="768" y2="810" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3D2B1F"/>
-      <stop offset="1" stop-color="#1A1208"/>
+    <radialGradient id="tile" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 470) rotate(90) scale(560)">
+      <stop stop-color="#FFF7E6"/>
+      <stop offset="0.55" stop-color="#F8E8BE"/>
+      <stop offset="1" stop-color="#F1D79C"/>
+    </radialGradient>
+    <linearGradient id="house" x1="250" y1="250" x2="760" y2="820" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B2A1D"/>
+      <stop offset="0.55" stop-color="#2C1B10"/>
+      <stop offset="1" stop-color="#160E07"/>
     </linearGradient>
-    <linearGradient id="leaf" x1="456" y1="250" x2="644" y2="520" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#BFD8A8"/>
-      <stop offset="0.55" stop-color="#7E9C7A"/>
-      <stop offset="1" stop-color="#4E7A48"/>
+    <linearGradient id="leaf" x1="540" y1="205" x2="615" y2="522" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B9D29C"/>
+      <stop offset="0.55" stop-color="#7F9B45"/>
+      <stop offset="1" stop-color="#4F7B32"/>
     </linearGradient>
   </defs>
 
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M512 178L212 444C188 465 203 504 235 504H275V745C275 769 294 788 318 788H430V565C430 541 449 522 473 522H551C575 522 594 541 594 565V788H706C730 788 749 769 749 745V504H789C821 504 836 465 812 444L512 178Z" fill="url(#house)"/>
-  <path d="M509 548H584C651 548 701 593 701 652C701 712 650 756 584 756H509V548Z" fill="#F5EFE3"/>
-  <path d="M594 608C623 608 642 624 642 650C642 676 623 692 594 692H566V608H594Z" fill="url(#house)"/>
-  <path d="M530 236C618 291 649 363 617 435C591 494 533 536 486 609C494 519 435 476 457 391C475 320 520 286 530 236Z" fill="url(#leaf)"/>
-  <path d="M491 252C529 329 523 405 474 473C451 505 438 535 437 570" stroke="#FFF4DB" stroke-width="24" stroke-linecap="round"/>
+  <rect x="38" y="38" width="948" height="948" rx="210" fill="url(#tile)"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M512 208L223 464C199 485 214 524 246 524H286V760C286 785 306 805 331 805H429V566C429 542 448 523 472 523H551C575 523 594 542 594 566V805H693C718 805 738 785 738 760V524H778C810 524 825 485 801 464L512 208Z" fill="url(#house)"/>
+  <path d="M509 528H588C660 528 712 577 712 641C712 706 659 754 588 754H509V528Z" fill="#FFF3D7"/>
+  <path d="M592 600C621 600 640 617 640 642C640 668 621 685 592 685H565V600H592Z" fill="url(#house)"/>
+  <path d="M526 211C617 262 656 338 629 414C605 482 542 524 487 614C496 520 438 483 458 396C474 323 516 281 526 211Z" fill="url(#leaf)"/>
+  <path d="M493 220C531 307 525 393 476 461C449 499 435 543 437 592" stroke="#FFF3D7" stroke-width="24" stroke-linecap="round"/>
 </svg>
