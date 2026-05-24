@@ -290,9 +290,99 @@ For trivial work (typo fixes, tiny tooling tweaks), skip the issue and use the s
 
 ### Branches not covered by this rule
 
-- `main` — protected default branch
-- `claude/*` — auto-generated worktree branches Claude Code creates for its own scratch space; they never become PR branches
+- `main` — protected default branch.
+- `claude/*` — auto-generated worktree branches Claude Code creates for its own scratch space. **Per §8, these are immediately renamed to a `<type>/<scope>/<name>` form at the start of any non-trivial work**, so the version that eventually lands on GitHub already follows this convention.
 
 ### Enforcement
 
 Convention only — no git hook today. Per Golden Rule #15 ("ship boring and reliable first"), enforcement infrastructure can wait until the team grows beyond solo. If a branch lands that violates this, rename it (`git branch -m <new-name>`) before opening the PR.
+
+---
+
+## 8. Local-First, GitHub-Last — Source Control Discipline
+
+Claude works on the user's local filesystem inside an auto-generated Claude Code worktree (§7). Remote (GitHub) and the `main` branch are touched only on explicit, in-session approval.
+
+### Three invariants
+
+1. **`main` never changes mid-session.** Claude never commits to `main`, never pushes to `origin main`, never merges directly into `main`. All changes land on a feature branch forked from `main` and merge back via PR only after explicit user approval.
+2. **Each new piece of work = a new branch from the latest `main`.** At the start of any non-trivial work, Claude verifies the worktree's HEAD is reachable from `main` (or surfaces the gap if not).
+3. **Local until told otherwise.** Files live on disk in the active worktree; commits live on the local branch. Nothing reaches `origin` (GitHub) without an explicit, in-session user instruction.
+
+### Required at the start of any non-trivial work
+
+The harness drops Claude on a `claude/<random-codename>` branch. As the first git move, rename it to a §7-compliant name:
+
+```bash
+git log -1 --oneline main                       # confirm base
+git merge-base --is-ancestor main HEAD          # exit 0 = forked from main, OK
+git branch -m claude/<random> <type>/<scope>/<short-kebab-name>
+```
+
+The worktree directory keeps its random codename — renaming the directory itself breaks git's worktree metadata. Only the branch ref changes. When the branch is later published, GitHub sees a clean §7-compliant name.
+
+If multiple independent concerns land in one session, each gets its own worktree off `main`:
+
+```bash
+git worktree add /Users/<user>/Desktop/pulse-platform/.claude/worktrees/<descriptive-codename> \
+  -b <type>/<scope>/<name> main
+```
+
+### Standard end-of-work sequence
+
+1. Stage intentional changes (`git add ...`).
+2. Compose a single focused commit per §1.6. **Print the commit message before running `git commit`** so the user can object.
+3. Print — but do not run — the publish commands. Hand them to the user verbatim:
+
+   ```bash
+   # Claude runs only after user says "push it":
+   git push -u origin <branch>
+
+   # User runs from their main checkout to review the result:
+   cd /Users/<user>/Desktop/pulse-platform
+   git fetch
+   git checkout <branch>
+   ```
+
+### Approval gates — each action, each time
+
+| Action | Default | Trigger phrases that unlock |
+|---|---|---|
+| Edit / Write / local build / local test | ✅ allowed | (always) |
+| `git branch -m` (rename auto-branch at session start) | ✅ allowed | (always — required) |
+| `git worktree add` (new branch from `main`) | ✅ allowed | (always — for splitting concerns) |
+| `git add`, `git status`, `git diff` | ✅ allowed | (always) |
+| `git commit` | 🛑 needs OK | "commit it", "stage and commit" |
+| `git push` (any form) | 🛑 needs OK | "push it", "publish the branch" |
+| `git fetch`, `git pull` | 🛑 needs OK | "sync with main", "pull latest" |
+| `gh pr create`, `gh pr merge`, any `gh` write op | 🛑 needs OK | "open a PR", "merge the PR" |
+| `git merge` into `main` (local or remote) | 🛑 needs OK | "merge into main" — prefer the PR review path |
+| `git worktree remove` | 🛑 needs OK | "clean up the worktree" |
+| Force-push, branch deletion, tagging, releasing | 🛑 needs OK | "force push", "delete the branch", "tag it" |
+
+### How the user reviews Claude's work
+
+While Claude is on a worktree branch, git locks that branch to its worktree — a second checkout of the same branch is refused. Two review paths:
+
+| Path | When to use | Commands |
+|---|---|---|
+| Open the worktree directly in the IDE | Fastest — no git moves needed | `open /Users/<user>/Desktop/pulse-platform/.claude/worktrees/<codename>/apps/ios/PulseCoffeeApp.xcodeproj` |
+| Publish, then check out in the main checkout | Standard PR-review flow | `git push -u origin <branch>` (Claude, on approval) → `cd <main checkout> && git fetch && git checkout <branch>` (user) |
+
+### What "implementation is finished" does NOT mean
+
+It does **not** mean "commit it." It does **not** mean "push it." Claude stops at:
+
+1. Green local build.
+2. Green local tests (relevant scope; full suite for risky changes).
+3. Staged changes.
+4. A printed commit message for review.
+
+And waits for an explicit go-ahead before touching `git commit`, `git push`, or `gh`.
+
+### Why these rules
+
+- **Reviewability.** The user often inspects changes in Xcode / iOS Simulator / the dashboard / the database before allowing them to leave the machine.
+- **Reversibility.** A push that needs iteration leaves a noisy branch on GitHub that has to be force-pushed or deleted. Local-first means the cleanup is `git restore .`, not `git push --delete origin`.
+- **No surprise mutations.** `git fetch` / `git pull` can silently overwrite uncommitted local work; gating them behind explicit approval makes those moments deliberate.
+- **`main` is sacred.** A personal-MVP demo for the founder depends on `main` being a known-good state at all times. Direct commits to `main` would erode that guarantee. Golden Rule #15 ("ship boring and reliable first") applies to source-control hygiene too.
