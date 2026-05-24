@@ -26,12 +26,33 @@ struct OrdersView: View {
     }
 }
 
+/// Account tab — splits on auth state.
+///
+/// - Logged out: the `WelcomeView` cold-open / join surface. This is the
+///   landing tab for guests (set in `ContentView`), so this is the first
+///   thing an un-registered user sees.
+/// - Logged in: the existing placeholder, until the real profile UI
+///   lands (see Navigation README build sequence).
+///
+/// `WelcomeView` renders its own full-bleed hero and doesn't want a
+/// nav-bar; the placeholder branch keeps `NavigationStack` for parity
+/// with the other placeholder tabs (and so the eventual profile screen
+/// has somewhere to push from).
 struct AccountView: View {
+
+    @EnvironmentObject private var appState: AppState
+
     var body: some View {
-        NavigationStack {
-            PlaceholderContent(tab: .account,
-                               caption: "Profile, payment methods, and sign-out move here.")
-                .navigationTitle(MainTab.account.title)
+        switch appState.authState {
+        case .loggedOut:
+            WelcomeView()
+
+        case .loggedIn:
+            NavigationStack {
+                PlaceholderContent(tab: .account,
+                                   caption: "Profile, payment methods, and sign-out move here.")
+                    .navigationTitle(MainTab.account.title)
+            }
         }
     }
 }
@@ -59,4 +80,6 @@ private struct PlaceholderContent: View {
 
 #Preview("Home")    { HomeView() }
 #Preview("Orders")  { OrdersView() }
-#Preview("Account") { AccountView() }
+#Preview("Account — guest") {
+    AccountView().environmentObject(AppState())
+}

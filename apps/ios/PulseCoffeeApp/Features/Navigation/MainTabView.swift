@@ -1,14 +1,30 @@
 import SwiftUI
 
-/// Bottom tab bar shown after sign-in. Hosts the four top-level
-/// destinations declared in `MainTab`.
+/// Bottom tab bar shown after sign-in (and now, for guests, as the
+/// cold-open shell with the Account tab pre-selected — see
+/// `ContentView`). Hosts the four top-level destinations declared in
+/// `MainTab`.
 ///
-/// Menu is the launch tab: it's the only one with real content in
-/// MVP-3. Home / Orders / Account are placeholders pending later
-/// commits (see this folder's README for the build sequence).
+/// `initialTab` controls which tab is selected on first appearance:
+/// - Signed-in users open to Menu (their job-to-be-done at launch).
+/// - Guests open to Account, which renders `WelcomeView` (the join
+///   surface).
+///
+/// Auth changes are handled by `ContentView`, not here: a sign-in (or a
+/// logout) flips `AppState.authState`, `ContentView`'s `switch`
+/// re-instantiates `MainTabView` with the new `initialTab`, and the old
+/// tab tree is torn down. So a guest who signs in lands on **Menu** (the
+/// fresh tree's `initialTab`), not back on Account — and that teardown is
+/// what clears the in-memory cart / view-model state on logout. `selection`
+/// is `@State` set once from `initialTab`; it is not re-synced on later
+/// auth changes because the whole view is rebuilt instead.
 struct MainTabView: View {
 
-    @State private var selection: MainTab = .menu
+    @State private var selection: MainTab
+
+    init(initialTab: MainTab = .menu) {
+        _selection = State(initialValue: initialTab)
+    }
 
     var body: some View {
         ZStack {
