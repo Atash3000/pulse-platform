@@ -2,6 +2,9 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
+      "Read",
+      "Glob",
+      "Grep",
       "Bash(git status)",
       "Bash(git status:*)",
       "Bash(git log:*)",
@@ -13,8 +16,10 @@
       "Bash(git rev-list:*)",
       "Bash(git worktree:*)",
       "Bash(git ls-files:*)",
+      "Bash(git ls-tree:*)",
       "Bash(git blame:*)",
       "Bash(git stash list:*)",
+      "Bash(git check-ignore:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr diff:*)",
@@ -35,10 +40,17 @@
       "Bash(find apps:*)",
       "Bash(find docs:*)",
       "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(sed -n:*)",
+      "Bash(grep:*)",
+      "Bash(awk:*)",
       "Bash(wc:*)",
       "Bash(file:*)",
       "Bash(diff:*)",
       "Bash(which:*)",
+      "Bash(curl -sS:*)",
+      "Bash(lsof:*)",
+      "Bash(ps:*)",
       "Bash(pwd)",
       "Bash(true)"
     ],
@@ -52,7 +64,10 @@
       "Bash(git push origin --force:*)",
       "Bash(git reset --hard origin/main)",
       "Bash(git branch -D main)",
-      "Bash(git branch -D master)"
+      "Bash(git branch -D master)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/.ssh/**)"
     ]
   },
   "hooks": {
