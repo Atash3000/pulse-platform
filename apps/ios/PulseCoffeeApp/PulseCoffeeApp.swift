@@ -1,6 +1,7 @@
 import SwiftUI
 import Sentry
 import PostHog
+import StripeCore
 
 @main
 struct PulseCoffeeApp: App {
@@ -71,6 +72,13 @@ struct PulseCoffeeApp: App {
             // explicitly for self-documenting code.)
             options.enableNetworkBreadcrumbs = true
         }
+
+        // Stripe SDK needs its publishable key set before any PaymentSheet
+        // is constructed. Without it, PaymentSheet can't authenticate to
+        // Stripe's API to load the PaymentIntent behind the backend's
+        // client_secret and fails with the generic "There was an unexpected
+        // error. Try again in a few seconds." Set once here, at launch.
+        StripeAPI.defaultPublishableKey = AppConfig.stripePublishableKey
 
         // PostHog init AFTER Sentry (Sentry catches PostHog init failures).
         // Single PostHog project covers iOS + backend (when DevOps wires
