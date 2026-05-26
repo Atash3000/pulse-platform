@@ -134,10 +134,16 @@ describe('AdminOrdersService.accept', () => {
     // Reload after commit returns the (now-mutated) orderRef with items
     // populated for the mapper. Customer lookup feeds customer_name.
     ordersFindOne.mockResolvedValueOnce(orderRef);
-    customersFindOne.mockResolvedValueOnce({
-      id: orderRef.customer_id,
-      baristaName: 'Alice Customer',
-    });
+    // Real Customer entity so the `baristaName` getter runs: this customer
+    // has a nickname, so the staff order list shows the nickname.
+    customersFindOne.mockResolvedValueOnce(
+      Object.assign(new Customer(), {
+        id: orderRef.customer_id,
+        first_name: 'Alice',
+        last_name: 'Customer',
+        nickname: 'Ali',
+      }),
+    );
 
     const returned = await service.accept(STAFF, orderRef.id);
 
@@ -161,7 +167,7 @@ describe('AdminOrdersService.accept', () => {
       expect.objectContaining({
         id: orderRef.id,
         customer_id: orderRef.customer_id,
-        customer_name: 'Alice Customer',
+        customer_name: 'Ali',
         order_status: OrderStatus.ACCEPTED,
         payment_status: orderRef.payment_status,
         clover_sync_status: orderRef.clover_sync_status,
@@ -577,10 +583,16 @@ describe('AdminOrdersService.refund', () => {
     phase3SumGetRawOne.mockResolvedValueOnce({ total: '1000' }); // unchanged in lock
     // Post-B2: committed branch reloads outside the lock + maps to AdminOrderDetail.
     ordersFindOne.mockResolvedValueOnce(order);
-    customersFindOne.mockResolvedValueOnce({
-      id: order.customer_id,
-      baristaName: 'Refund Customer',
-    });
+    // Real Customer entity with NO nickname → baristaName falls back to the
+    // full legal name, which is what the staff list shows.
+    customersFindOne.mockResolvedValueOnce(
+      Object.assign(new Customer(), {
+        id: order.customer_id,
+        first_name: 'Refund',
+        last_name: 'Customer',
+        nickname: null,
+      }),
+    );
 
     const result = await service.refund(STAFF, order.id, 'final refund', 1000);
 

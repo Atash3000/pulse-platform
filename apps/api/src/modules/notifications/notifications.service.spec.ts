@@ -225,7 +225,16 @@ describe('NotificationsService', () => {
         { id: 'oi-2', item_name: 'Muffin', quantity: 2 },
       ];
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Alice Mitchell' });
+      // Real Customer entity (not a literal) so the `baristaName` getter
+      // runs end-to-end: nickname is set, so staff see the nickname.
+      customersFindOne.mockResolvedValueOnce(
+        Object.assign(new Customer(), {
+          id: 'cust-1',
+          first_name: 'Abdurakhman',
+          last_name: 'Ivanov',
+          nickname: 'Abdu',
+        }),
+      );
       locationsFindOne.mockResolvedValueOnce({ id: 'loc-1', name: 'Main St' });
 
       await service.handleOrderPaidNotification({
@@ -237,11 +246,12 @@ describe('NotificationsService', () => {
 
       // TelegramService.newOrder was called with pre-formatted scalars.
       // Pre-formatting (`formatCustomerName` etc.) happens inside
-      // TelegramService — we just pass raw strings.
+      // TelegramService — we just pass raw strings. `customerName` is the
+      // nickname because the customer set one (baristaName getter).
       expect(telegramNewOrder).toHaveBeenCalledTimes(1);
       expect(telegramNewOrder).toHaveBeenCalledWith({
         orderId: 'o-paid-1',
-        customerName: 'Alice Mitchell',
+        customerName: 'Abdu',
         items: [
           { name: 'Oat Latte', quantity: 1 },
           { name: 'Muffin', quantity: 2 },
