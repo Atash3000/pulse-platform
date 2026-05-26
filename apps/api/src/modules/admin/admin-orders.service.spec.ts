@@ -584,7 +584,7 @@ describe('AdminOrdersService.refund', () => {
     // Post-B2: committed branch reloads outside the lock + maps to AdminOrderDetail.
     ordersFindOne.mockResolvedValueOnce(order);
     // Real Customer entity with NO nickname → baristaName falls back to the
-    // full legal name, which is what the staff list shows.
+    // first name + last initial, which is what the staff list shows.
     customersFindOne.mockResolvedValueOnce(
       Object.assign(new Customer(), {
         id: order.customer_id,
@@ -608,7 +608,7 @@ describe('AdminOrdersService.refund', () => {
     // result.order is the mapped AdminOrderDetail (post-B2), not a raw Order.
     // order_status field is preserved on the mapped shape.
     expect(result.order.order_status).toBe(OrderStatus.REFUNDED);
-    expect(result.order.customer_name).toBe('Refund Customer');
+    expect(result.order.customer_name).toBe('Refund C.');
     // The Phase 3 OrderEvent insert should record full_refund=true and the
     // cumulative total.
     const orderEventInsert = mockInsert.mock.calls.find(

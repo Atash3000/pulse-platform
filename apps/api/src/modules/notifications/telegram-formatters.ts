@@ -18,18 +18,20 @@
  *     → "Mary Jane W.".
  *   - Empty / whitespace-only input returns an empty string. The caller
  *     (currently always one of the C1 handlers via C4/C5 wiring) passes
- *     `Customer.baristaName` (the nickname if set, otherwise the full
- *     legal name), which is non-empty for any registered customer since
- *     `first_name`/`last_name` are NOT NULL at the schema level. Returning
- *     empty rather than throwing keeps the formatter contract simple and
- *     prevents notifications from crashing on a malformed input — the
- *     resulting alert message would have a missing name slot, which is
- *     operator-visible but non-fatal.
+ *     `Customer.baristaName` (the nickname if set, otherwise the first
+ *     name + last initial), which is non-empty for any registered
+ *     customer since `first_name`/`last_name` are NOT NULL at the schema
+ *     level. Returning empty rather than throwing keeps the formatter
+ *     contract simple and prevents notifications from crashing on a
+ *     malformed input — the resulting alert message would have a
+ *     missing name slot, which is operator-visible but non-fatal.
  *
  *   - A single-word barista name (a nickname like "Abdu", or a one-word
  *     legal name) is returned as-is — there's no last token to abbreviate.
+ *     If `baristaName` already contains an initial (e.g. "Adam D."), this
+ *     formatter preserves it.
  */
-export function formatCustomerName(name: string): string {
+ export function formatCustomerName(name: string): string {
   const parts = name.trim().split(/\s+/).filter((p) => p.length > 0);
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0]!;

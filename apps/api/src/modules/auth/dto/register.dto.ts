@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
@@ -56,24 +58,29 @@ export class RegisterDto {
 
   @ApiProperty({ example: 'Abdurakhman', minLength: 1, maxLength: 60 })
   @IsString()
+  @IsNotEmpty()
   @MinLength(1)
   @MaxLength(60)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   first_name!: string;
 
   @ApiProperty({ example: 'Ivanov', minLength: 1, maxLength: 60 })
   @IsString()
+  @IsNotEmpty()
   @MinLength(1)
   @MaxLength(60)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   last_name!: string;
 
   @ApiPropertyOptional({
     example: 'Abdu',
     maxLength: 40,
-    description: 'Shorter name baristas see on the order (defaults to the full name).',
+    description: 'Shorter name baristas see on the order (defaults to the first name).',
   })
   @IsOptional()
   @IsString()
   @MaxLength(40)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   nickname?: string;
 
   @ApiPropertyOptional({ example: '+1 718 555 0100' })

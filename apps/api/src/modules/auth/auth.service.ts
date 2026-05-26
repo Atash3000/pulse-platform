@@ -94,12 +94,23 @@ export class AuthService {
       last_name: dto.last_name.trim(),
       nickname: nickname ? nickname : null,
       date_of_birth: dto.date_of_birth ?? null,
-      phone: dto.phone ?? null,
+      phone: dto.phone ? this.normalizePhone(dto.phone) : null,
       password_hash,
     });
     const saved = await this.customers.save(customer);
 
     return this.buildCustomerResponse(saved);
+  }
+
+  /**
+   * Normalizes a phone number to E.164-like format (digits + leading plus).
+   * e.g. "(555) 123-4567" -> "5551234567"
+   * e.g. "+1 (555) 123-4567" -> "+15551234567"
+   */
+  private normalizePhone(phone: string): string {
+    const hasPlus = phone.startsWith('+');
+    const digits = phone.replace(/\D/g, '');
+    return hasPlus ? `+${digits}` : digits;
   }
 
   async loginCustomer(dto: LoginDto): Promise<CustomerAuthResponse> {

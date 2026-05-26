@@ -188,6 +188,8 @@ export class LocationSettings {
 }
 
 @Entity({ name: 'customers' })
+@Index(['last_name', 'first_name'])
+@Index(['nickname'])
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -249,12 +251,17 @@ export class Customer {
 
   /**
    * Name shown to staff on order surfaces (Telegram alerts, admin order
-   * list): the nickname if the customer set one, otherwise the full legal
-   * name. Lets a barista call out "Abdu" instead of "Abdurakhman".
+   * list): the nickname if the customer set one, otherwise the first name
+   * plus the last initial (e.g. "Abdu I."). Provides a balance between
+   * privacy and being able to distinguish multiple customers with the
+   * same first name.
    */
   get baristaName(): string {
     const nick = this.nickname?.trim();
-    return nick && nick.length > 0 ? nick : this.fullName;
+    if (nick && nick.length > 0) return nick;
+    
+    const lastInitial = this.last_name.trim().charAt(0);
+    return lastInitial ? `${this.first_name} ${lastInitial}.` : this.first_name;
   }
 }
 

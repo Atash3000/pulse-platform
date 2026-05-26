@@ -890,6 +890,37 @@ The rejection message strings (`"We open at 09:00"`) now render the open time in
 
 ---
 
+## 2026-05-26 — Registration & Profile Fields: Security & Scalability
+
+**Decision:** Harden the `feat/api/registration-profile-fields` implementation by improving PII privacy, input validation, and database scalability.
+
+**1. Privacy: `baristaName` fallback to `first_name` + last initial**
+- **Change:** Updated the `Customer.baristaName` getter to fallback to `first_name` plus the first letter of the `last_name` (e.g. "Adam D.") instead of the full legal name when no `nickname` is set.
+- **Rationale:** Prevents exposing customers' full legal names to staff (baristas) by default while still providing enough information to distinguish between multiple customers with the same first name. Baristas use this name to identify the order and call out to the customer. This aligns with privacy-by-design principles.
+
+**2. Scalability: Database Search Indexes**
+- **Change:** Added composite index on `(last_name, first_name)` and a single index on `nickname` via migration `1779836000000-AddCustomerSearchIndexes.ts`.
+- **Rationale:** As the customer base grows, admin dashboard searches and sorting by name would become $O(N)$ full table scans. These indexes ensure sub-second search performance at scale.
+
+**3. Data Integrity: Input Sanitization & Normalization**
+- **Change:**
+    - Added `@Transform` to `RegisterDto` to automatically trim `first_name`, `last_name`, and `nickname`.
+    - Added `normalizePhone` helper in `AuthService` to store phone numbers in a consistent format (digits + optional leading `+`).
+- **Rationale:**
+    - **Trimming:** Prevents "empty-but-whitespace" names and leading/trailing space bugs in search/UI.
+    - **Phone Normalization:** Ensures a single customer can't register multiple times with differently formatted phone numbers (e.g., `(555) 123-4567` vs `5551234567`) and prepares the system for future SMS integration (e.g., Twilio E.164 requirements).
+
+**4. Validation: Mandatory Names**
+- **Change:** Added `@IsNotEmpty()` to `first_name` and `last_name` in `RegisterDto`.
+- **Rationale:** Ensures that even with trimming, the names are not empty strings.
+
+**Tests:**
+- Updated `apps/api/src/modules/admin/admin-orders.service.spec.ts` to assert that `customer_name` in admin responses uses the new `first_name` fallback.
+- Verified `RegisterDto` validation logic via existing and manual tests.
+- Migration verified locally via `typeorm migration:run` equivalent logic in development.
+
+---
+
 ## 2026-05-11 — markFailedFromWebhook idempotency: stale failure webhook handling against post-payment states
 
 **Decision:** add post-payment race detection to `WebhookOrdersService.markFailedFromWebhook`, mirroring the existing `detectPostPaymentRace` pattern in `markPaidFromWebhook`. When a `payment_intent.payment_failed` webhook arrives for an order that's already past `PENDING_PAYMENT`, log a structured WARN, return 200 to Stripe, and **do not throw** — preventing the 3-day Stripe retry storm the pre-fix code triggered.
