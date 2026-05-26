@@ -17,16 +17,20 @@
  *   - Three-or-more-word names abbreviate the last word: "Mary Jane Watson"
  *     → "Mary Jane W.".
  *   - Empty / whitespace-only input returns an empty string. The caller
- *     (currently always one of the C1 handlers via C4/C5 wiring) is
- *     responsible for ensuring a non-empty name reaches this formatter,
- *     since the `customers.full_name` column is NOT NULL at the schema
- *     level. Returning empty rather than throwing keeps the formatter
- *     contract simple and prevents notifications from crashing on a
- *     malformed input — the resulting alert message would have a missing
- *     name slot, which is operator-visible but non-fatal.
+ *     (currently always one of the C1 handlers via C4/C5 wiring) passes
+ *     `Customer.baristaName` (the nickname if set, otherwise the full
+ *     legal name), which is non-empty for any registered customer since
+ *     `first_name`/`last_name` are NOT NULL at the schema level. Returning
+ *     empty rather than throwing keeps the formatter contract simple and
+ *     prevents notifications from crashing on a malformed input — the
+ *     resulting alert message would have a missing name slot, which is
+ *     operator-visible but non-fatal.
+ *
+ *   - A single-word barista name (a nickname like "Abdu", or a one-word
+ *     legal name) is returned as-is — there's no last token to abbreviate.
  */
-export function formatCustomerName(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/).filter((p) => p.length > 0);
+export function formatCustomerName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter((p) => p.length > 0);
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0]!;
   const last = parts[parts.length - 1]!;

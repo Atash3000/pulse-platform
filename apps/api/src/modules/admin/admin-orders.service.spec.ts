@@ -136,7 +136,7 @@ describe('AdminOrdersService.accept', () => {
     ordersFindOne.mockResolvedValueOnce(orderRef);
     customersFindOne.mockResolvedValueOnce({
       id: orderRef.customer_id,
-      full_name: 'Alice Customer',
+      baristaName: 'Alice Customer',
     });
 
     const returned = await service.accept(STAFF, orderRef.id);
@@ -579,7 +579,7 @@ describe('AdminOrdersService.refund', () => {
     ordersFindOne.mockResolvedValueOnce(order);
     customersFindOne.mockResolvedValueOnce({
       id: order.customer_id,
-      full_name: 'Refund Customer',
+      baristaName: 'Refund Customer',
     });
 
     const result = await service.refund(STAFF, order.id, 'final refund', 1000);
@@ -960,7 +960,7 @@ describe('AdminOrdersService.markPickedUp', () => {
     ordersFindOne.mockResolvedValueOnce(orderRef);
     customersFindOne.mockResolvedValueOnce({
       id: orderRef.customer_id,
-      full_name: 'Bob Pickup',
+      baristaName: 'Bob Pickup',
     });
 
     const returned = await service.markPickedUp(STAFF, orderRef.id);

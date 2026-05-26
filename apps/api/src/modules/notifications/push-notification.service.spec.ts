@@ -177,7 +177,7 @@ describe('customer has no push_token', () => {
     const findOne = jest.fn().mockResolvedValueOnce({
       id: 'cust-no-token',
       push_token: null,
-      full_name: 'Pushless Pete',
+      baristaName: 'Pushless Pete',
     });
     const { service, log, warn } = await buildService({}, findOne);
 

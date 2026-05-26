@@ -21,7 +21,9 @@ export interface CustomerAuthResponse {
   customer: {
     id: string;
     email: string;
-    full_name: string;
+    first_name: string;
+    last_name: string;
+    nickname: string | null;
   };
 }
 
@@ -85,9 +87,13 @@ export class AuthService {
 
     const password_hash = await bcrypt.hash(dto.password, this.bcryptRounds);
 
+    const nickname = dto.nickname?.trim();
     const customer = this.customers.create({
       email: normalizedEmail,
-      full_name: dto.full_name.trim(),
+      first_name: dto.first_name.trim(),
+      last_name: dto.last_name.trim(),
+      nickname: nickname ? nickname : null,
+      date_of_birth: dto.date_of_birth ?? null,
       phone: dto.phone ?? null,
       password_hash,
     });
@@ -191,7 +197,9 @@ export class AuthService {
       customer: {
         id: customer.id,
         email: customer.email,
-        full_name: customer.full_name,
+        first_name: customer.first_name,
+        last_name: customer.last_name,
+        nickname: customer.nickname,
       },
     };
   }

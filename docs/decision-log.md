@@ -2625,3 +2625,22 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 - iOS chat: when the above lands, do a single swap commit removing every `TODO(loyalty):` marker in `WelcomeView.swift` and `LoyaltyView` (placeholder per 2026-05-14 entry) in lockstep.
 - Product: decide whether the birthday perk stays — if yes, add `birthday` column on `customers` + a worker that mints rewards; if no, drop the perk row before launch.
 
+## 2026-05-26 — [api+ios] Registration profile fields: name split, nickname, phone, DOB
+
+**Decision:** Replace the single `customers.full_name` column with `first_name` + `last_name` (both required), and add `nickname` (optional, barista-facing) and `date_of_birth` (optional, Postgres `date`). The registration form (backend `RegisterDto` + iOS `RegisterView`) collects all of them; email + password auth is unchanged. Staff order surfaces (Telegram alerts, admin order list, customer-facing push) now display a derived **barista name** = `nickname` if set, else `first_name + last_name`, exposed as `Customer.baristaName`. `Customer.fullName` (first + last) is the legal-name getter.
+
+**Context:** The founder wanted a richer sign-up: split name, a short name baristas can call out ("Abdu" not "Abdurakhman"), and a birthday for future loyalty perks. The existing single `full_name` field couldn't express any of this.
+
+**Alternatives considered:**
+- *Keep `full_name`, add the other fields alongside.* Rejected — two overlapping name concepts to keep in sync; the founder confirmed a clean replacement (no real users yet).
+- *Edit the shipped `InitialSchema` migration in place.* Rejected — append-only migrations are the repo's invariant; editing a shipped migration breaks any DB that already ran it (including the dev DB). Shipped a new `AddCustomerProfileFields` migration with a tested `down()` instead.
+- *Show staff only the nickname (drop last name).* The founder chose nickname-else-**full name**, so a customer with no nickname is still fully identifiable to staff.
+- *Collect month/day only for the birthday.* Rejected — full ISO `date` (`YYYY-MM-DD`) is the unambiguous standard, more flexible, and the iOS `DatePicker` renders it in the user's locale (US sees MM/DD/YYYY) with no parsing.
+
+**Reasoning:** Removing `full_name` is not registration-only — it was read by `notifications.service.ts` (Telegram + push), `telegram-formatters.ts`, and `admin-orders.service.ts`. Routing all of them through one `baristaName` getter both keeps the removal honest and delivers the actual feature (baristas see the nickname). Optional fields (`nickname`, `phone`, `date_of_birth`) are omitted from the register request JSON when unset so the backend's `@IsOptional()` validators see "absent", not `null`.
+
+**Trade-offs:**
+- DOB is stored but unused — the birthday-perk worker is still future loyalty work (see the 2026-05-24 entry's open product question, now partially answered: the column exists). The register response stays lean (`id, email, first_name, last_name, nickname`); phone/DOB are write-only until a screen needs them.
+- Email verification remains a documented Phase-2 gap — unchanged here.
+- `staff_users.full_name` is deliberately untouched (separate surface, out of scope).
+

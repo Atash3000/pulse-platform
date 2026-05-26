@@ -36,7 +36,7 @@ final class AppStateTests: XCTestCase {
     }
 
     func test_init_keychainHasTokenAndCustomer_authStateIsLoggedIn() throws {
-        let customer = CustomerProfile(id: "c-1", email: "x@y.com", fullName: "Test User")
+        let customer = CustomerProfile(id: "c-1", email: "x@y.com", firstName: "Test", lastName: "User", nickname: nil)
         try Keychain.saveAccessToken("access-1")
         try Keychain.saveRefreshToken("refresh-1")
         try Keychain.saveCustomer(customer)
@@ -70,7 +70,8 @@ final class AppStateTests: XCTestCase {
               "customer": {
                 "id": "cust-1",
                 "email": "sarah@example.com",
-                "full_name": "Sarah M."
+                "first_name": "Sarah",
+                "last_name": "M."
               }
             }
             """#
@@ -82,7 +83,7 @@ final class AppStateTests: XCTestCase {
         // State transitioned
         XCTAssertEqual(
             appState.authState,
-            .loggedIn(CustomerProfile(id: "cust-1", email: "sarah@example.com", fullName: "Sarah M."))
+            .loggedIn(CustomerProfile(id: "cust-1", email: "sarah@example.com", firstName: "Sarah", lastName: "M.", nickname: nil))
         )
         // Keychain persisted
         XCTAssertEqual(try Keychain.loadAccessToken(), "new-access")
@@ -119,7 +120,9 @@ final class AppStateTests: XCTestCase {
               "customer": {
                 "id": "cust-new",
                 "email": "new@example.com",
-                "full_name": "New Customer"
+                "first_name": "New",
+                "last_name": "Customer",
+                "nickname": "Newbie"
               }
             }
             """#
@@ -129,8 +132,11 @@ final class AppStateTests: XCTestCase {
         try await appState.register(
             email: "new@example.com",
             password: "longpassword",
-            fullName: "New Customer",
-            phone: "+1 718 555 0100"
+            firstName: "New",
+            lastName: "Customer",
+            nickname: "Newbie",
+            phone: "+1 718 555 0100",
+            dateOfBirth: "1994-03-15"
         )
 
         if case .loggedIn(let profile) = appState.authState {
@@ -146,7 +152,7 @@ final class AppStateTests: XCTestCase {
         // Set up logged-in state
         try Keychain.saveAccessToken("a")
         try Keychain.saveRefreshToken("r")
-        try Keychain.saveCustomer(.init(id: "1", email: "x", fullName: "y"))
+        try Keychain.saveCustomer(.init(id: "1", email: "x", firstName: "y", lastName: "z", nickname: nil))
         let appState = AppState(api: makeAPIClient())
         XCTAssertNotEqual(appState.authState, .loggedOut)
 
@@ -163,7 +169,7 @@ final class AppStateTests: XCTestCase {
     func test_authRequiredNotification_triggersLogout() async throws {
         try Keychain.saveAccessToken("a")
         try Keychain.saveRefreshToken("r")
-        try Keychain.saveCustomer(.init(id: "1", email: "x", fullName: "y"))
+        try Keychain.saveCustomer(.init(id: "1", email: "x", firstName: "y", lastName: "z", nickname: nil))
         let appState = AppState(api: makeAPIClient())
         XCTAssertNotEqual(appState.authState, .loggedOut)
 

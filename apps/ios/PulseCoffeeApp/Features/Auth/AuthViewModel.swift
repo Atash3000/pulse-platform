@@ -29,8 +29,12 @@ final class AuthViewModel: ObservableObject {
 
     @Published var email: String = ""
     @Published var password: String = ""
-    @Published var fullName: String = ""
+    @Published var firstName: String = ""
+    @Published var lastName: String = ""
+    @Published var nickname: String = ""
     @Published var phone: String = ""
+    /// `nil` until the user opts in to share a birthday (see `RegisterView`).
+    @Published var dateOfBirth: Date?
 
     // MARK: - State
 
@@ -41,8 +45,11 @@ final class AuthViewModel: ObservableObject {
     struct FieldErrors: Equatable {
         var email: String?
         var password: String?
-        var fullName: String?
+        var firstName: String?
+        var lastName: String?
+        var nickname: String?
         var phone: String?
+        var dateOfBirth: String?
     }
 
     let mode: Mode
@@ -64,9 +71,22 @@ final class AuthViewModel: ObservableObject {
         case .login:
             return emailOK && passwordOK
         case .register:
-            return emailOK && passwordOK && !fullName.trimmed.isEmpty
+            return emailOK && passwordOK
+                && !firstName.trimmed.isEmpty
+                && !lastName.trimmed.isEmpty
         }
     }
+
+    /// ISO-8601 date-only (`YYYY-MM-DD`) in the device's current calendar —
+    /// the wire format the backend's `date_of_birth` validator expects. Fixed
+    /// `en_US_POSIX` locale so the output never shifts with the user's region.
+    private static let dobFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     func submit() async {
         guard !isSubmitting, isFormValid else { return }
@@ -84,11 +104,15 @@ final class AuthViewModel: ObservableObject {
                 )
             case .register:
                 let phoneValue = phone.trimmed
+                let nicknameValue = nickname.trimmed
                 try await appState.register(
                     email: email.trimmed,
                     password: password,
-                    fullName: fullName.trimmed,
-                    phone: phoneValue.isEmpty ? nil : phoneValue
+                    firstName: firstName.trimmed,
+                    lastName: lastName.trimmed,
+                    nickname: nicknameValue.isEmpty ? nil : nicknameValue,
+                    phone: phoneValue.isEmpty ? nil : phoneValue,
+                    dateOfBirth: dateOfBirth.map { Self.dobFormatter.string(from: $0) }
                 )
             }
         } catch let error as APIError {

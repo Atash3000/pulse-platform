@@ -28,7 +28,7 @@ final class APIClientTests: XCTestCase {
     func test_get_decodesSnakeCaseResponse() async throws {
         StubURLProtocol.stub(
             statusCode: 200,
-            body: #"{"access_token":"a","refresh_token":"r","customer":{"id":"1","email":"x@y","full_name":"X"}}"#
+            body: #"{"access_token":"a","refresh_token":"r","customer":{"id":"1","email":"x@y","first_name":"X","last_name":"Y","nickname":"XY"}}"#
         )
         let client = makeClient()
 
@@ -36,7 +36,9 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(response.accessToken, "a")
         XCTAssertEqual(response.refreshToken, "r")
-        XCTAssertEqual(response.customer.fullName, "X")
+        XCTAssertEqual(response.customer.firstName, "X")
+        XCTAssertEqual(response.customer.lastName, "Y")
+        XCTAssertEqual(response.customer.nickname, "XY")
     }
 
     // MARK: - Authorization header injection

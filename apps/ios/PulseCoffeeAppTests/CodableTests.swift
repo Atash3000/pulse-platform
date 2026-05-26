@@ -21,7 +21,9 @@ final class CodableTests: XCTestCase {
             "customer": {
                 "id": "cust-uuid-123",
                 "email": "sarah@example.com",
-                "full_name": "Sarah M."
+                "first_name": "Sarah",
+                "last_name": "Mitchell",
+                "nickname": "Sarah M."
             }
         }
         """.data(using: .utf8)!
@@ -32,7 +34,9 @@ final class CodableTests: XCTestCase {
         XCTAssertEqual(decoded.refreshToken, "eyJhbGc.refresh")
         XCTAssertEqual(decoded.customer.id, "cust-uuid-123")
         XCTAssertEqual(decoded.customer.email, "sarah@example.com")
-        XCTAssertEqual(decoded.customer.fullName, "Sarah M.")
+        XCTAssertEqual(decoded.customer.firstName, "Sarah")
+        XCTAssertEqual(decoded.customer.lastName, "Mitchell")
+        XCTAssertEqual(decoded.customer.nickname, "Sarah M.")
     }
 
     // MARK: - RefreshResponse
@@ -45,12 +49,57 @@ final class CodableTests: XCTestCase {
 
     // MARK: - CustomerProfile
 
-    func test_customerProfile_decodesFullName() throws {
+    func test_customerProfile_decodesNameSplitAndNickname() throws {
         let json = """
-        {"id":"u-1","email":"a@b.com","full_name":"Alice"}
+        {"id":"u-1","email":"a@b.com","first_name":"Alice","last_name":"Brown","nickname":"Al"}
         """.data(using: .utf8)!
         let decoded = try decoder.decode(CustomerProfile.self, from: json)
-        XCTAssertEqual(decoded.fullName, "Alice")
+        XCTAssertEqual(decoded.firstName, "Alice")
+        XCTAssertEqual(decoded.lastName, "Brown")
+        XCTAssertEqual(decoded.nickname, "Al")
+    }
+
+    func test_customerProfile_decodesWithMissingNicknameAsNil() throws {
+        let json = """
+        {"id":"u-1","email":"a@b.com","first_name":"Alice","last_name":"Brown"}
+        """.data(using: .utf8)!
+        let decoded = try decoder.decode(CustomerProfile.self, from: json)
+        XCTAssertNil(decoded.nickname)
+    }
+
+    // MARK: - RegisterRequest (encoding)
+
+    func test_registerRequest_encodesSnakeCaseAndOmitsNilOptionals() throws {
+        let req = RegisterRequest(
+            email: "a@b.com", password: "longpassword",
+            firstName: "Abdurakhman", lastName: "Ivanov",
+            nickname: nil, phone: nil, dateOfBirth: nil
+        )
+        let obj = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(req)
+        ) as! [String: Any]
+
+        XCTAssertEqual(obj["first_name"] as? String, "Abdurakhman")
+        XCTAssertEqual(obj["last_name"] as? String, "Ivanov")
+        // nil optionals are omitted entirely, not encoded as JSON null.
+        XCTAssertFalse(obj.keys.contains("nickname"))
+        XCTAssertFalse(obj.keys.contains("phone"))
+        XCTAssertFalse(obj.keys.contains("date_of_birth"))
+    }
+
+    func test_registerRequest_encodesOptionalsWhenPresent() throws {
+        let req = RegisterRequest(
+            email: "a@b.com", password: "longpassword",
+            firstName: "Abdurakhman", lastName: "Ivanov",
+            nickname: "Abdu", phone: "+1 718 555 0100", dateOfBirth: "1994-03-15"
+        )
+        let obj = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(req)
+        ) as! [String: Any]
+
+        XCTAssertEqual(obj["nickname"] as? String, "Abdu")
+        XCTAssertEqual(obj["phone"] as? String, "+1 718 555 0100")
+        XCTAssertEqual(obj["date_of_birth"] as? String, "1994-03-15")
     }
 
     // MARK: - ServerError variants
