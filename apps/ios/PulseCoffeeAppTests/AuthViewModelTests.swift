@@ -45,9 +45,12 @@ final class AuthViewModelTests: XCTestCase {
         let vm = AuthViewModel(mode: .register, appState: makeAppState())
         vm.email = "x@y.com"
         vm.password = "pwd123456"
-        XCTAssertFalse(vm.isFormValid, "Register form needs full_name")
+        XCTAssertFalse(vm.isFormValid, "Register form needs first and last name")
 
-        vm.fullName = "X Y"
+        vm.firstName = "Abdurakhman"
+        XCTAssertFalse(vm.isFormValid, "Register form still needs a last name")
+
+        vm.lastName = "Ivanov"
         XCTAssertTrue(vm.isFormValid)
     }
 
@@ -110,7 +113,8 @@ final class AuthViewModelTests: XCTestCase {
         let vm = AuthViewModel(mode: .register, appState: makeAppState())
         vm.email = "taken@example.com"
         vm.password = "longpassword"
-        vm.fullName = "Whoever"
+        vm.firstName = "Who"
+        vm.lastName = "Ever"
 
         await vm.submit()
 
@@ -140,7 +144,8 @@ final class AuthViewModelTests: XCTestCase {
         let vm = AuthViewModel(mode: .register, appState: makeAppState())
         vm.email = "bad"
         vm.password = "short"
-        vm.fullName = "Whoever"
+        vm.firstName = "Who"
+        vm.lastName = "Ever"
 
         await vm.submit()
 
@@ -171,7 +176,8 @@ final class AuthViewModelTests: XCTestCase {
         let vm = AuthViewModel(mode: .register, appState: makeAppState())
         vm.email = "x@y"
         vm.password = "longpassword"
-        vm.fullName = "X"
+        vm.firstName = "X"
+        vm.lastName = "Y"
 
         await vm.submit()
 
@@ -189,7 +195,7 @@ final class AuthViewModelTests: XCTestCase {
             {
               "access_token": "a",
               "refresh_token": "r",
-              "customer": {"id":"1","email":"x@y","full_name":"X"}
+              "customer": {"id":"1","email":"x@y","first_name":"X","last_name":"Y"}
             }
             """#
         )

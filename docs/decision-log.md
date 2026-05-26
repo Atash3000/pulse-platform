@@ -890,6 +890,37 @@ The rejection message strings (`"We open at 09:00"`) now render the open time in
 
 ---
 
+## 2026-05-26 — Registration & Profile Fields: Security & Scalability
+
+**Decision:** Harden the `feat/api/registration-profile-fields` implementation by improving PII privacy, input validation, and database scalability.
+
+**1. Privacy: `baristaName` fallback to `first_name` + last initial**
+- **Change:** Updated the `Customer.baristaName` getter to fallback to `first_name` plus the first letter of the `last_name` (e.g. "Adam D.") instead of the full legal name when no `nickname` is set.
+- **Rationale:** Prevents exposing customers' full legal names to staff (baristas) by default while still providing enough information to distinguish between multiple customers with the same first name. Baristas use this name to identify the order and call out to the customer. This aligns with privacy-by-design principles.
+
+**2. Scalability: Database Search Indexes**
+- **Change:** Added composite index on `(last_name, first_name)` and a single index on `nickname` via migration `1779836000000-AddCustomerSearchIndexes.ts`.
+- **Rationale:** As the customer base grows, admin dashboard searches and sorting by name would become $O(N)$ full table scans. These indexes ensure sub-second search performance at scale.
+
+**3. Data Integrity: Input Sanitization & Normalization**
+- **Change:**
+    - Added `@Transform` to `RegisterDto` to automatically trim `first_name`, `last_name`, and `nickname`.
+    - Added `normalizePhone` helper in `AuthService` to store phone numbers in a consistent format (digits + optional leading `+`).
+- **Rationale:**
+    - **Trimming:** Prevents "empty-but-whitespace" names and leading/trailing space bugs in search/UI.
+    - **Phone Normalization:** Ensures a single customer can't register multiple times with differently formatted phone numbers (e.g., `(555) 123-4567` vs `5551234567`) and prepares the system for future SMS integration (e.g., Twilio E.164 requirements).
+
+**4. Validation: Mandatory Names**
+- **Change:** Added `@IsNotEmpty()` to `first_name` and `last_name` in `RegisterDto`.
+- **Rationale:** Ensures that even with trimming, the names are not empty strings.
+
+**Tests:**
+- Updated `apps/api/src/modules/admin/admin-orders.service.spec.ts` to assert that `customer_name` in admin responses uses the new `first_name` fallback.
+- Verified `RegisterDto` validation logic via existing and manual tests.
+- Migration verified locally via `typeorm migration:run` equivalent logic in development.
+
+---
+
 ## 2026-05-11 — markFailedFromWebhook idempotency: stale failure webhook handling against post-payment states
 
 **Decision:** add post-payment race detection to `WebhookOrdersService.markFailedFromWebhook`, mirroring the existing `detectPostPaymentRace` pattern in `markPaidFromWebhook`. When a `payment_intent.payment_failed` webhook arrives for an order that's already past `PENDING_PAYMENT`, log a structured WARN, return 200 to Stripe, and **do not throw** — preventing the 3-day Stripe retry storm the pre-fix code triggered.
@@ -2624,4 +2655,23 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 - Backend chat: design + ship the loyalty module (`loyalty_accounts`, `beats_ledger`, `GET /loyalty/my`, welcome-bonus mint, beats-per-dollar config).
 - iOS chat: when the above lands, do a single swap commit removing every `TODO(loyalty):` marker in `WelcomeView.swift` and `LoyaltyView` (placeholder per 2026-05-14 entry) in lockstep.
 - Product: decide whether the birthday perk stays — if yes, add `birthday` column on `customers` + a worker that mints rewards; if no, drop the perk row before launch.
+
+## 2026-05-26 — [api+ios] Registration profile fields: name split, nickname, phone, DOB
+
+**Decision:** Replace the single `customers.full_name` column with `first_name` + `last_name` (both required), and add `nickname` (optional, barista-facing) and `date_of_birth` (optional, Postgres `date`). The registration form (backend `RegisterDto` + iOS `RegisterView`) collects all of them; email + password auth is unchanged. Staff order surfaces (Telegram alerts, admin order list, customer-facing push) now display a derived **barista name** = `nickname` if set, else `first_name + last_name`, exposed as `Customer.baristaName`. `Customer.fullName` (first + last) is the legal-name getter.
+
+**Context:** The founder wanted a richer sign-up: split name, a short name baristas can call out ("Abdu" not "Abdurakhman"), and a birthday for future loyalty perks. The existing single `full_name` field couldn't express any of this.
+
+**Alternatives considered:**
+- *Keep `full_name`, add the other fields alongside.* Rejected — two overlapping name concepts to keep in sync; the founder confirmed a clean replacement (no real users yet).
+- *Edit the shipped `InitialSchema` migration in place.* Rejected — append-only migrations are the repo's invariant; editing a shipped migration breaks any DB that already ran it (including the dev DB). Shipped a new `AddCustomerProfileFields` migration with a tested `down()` instead.
+- *Show staff only the nickname (drop last name).* The founder chose nickname-else-**full name**, so a customer with no nickname is still fully identifiable to staff.
+- *Collect month/day only for the birthday.* Rejected — full ISO `date` (`YYYY-MM-DD`) is the unambiguous standard, more flexible, and the iOS `DatePicker` renders it in the user's locale (US sees MM/DD/YYYY) with no parsing.
+
+**Reasoning:** Removing `full_name` is not registration-only — it was read by `notifications.service.ts` (Telegram + push), `telegram-formatters.ts`, and `admin-orders.service.ts`. Routing all of them through one `baristaName` getter both keeps the removal honest and delivers the actual feature (baristas see the nickname). Optional fields (`nickname`, `phone`, `date_of_birth`) are omitted from the register request JSON when unset so the backend's `@IsOptional()` validators see "absent", not `null`.
+
+**Trade-offs:**
+- DOB is stored but unused — the birthday-perk worker is still future loyalty work (see the 2026-05-24 entry's open product question, now partially answered: the column exists). The register response stays lean (`id, email, first_name, last_name, nickname`); phone/DOB are write-only until a screen needs them.
+- Email verification remains a documented Phase-2 gap — unchanged here.
+- `staff_users.full_name` is deliberately untouched (separate surface, out of scope).
 

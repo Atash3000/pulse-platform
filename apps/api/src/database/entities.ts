@@ -188,6 +188,8 @@ export class LocationSettings {
 }
 
 @Entity({ name: 'customers' })
+@Index(['last_name', 'first_name'])
+@Index(['nickname'])
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -200,7 +202,22 @@ export class Customer {
   phone!: string | null;
 
   @Column({ type: 'text' })
-  full_name!: string;
+  first_name!: string;
+
+  @Column({ type: 'text' })
+  last_name!: string;
+
+  // Optional barista-facing nickname (e.g. "Abdu" for "Abdurakhman").
+  // Surfaced on staff order views in preference to the legal name —
+  // see `baristaName`.
+  @Column({ type: 'text', nullable: true })
+  nickname!: string | null;
+
+  // Calendar date only — no time, no timezone. TypeORM maps a Postgres
+  // `date` to a `YYYY-MM-DD` string on read. Optional; powers future
+  // birthday-loyalty perks (no worker exists yet).
+  @Column({ type: 'date', nullable: true })
+  date_of_birth!: string | null;
 
   @Index({ unique: true, where: 'cognito_id IS NOT NULL' })
   @Column({ type: 'text', nullable: true })
@@ -226,6 +243,26 @@ export class Customer {
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at!: Date;
+
+  /** Legal name for receipts/records: "Abdurakhman Ivanov". */
+  get fullName(): string {
+    return `${this.first_name} ${this.last_name}`.trim();
+  }
+
+  /**
+   * Name shown to staff on order surfaces (Telegram alerts, admin order
+   * list): the nickname if the customer set one, otherwise the first name
+   * plus the last initial (e.g. "Abdu I."). Provides a balance between
+   * privacy and being able to distinguish multiple customers with the
+   * same first name.
+   */
+  get baristaName(): string {
+    const nick = this.nickname?.trim();
+    if (nick && nick.length > 0) return nick;
+    
+    const lastInitial = this.last_name.trim().charAt(0);
+    return lastInitial ? `${this.first_name} ${lastInitial}.` : this.first_name;
+  }
 }
 
 @Entity({ name: 'staff_users' })

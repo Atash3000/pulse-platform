@@ -31,7 +31,7 @@ export class AuthController {
     description: 'Public. Rate-limited 10/min/IP. Email is normalised to lowercase. Password is bcrypt-hashed (12 rounds). Returns access + refresh JWTs.',
   })
   @ApiResponse({ status: 201, description: 'Account created. Tokens issued.' })
-  @ApiResponse({ status: 400, description: 'Validation failed (invalid email, short password, missing full_name).' })
+  @ApiResponse({ status: 400, description: 'Validation failed (invalid email, short password, missing first_name/last_name, malformed date_of_birth).' })
   @ApiResponse({ status: 409, description: 'Email already registered.' })
   @ApiResponse({ status: 429, description: 'Too many requests (>10/min from this IP).' })
   register(@Body() dto: RegisterDto): Promise<CustomerAuthResponse> {

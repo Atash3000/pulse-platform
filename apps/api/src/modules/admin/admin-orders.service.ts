@@ -207,7 +207,7 @@ export class AdminOrdersService {
     return {
       id: order.id,
       customer_id: order.customer_id,
-      customer_name: customer?.full_name ?? null,
+      customer_name: customer?.baristaName ?? null,
       order_status: order.order_status,
       payment_status: order.payment_status,
       clover_sync_status: order.clover_sync_status,

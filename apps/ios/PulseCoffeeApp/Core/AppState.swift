@@ -67,12 +67,23 @@ final class AppState: ObservableObject {
     /// Create a new account via `POST /auth/register` and authenticate
     /// in one round trip. Backend returns the same `AuthResponse` shape
     /// as `/login` (tokens + profile), so the persist path is identical.
-    func register(email: String, password: String, fullName: String, phone: String?) async throws {
+    func register(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        nickname: String?,
+        phone: String?,
+        dateOfBirth: String?
+    ) async throws {
         let request = RegisterRequest(
             email: email,
             password: password,
-            fullName: fullName,
-            phone: phone
+            firstName: firstName,
+            lastName: lastName,
+            nickname: nickname,
+            phone: phone,
+            dateOfBirth: dateOfBirth
         )
         let response: AuthResponse = try await api.post("/auth/register", body: request)
         try persistAuth(response)

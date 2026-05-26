@@ -65,7 +65,7 @@ final class KeychainTests: XCTestCase {
     // MARK: - Customer profile round-trip
 
     func test_saveAndLoadCustomer_roundTrips() throws {
-        let original = CustomerProfile(id: "cust-1", email: "x@y.com", fullName: "X Y")
+        let original = CustomerProfile(id: "cust-1", email: "x@y.com", firstName: "X", lastName: "Y", nickname: "XY")
         try Keychain.saveCustomer(original)
         let loaded = try Keychain.loadCustomer()
         XCTAssertEqual(loaded, original)
@@ -76,8 +76,8 @@ final class KeychainTests: XCTestCase {
     }
 
     func test_saveCustomer_overwritesPreviousValue() throws {
-        try Keychain.saveCustomer(.init(id: "1", email: "a@b", fullName: "A"))
-        try Keychain.saveCustomer(.init(id: "2", email: "c@d", fullName: "B"))
+        try Keychain.saveCustomer(.init(id: "1", email: "a@b", firstName: "A", lastName: "A", nickname: nil))
+        try Keychain.saveCustomer(.init(id: "2", email: "c@d", firstName: "B", lastName: "B", nickname: nil))
         XCTAssertEqual(try Keychain.loadCustomer()?.id, "2")
     }
 
@@ -86,7 +86,7 @@ final class KeychainTests: XCTestCase {
     func test_clearAll_removesEveryItem() throws {
         try Keychain.saveAccessToken("a")
         try Keychain.saveRefreshToken("r")
-        try Keychain.saveCustomer(.init(id: "x", email: "x@y", fullName: "X"))
+        try Keychain.saveCustomer(.init(id: "x", email: "x@y", firstName: "X", lastName: "Y", nickname: nil))
 
         try Keychain.clearAll()
 

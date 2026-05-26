@@ -21,7 +21,9 @@ export interface CustomerAuthResponse {
   customer: {
     id: string;
     email: string;
-    full_name: string;
+    first_name: string;
+    last_name: string;
+    nickname: string | null;
   };
 }
 
@@ -85,15 +87,30 @@ export class AuthService {
 
     const password_hash = await bcrypt.hash(dto.password, this.bcryptRounds);
 
+    const nickname = dto.nickname?.trim();
     const customer = this.customers.create({
       email: normalizedEmail,
-      full_name: dto.full_name.trim(),
-      phone: dto.phone ?? null,
+      first_name: dto.first_name.trim(),
+      last_name: dto.last_name.trim(),
+      nickname: nickname ? nickname : null,
+      date_of_birth: dto.date_of_birth ?? null,
+      phone: dto.phone ? this.normalizePhone(dto.phone) : null,
       password_hash,
     });
     const saved = await this.customers.save(customer);
 
     return this.buildCustomerResponse(saved);
+  }
+
+  /**
+   * Normalizes a phone number to E.164-like format (digits + leading plus).
+   * e.g. "(555) 123-4567" -> "5551234567"
+   * e.g. "+1 (555) 123-4567" -> "+15551234567"
+   */
+  private normalizePhone(phone: string): string {
+    const hasPlus = phone.startsWith('+');
+    const digits = phone.replace(/\D/g, '');
+    return hasPlus ? `+${digits}` : digits;
   }
 
   async loginCustomer(dto: LoginDto): Promise<CustomerAuthResponse> {
@@ -191,7 +208,9 @@ export class AuthService {
       customer: {
         id: customer.id,
         email: customer.email,
-        full_name: customer.full_name,
+        first_name: customer.first_name,
+        last_name: customer.last_name,
+        nickname: customer.nickname,
       },
     };
   }

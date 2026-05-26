@@ -6,7 +6,7 @@ NestJS + TypeScript + TypeORM. Owns Postgres, Redis, Stripe, Clover, push, Teleg
 
 | Module | Status | Notes |
 |---|---|---|
-| `auth` | Built | Customer + staff JWT, bcrypt, refresh, RBAC roles guard. |
+| `auth` | Built | Customer + staff JWT, bcrypt, refresh, RBAC roles guard. Features phone normalization (E.164) and automatic name trimming. |
 | `health` | Built | `GET /health` checks Postgres + Redis with 2s cap. ECS task health check. |
 | `locations` | Built | List, detail, `canAcceptOrders()` implementing spec 5.5. |
 | `menu` | Built | Two-layer Redis cache (`menu:full:{loc}` + `menu:item:{id}`), tracking-set invalidation. |
@@ -44,7 +44,23 @@ TypeORM 0.3's `migration:generate` emits **duplicate `CREATE TYPE`** statements 
 
 The fix is manual: open the generated migration, delete the duplicate `CREATE TYPE` lines (keep the first one), and in `down()` move the `DROP TYPE` for shared enums to the end so they fire **after** every referencing table is dropped. The `1778273424632-InitialSchema.ts` migration in the repo shows the pattern with explanatory comments — copy that approach for any future shared-enum migration.
 
-**Always read a generated migration before running it.** The generator is a useful first draft, not a finished artifact.
+Always read a generated migration before running it. The generator is a useful first draft, not a finished artifact.
+
+## Security & Scalability Invariants
+
+The API enforces several baseline standards to ensure privacy and performance as the platform scales:
+
+### 1. PII Privacy (Barista-Facing)
+Staff-facing surfaces (Admin Dashboard, Telegram Alerts) use the `Customer.baristaName` property. This property defaults to the customer's **First Name + Last Initial** (e.g. "Adam D.") if no nickname is set. Full legal names are never exposed to baristas by default.
+
+### 2. Database Indexing
+The `customers` table is indexed for search performance:
+- `(last_name, first_name)`: Powers admin dashboard searches and sorting.
+- `nickname`: Powers staff-side name lookups.
+
+### 3. Data Normalization
+- **Phone Numbers**: Automatically normalized to a consistent format (digits + leading `+`) in the `AuthService` before persistence.
+- **Name Trimming**: `RegisterDto` uses `class-transformer` to automatically trim leading/trailing whitespace from names and nicknames.
 
 ## Seeds
 

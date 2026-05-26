@@ -225,7 +225,16 @@ describe('NotificationsService', () => {
         { id: 'oi-2', item_name: 'Muffin', quantity: 2 },
       ];
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Alice Mitchell' });
+      // Real Customer entity (not a literal) so the `baristaName` getter
+      // runs end-to-end: nickname is set, so staff see the nickname.
+      customersFindOne.mockResolvedValueOnce(
+        Object.assign(new Customer(), {
+          id: 'cust-1',
+          first_name: 'Abdurakhman',
+          last_name: 'Ivanov',
+          nickname: 'Abdu',
+        }),
+      );
       locationsFindOne.mockResolvedValueOnce({ id: 'loc-1', name: 'Main St' });
 
       await service.handleOrderPaidNotification({
@@ -237,11 +246,12 @@ describe('NotificationsService', () => {
 
       // TelegramService.newOrder was called with pre-formatted scalars.
       // Pre-formatting (`formatCustomerName` etc.) happens inside
-      // TelegramService — we just pass raw strings.
+      // TelegramService — we just pass raw strings. `customerName` is the
+      // nickname because the customer set one (baristaName getter).
       expect(telegramNewOrder).toHaveBeenCalledTimes(1);
       expect(telegramNewOrder).toHaveBeenCalledWith({
         orderId: 'o-paid-1',
-        customerName: 'Alice Mitchell',
+        customerName: 'Abdu',
         items: [
           { name: 'Oat Latte', quantity: 1 },
           { name: 'Muffin', quantity: 2 },
@@ -269,7 +279,7 @@ describe('NotificationsService', () => {
       const order = makeOrder({ id: 'o-paid-1' });
       (order as Record<string, unknown>).items = [];
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Alice' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Alice' });
       locationsFindOne.mockResolvedValueOnce(null);
 
       await service.handleOrderPaidNotification({ orderId: 'o-paid-1' });
@@ -311,7 +321,7 @@ describe('NotificationsService', () => {
         estimated_ready_at: new Date('2026-05-09T15:30:00.000Z'),
       });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Bob' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Bob' });
 
       await service.handleOrderReady({
         orderId: 'o-ready-1',
@@ -351,7 +361,7 @@ describe('NotificationsService', () => {
         location: { id: 'loc-1', name: 'Main St' },
       });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-push-1', full_name: 'Bob' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-push-1', baristaName: 'Bob' });
 
       await service.handleOrderReady({ orderId: 'o-ready-push' });
 
@@ -372,7 +382,7 @@ describe('NotificationsService', () => {
       // body degrades gracefully — operator-visible but non-fatal.
       const order = makeOrder({ id: 'o-ready-noloc', location: null });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Bob' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Bob' });
 
       await service.handleOrderReady({ orderId: 'o-ready-noloc' });
 
@@ -413,7 +423,7 @@ describe('NotificationsService', () => {
     it('reads cancelledBy/staffUserId/reason defensively and logs the cancellation', async () => {
       const order = makeOrder({ id: 'o-cancel-1' });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Carol' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Carol' });
 
       await service.handleOrderCancelled({
         orderId: 'o-cancel-1',
@@ -465,7 +475,7 @@ describe('NotificationsService', () => {
     it('logs the close-of-loop context with picked_up_at from the payload', async () => {
       const order = makeOrder({ id: 'o-pickup-1' });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Dave' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Dave' });
 
       await service.handleOrderPickedUp({
         orderId: 'o-pickup-1',
@@ -497,7 +507,7 @@ describe('NotificationsService', () => {
     it('committed-arm payload (admin-orders.service.ts refund happy path) → INFO log', async () => {
       const order = makeOrder({ id: 'o-refund-committed' });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', full_name: 'Eve' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-1', baristaName: 'Eve' });
 
       await service.handleRefundCreated({
         orderId: 'o-refund-committed',
@@ -604,7 +614,7 @@ describe('NotificationsService', () => {
     it('committed-arm: calls pushNotifications.send with title="Refund processed" and $X.XX in body', async () => {
       const order = makeOrder({ id: 'o-refund-push', customer_id: 'cust-refund-1' });
       ordersFindOne.mockResolvedValueOnce(order);
-      customersFindOne.mockResolvedValueOnce({ id: 'cust-refund-1', full_name: 'Eve' });
+      customersFindOne.mockResolvedValueOnce({ id: 'cust-refund-1', baristaName: 'Eve' });
 
       await service.handleRefundCreated({
         orderId: 'o-refund-push',

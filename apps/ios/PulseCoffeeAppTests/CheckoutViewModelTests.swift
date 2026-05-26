@@ -294,7 +294,7 @@ final class CheckoutViewModelTests: XCTestCase {
     private func makeVMLoggedIn() -> (CheckoutViewModel, CartManager, AppState) {
         try? Keychain.saveAccessToken("test-access")
         try? Keychain.saveRefreshToken("test-refresh")
-        try? Keychain.saveCustomer(.init(id: "cust-1", email: "x@y", fullName: "Test"))
+        try? Keychain.saveCustomer(.init(id: "cust-1", email: "x@y", firstName: "Test", lastName: "User", nickname: nil))
         let cart = CartManager()
         let api = makeAPIClient()
         let appState = AppState(api: api)
