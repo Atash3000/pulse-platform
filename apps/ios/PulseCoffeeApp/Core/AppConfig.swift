@@ -40,6 +40,28 @@ enum AppConfig {
 
     static let postHogAPIKey = "phc_ru627crGzUTPMbwBeE85V5pLYqRN2eavsy2KMyikmq9W"
 
+    // Stripe PUBLISHABLE key is a public client-side credential, exactly
+    // like the Sentry DSN and PostHog key above: it identifies the Stripe
+    // account to the iOS SDK so PaymentSheet can load a PaymentIntent, but
+    // it grants no ability to move money or read other accounts' data.
+    // The SECRET key (`sk_…`) lives only in the backend `.env` and never
+    // ships in the app. This key MUST be from the SAME Stripe account and
+    // mode as the backend's `STRIPE_SECRET_KEY` — otherwise PaymentSheet
+    // fails to load the PaymentIntent with Stripe's generic "There was an
+    // unexpected error. Try again in a few seconds."
+    //
+    // Debug builds use the test-mode key (`pk_test_…`, paired with the
+    // backend's `sk_test_…`). Release builds need the live key
+    // (`pk_live_…`) — placeholder until the production Stripe account is
+    // wired in the DevOps phase.
+    static let stripePublishableKey: String = {
+        #if DEBUG
+        return "pk_test_51TWs9mRwTm9NZFNCmYBvEghdOmpkP39Rvtz8dNSxU7ZrJrukjHvRenWfJyLrPIB7dbzCX9b7bi5z9ld5A9DrdTAo00DJwjeWpj"
+        #else
+        return "pk_live_REPLACE_WITH_PRODUCTION_KEY"
+        #endif
+    }()
+
     // MARK: - API base URL
     //
     // Debug builds talk to the local backend running on the developer's
