@@ -58,7 +58,7 @@ describe('AuthService.registerCustomer', () => {
     );
   });
 
-  it('persists the name split, trims values, and lower-cases the email', async () => {
+  it('persists the name split, trims values, normalizes the phone, and lower-cases the email', async () => {
     await service.registerCustomer({
       ...baseDto,
       first_name: '  Abdurakhman ',
@@ -73,7 +73,8 @@ describe('AuthService.registerCustomer', () => {
       first_name: 'Abdurakhman',
       last_name: 'Ivanov',
       nickname: 'Abdu',
-      phone: '+1 718 555 0100',
+      // Phone is normalized to E.164-like form (formatting stripped, leading + kept).
+      phone: '+17185550100',
       date_of_birth: '1994-03-15',
     });
   });
@@ -125,12 +126,12 @@ describe('Customer display-name getters', () => {
     ).toBe('Abdu');
   });
 
-  it('baristaName falls back to the full name when nickname is null or blank', () => {
+  it('baristaName falls back to first name + last initial when nickname is null or blank', () => {
     expect(
       customerWith({ first_name: 'Abdurakhman', last_name: 'Ivanov', nickname: null }).baristaName,
-    ).toBe('Abdurakhman Ivanov');
+    ).toBe('Abdurakhman I.');
     expect(
       customerWith({ first_name: 'Abdurakhman', last_name: 'Ivanov', nickname: '   ' }).baristaName,
-    ).toBe('Abdurakhman Ivanov');
+    ).toBe('Abdurakhman I.');
   });
 });
