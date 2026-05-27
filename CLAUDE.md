@@ -131,9 +131,9 @@ Per Golden Rule #7 (Spec Part 13): all money is INTEGER CENTS. Never floats. Nev
 
 ---
 
-## 3. The 15 Golden Rules (Spec Part 13) Are Non-Negotiable
+## 3. The Golden Rules Are Non-Negotiable
 
-These are the rules that, if broken, cost the business money or trust:
+Rules 1–15 are the canonical set from Spec Part 13. Rules 16+ are project-added extensions (each logged in the decision-log when elevated). The canonical, fully-explained list lives in `docs/golden-rules.md` — read it for the "why" behind each. These are the rules that, if broken, cost the business money or trust:
 
 1. Menu loads instantly (disk cache shown immediately, refresh in background)
 2. Checkout is sacred (no AI, no experiments, no dynamic logic in the pay flow)
@@ -150,6 +150,8 @@ These are the rules that, if broken, cost the business money or trust:
 13. Locations from day one (every record scoped to location_id)
 14. Three separate status enums (OrderStatus, PaymentStatus, CloverSyncStatus)
 15. Ship boring and reliable first
+16. Staff see derived state, never customer PII (DOB/age/year never leave the server to a staff client)
+17. Non-critical surfaces fail safe (badges/recommendations/celebration state degrade to a neutral default, never break the order/checkout path)
     If a change would violate any of these, Claude refuses and explains why. If the manager insists, Claude documents the override in the decision-log so future readers know it was deliberate.
 
 ---

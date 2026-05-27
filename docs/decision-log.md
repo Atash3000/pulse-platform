@@ -2675,3 +2675,31 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 - Email verification remains a documented Phase-2 gap — unchanged here.
 - `staff_users.full_name` is deliberately untouched (separate surface, out of scope).
 
+## 2026-05-26 — [api] — Staff celebration-state endpoint (birthday, backend-only) + Golden Rules #16/#17
+
+**Decision:** Add read-only `GET /api/v1/admin/customers/:customerId/celebration-state` returning a derived birthday state (`BIRTHDAY_TODAY` | `BIRTHDAY_THIS_WEEK` | `NONE`), a pre-localized label, and any live rewards mapped from the existing `offers` table. Computed in a new, self-contained `CelebrationModule`. Gated by the `birthday_celebration_state` feature flag (default off). Introduces **Golden Rule #16** (staff see derived state, never customer PII) and **Golden Rule #17** (non-critical surfaces fail safe). Spec: `docs/superpowers/specs/2026-05-26-birthday-staff-celebration-state-design.md`; plan: `docs/superpowers/plans/2026-05-26-staff-celebration-state.md`.
+
+**Context:** The "Barista / Staff-Facing Side" brief is an addendum to a `BIRTHDAY_FEATURE_v2.md` that does not exist in this repo — there is no generic `rewards` table, birthday date-math, issuance worker, or redemption flow. We shipped a minimal self-contained slice: state computed directly from `Customer.date_of_birth` (this endpoint is its first reader; previously write-only per the entry above), rewards mapped from the existing `offers` table. The hard constraint from the brief: a barista must NEVER see the raw DOB/age/year.
+
+**Alternatives considered:**
+- *Build the full v2 customer-side base first.* Rejected for now — larger scope; this staff slice stands alone and delivers value.
+- *Add the endpoint to `AdminModule`.* Rejected — `AdminModule` already has 5 controllers/services; a dedicated module keeps the only staff-side reader of `date_of_birth` inside a tight, auditable boundary.
+- *Invent a `/api/staff/...` route prefix.* Rejected — reuses the wired `admin` prefix (`RolesGuard`/`requireStaff` already expect it); a new prefix would duplicate auth for no gain.
+- *New generic `rewards` table now.* Rejected — `offers` already has the needed shape; anniversary/referral types flow into `active_rewards` later with no endpoint change.
+
+**Reasoning:** Smallest shippable staff feature that honors the privacy line. Flag-gated per GR#12. Pure date-math (Feb 29 → Feb 28, store-tz via `date-fns-tz`) in an isolated, unit-tested helper. The privacy guarantee is structural (a plain DTO with three constructor-assigned fields; the `Customer` entity is never spread in) and pinned by a build-failing recursive key-absence test.
+
+**Status codes / anti-enumeration:** Non-staff token → **403** (RolesGuard / `requireStaff` — *role* enforcement, distinct from the cross-resource privacy-404 rule of the 2026 orders entries). Unknown `customerId` → **200 `NONE`**, never 404, to prevent customer-UUID enumeration. No same-type cross-resource access arises (any staff may query any customer — anyone can walk into the store), so there's no ownership check to fail and no conflict with the 404 rule.
+
+**Golden Rules added:**
+- **#16 — Staff see derived state, never customer PII.** Generalizes the `baristaName` precedent. DOB/age/year never reach a staff client.
+- **#17 — Non-critical surfaces fail safe.** Same DNA as GR#2/#6: the service catches its own errors and degrades to `NONE`; the endpoint is off the order/checkout path. A birthday badge can never cause an outage.
+
+**Trade-offs:**
+- `active_rewards` is empty in practice until something writes `offers` (issuance deferred). The mapping + DTO shape + privacy test ship now.
+- Badge UI and one-tap redemption are out of scope — no POS/dashboard client exists to render them.
+- `SHOW_DAYS_UNTIL_BIRTHDAY` ("in N days") is a documented seam, default off; not built (no dead config constant).
+- In-memory offer-liveness filtering (not a SQL `where`) is a deliberate, scale-bounded choice: the predicate is the security-relevant "never show a redeemed/expired reward" logic and is unit-tested in one place; per-customer offer counts are tiny and the fetch is index-backed (`@Index(['customer_id','sent_at'])`). Switch to SQL filtering only if per-customer offer volume ever grows large.
+
+**Considered and explicitly deferred (do not reopen without the scale to justify it):** A FAANG-tier review proposed field-level encryption / a "shadow column" / a vault for DOB, daily Redis pre-computation with 24h negative caching, a hard 200ms query timeout, feature-flag caching, and adaptive/anomaly-detection throttling. All rejected for this feature as premature scale-engineering that contradicts §2.2 ("fast enough for 100k not a million; don't over-engineer for a million when the table has 50 rows") and GR#15. Specific reasons: (a) DOB encryption is a separate cross-cutting data-governance project, not a badge PR — logged here as a future "Privacy Hardening" candidate (incl. the open product question of whether to store the birth *year* at all); (b) 24h negative caching introduces a correctness bug at the store-midnight birthday boundary — the exact moment the feature exists for; (c) a bespoke 200ms timeout is a novel pattern nothing else in the repo uses, and Node's async model means a slow query doesn't block the event loop — the GR#17 error boundary covers the real need; (d) flag caching blunts the kill-switch with no invalidation story (§2.2); (e) adaptive/anomaly throttling is platform infra that doesn't exist, and a per-minute throttle doesn't stop the described once-a-day "fishing" poll anyway (worst-case leak is month/day, never DOB/age/year). The flat admin `@Throttle(30/min)` is kept for consistency and rush-hour headroom.
+

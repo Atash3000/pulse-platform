@@ -10,6 +10,7 @@ import { dataSourceOptions } from './database/data-source';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { CelebrationModule } from './modules/celebration/celebration.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { LocationsModule } from './modules/locations/locations.module';
@@ -47,6 +48,7 @@ import { WorkersModule } from './workers/workers.module';
     CustomersModule,
     OrdersModule,
     AdminModule,
+    CelebrationModule,
     WorkersModule,
 
     // Future modules (registered here as they're built):
