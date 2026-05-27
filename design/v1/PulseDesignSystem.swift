@@ -135,6 +135,20 @@ struct LayerStyle: Equatable {
     static let classicMatcha = LayerStyle(
         top: [P.matchaLayer, P.matchaLayerDeep], mid: milkBand,
         bottom: [P.matcha, P.matchaDeep], straw: P.matchaLayer)
+
+    // Coffee — espresso base, milk, light foam cap (still a 3-layer pour).
+    static let brownSugarLatte = LayerStyle(
+        top: [Color(hex: 0xEDE0CC), Color(hex: 0xD9C3A0)], mid: milkBand,
+        bottom: [Color(hex: 0x5A3B22), Color(hex: 0x2E1A0E)], straw: Color(hex: 0x8A5A2B))
+
+    static let vanillaLatte = LayerStyle(
+        top: [Color(hex: 0xF3E9D8), Color(hex: 0xE3D2B4)], mid: milkBand,
+        bottom: [Color(hex: 0x6B4A2C), Color(hex: 0x37210F)], straw: Color(hex: 0xC9A06A))
+
+    // Seasonal drop.
+    static let lavenderHoney = LayerStyle(
+        top: [Color(hex: 0xC9B6E8), Color(hex: 0xA98FD6)], mid: milkBand,
+        bottom: [Color(hex: 0xE6B23C), Color(hex: 0xB06A22)], straw: Color(hex: 0xA98FD6))
 }
 
 /// The brand hero: a 3-layer iced drink in a glass.
@@ -291,6 +305,38 @@ struct PulseTabBar: View {
     }
 }
 
+// MARK: - Beans loyalty badge (header)
+
+/// Header loyalty pill: a small progress ring (toward the next free matcha)
+/// hugging the bean count. "Beans" is Pulse's loyalty currency — gives the
+/// number emotional context instead of a bare integer.
+struct BeanBadge: View {
+    let beans: Int
+    let progress: Double          // 0…1 toward the next reward
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ZStack {
+                Circle().stroke(P.mint, lineWidth: 3)
+                Circle().trim(from: 0, to: max(0, min(progress, 1)))
+                    .stroke(LinearGradient(colors: [P.matcha, P.glow], startPoint: .top, endPoint: .bottom),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Image(systemName: "leaf.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(P.matcha)
+            }
+            .frame(width: 22, height: 22)
+            Text(beans, format: .number)
+                .font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(P.ink)
+                .contentTransition(.numericText())
+        }
+        .padding(.horizontal, 11).frame(height: 36)
+        .background(P.surface, in: Capsule())
+        .overlay(Capsule().stroke(P.line, lineWidth: 1))
+        .accessibilityElement()
+        .accessibilityLabel("\(beans) beans, \(Int(progress * 100)) percent to your next free matcha")
+    }
+}
+
 // MARK: - Floating cart bar (shared app chrome, sits above the tab bar)
 
 /// Persistent cart pill shown on Home + Menu. Display only — the real cart
@@ -325,5 +371,22 @@ struct PulseCartBar: View {
             .padding(.horizontal, 20).padding(.bottom, 12)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+}
+
+// MARK: - Bottom fade (content dissolves into the canvas behind the cart)
+
+/// A soft canvas-colored fade pinned to the bottom of a screen. Sits between
+/// the scroll content and the floating cart so content fades out gracefully
+/// instead of hard-overlapping the bar (reviewer fix — Apple-style).
+struct BottomFade: View {
+    var height: CGFloat = 180
+
+    var body: some View {
+        LinearGradient(colors: [P.bg.opacity(0), P.bg], startPoint: .top, endPoint: .bottom)
+            .frame(height: height)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
     }
 }

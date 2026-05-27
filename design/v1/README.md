@@ -16,21 +16,25 @@ Light & airy, matcha-forward, NYC specialty café. The signature device is the
 | File | Purpose |
 |---|---|
 | `PulseDesignSystem.swift` | Palette (`P`), `money()` formatter, `Color(hex:)`, `softShadow()`, the signature `LayeredCup` + `GlassShape` + `LayerStyle` presets (every drink is a 3-layer pour), `TricolorMark` logo, `ProductOrb`, `PulseTabBar`, `PulseCartBar`. The single source of truth for the look. |
-| `PulseHomeView.swift` | The Home screen: header · greeting · **Your usual** one-tap reorder · categories · the 3-layer signature story · popular grid · fresh Georgian bakes · rewards · floating cart. |
-| `PulseMenuView.swift` | The Menu screen: every drink as its own layered cup, the "3 layers" swatch on each card, a shimmering **This week's layer** featured drop, collection chips, and a satisfying add-to-cart (cup springs · + flips to ✓ · cart total bumps). |
+| `PulseHomeView.swift` | The Home screen: header (Beans ring) · greeting · **Your usual** reorder hero (qty stepper + one-tap reorder) · type categories · the 3-layer signature story · popular grid · Georgian bakes · Beans rewards · floating cart. |
+| `PulseMenuView.swift` | The Menu screen: every drink as its own layered cup (3 color swatches per card), a shimmering **This week's layer** featured drop, **type** chips, and a satisfying add-to-cart (cup springs · + flips to ✓ · total bumps · haptic). |
 | `PulseRootView.swift` | Tab shell. Home + Menu are designed; other tabs show a tidy placeholder. |
 | `.preview/PulseDesignApp.swift` | `@main` entry so v1 can run standalone in the Simulator. |
+| `project.yml` | xcodegen spec → generates `PulseDesign.xcodeproj` (git-ignored, regenerable). |
 
-`LayerStyle` presets so far: `strawberryMatcha`, `brownSugarMatcha`, `gingerHoney`, `raspberryMatcha`, `blueberryMatcha`, `mangoMatcha`, `ubeMatcha`, `classicMatcha`. Add a new drink color story by adding one preset — the glass, ice, gloss, and straw all come for free.
+`LayerStyle` presets: `strawberryMatcha`, `brownSugarMatcha`, `gingerHoney`, `raspberryMatcha`, `blueberryMatcha`, `mangoMatcha`, `ubeMatcha`, `classicMatcha`, `brownSugarLatte`, `vanillaLatte`, `lavenderHoney`. Add a new drink color story by adding one preset — the glass, ice, gloss, and straw all come for free.
 
 ## Home screen, top → bottom
 
-1. **Header** — tricolor mark + `PULSE` wordmark, location pill, points, avatar.
-2. **Greeting** — time-aware, personal (`Good morning, Maya`).
-3. **Your usual** — the fast path: one-tap **Reorder** of the customer's regular
-   drink, with the layered cup, options summary, price, and an ETA. Topped with
-   the strawberry/milk/matcha stripe so the brand reads instantly.
-4. **Categories** — Matcha · Iced · Coffee · Bakes · Sweets.
+1. **Header** — tricolor mark + `PULSE` wordmark, location pill, **Beans** ring
+   (loyalty balance + progress to the next free matcha), avatar.
+2. **Greeting** — time-aware, personal (`Good afternoon, Maya`).
+3. **Your usual** — the hero / one iconic interaction: the layered cup, an ETA
+   pill, a **quantity stepper**, and a one-tap **Reorder** (price tracks qty,
+   flips to ✓ with a success haptic). Topped with the strawberry/milk/matcha
+   stripe so the brand reads instantly.
+4. **Categories** — one taxonomy by **type**: Matcha · Coffee · Bakery · Seasonal
+   (matches the Menu tab).
 5. **The original** — the 3-layer story card with the big `LayeredCup` and the
    33 / 33 / 33 ratio dots: how we got famous.
 6. **Popular now** — brand items (strawberry matcha #1, matcha latte, khachapuri,
@@ -41,16 +45,18 @@ Light & airy, matcha-forward, NYC specialty café. The signature device is the
 
 ## Render it in Xcode
 
-**Canvas preview (fastest):** open any of the three `.swift` files in
-`apps/ios/PulseCoffeeApp` (or any iOS target) with these files added, and use
-the `#Preview` at the bottom of `PulseHomeView.swift` / `PulseRootView.swift`.
+**Easiest — generate + open the project (needs `brew install xcodegen`):**
+```bash
+cd design/v1
+xcodegen generate          # creates PulseDesign.xcodeproj from project.yml
+open PulseDesign.xcodeproj  # then pick a simulator and press ⌘R
+```
+For a live design canvas, open `PulseHomeView.swift` and press **⌥⌘↩**; the
+`#Preview` at the bottom renders and updates as you edit.
 
-**Run in the Simulator (standalone):**
-1. New Xcode project → **iOS App**, SwiftUI, name it `PulseDesign`.
-2. Delete its generated `ContentView.swift` and `*App.swift`.
-3. Drag in `PulseDesignSystem.swift`, `PulseHomeView.swift`, `PulseRootView.swift`,
-   and `.preview/PulseDesignApp.swift` (check *Copy items if needed*).
-4. Run on any iPhone simulator.
+**Manual (no xcodegen):** new Xcode iOS App project, delete its generated
+`ContentView.swift` + `*App.swift`, drag in the four `.swift` files plus
+`.preview/PulseDesignApp.swift` (*Copy items if needed*), run.
 
 > Note: include **only one** `@main`. If you reuse the production app target,
 > drop `.preview/PulseDesignApp.swift` and point the existing entry at

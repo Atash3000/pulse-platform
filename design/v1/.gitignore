@@ -1,3 +1,6 @@
 # Build artifacts from the standalone Simulator preview (regenerated on demand)
 .DS_Store
 .preview/PulseDesign.app/
+
+# Xcode project generated from project.yml — regenerate with `xcodegen generate`
+PulseDesign.xcodeproj/

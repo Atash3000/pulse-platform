@@ -4,7 +4,7 @@ import SwiftUI
 // Pulse Coffee — v1 Home (signed-in customer).
 //
 // Layout, top → bottom:
-//   1. Header        — tricolor mark + PULSE wordmark, location, points, avatar
+//   1. Header        — tricolor mark + PULSE wordmark, location, beans, avatar
 //   2. Greeting      — time-aware, personal
 //   3. Your usual    — one-tap reorder hero (the "super fast" repeat order)
 //   4. Categories    — quick filter chips
@@ -43,10 +43,19 @@ struct PulseHomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let customerName = "Maya"
+    private let beanBalance = 1240
+    private let beansToReward = 260          // beans until the next free matcha
     @State private var selectedCategory = 0
     @State private var rewardFill: CGFloat = 0
+    @State private var usualQty = 1
+    @State private var reordered = false
+    @State private var breathe = false
 
-    private let categories = ["Matcha", "Iced", "Coffee", "Bakes", "Sweets"]
+    // One taxonomy across the app: organize by TYPE (matches the Menu tab).
+    private let categories = ["Matcha", "Coffee", "Bakery", "Seasonal"]
+
+    /// Beans earned vs. the next reward tier → drives the header ring + bar.
+    private var beanProgress: Double { Double(beanBalance) / Double(beanBalance + beansToReward) }
 
     private let popular: [Product] = [
         Product(name: "Iced Strawberry Matcha", priceCents: 750, symbol: "drop.fill",
@@ -79,12 +88,14 @@ struct PulseHomeView: View {
                     popularSection
                     bakesSection
                     rewardsStrip
-                    Color.clear.frame(height: 150)   // room for cart + tab bar
+                    Color.clear.frame(height: 140)   // room for cart + tab bar
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
             }
             .scrollIndicators(.hidden)
+
+            BottomFade()
 
             VStack(spacing: 0) {
                 PulseCartBar(itemCount: 2, totalCents: 1600)
@@ -94,8 +105,11 @@ struct PulseHomeView: View {
         .tint(P.matcha)
         .onAppear {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 1.0).delay(0.25)) {
-                rewardFill = 0.8
+                rewardFill = CGFloat(beanProgress)
             }
+            guard !reduceMotion else { return }
+            // tiny "alive" breathing on the hero — not casino, just not dead
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { breathe = true }
         }
     }
 
@@ -113,13 +127,7 @@ struct PulseHomeView: View {
                 }
             }
             Spacer()
-            HStack(spacing: 6) {
-                Image(systemName: "star.fill").font(.system(size: 12)).foregroundStyle(P.gold)
-                Text("1,240").font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(P.ink)
-            }
-            .padding(.horizontal, 12).frame(height: 36)
-            .background(P.surface, in: Capsule())
-            .overlay(Capsule().stroke(P.line, lineWidth: 1))
+            BeanBadge(beans: beanBalance, progress: rewardFill)
 
             Circle().fill(LinearGradient(colors: [P.matcha, P.matchaDeep], startPoint: .top, endPoint: .bottom))
                 .frame(width: 38, height: 38)
@@ -134,7 +142,7 @@ struct PulseHomeView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text("\(timeGreeting), \(customerName)")
                 .font(.system(size: 26, weight: .bold)).foregroundStyle(P.ink)
-            Text("Your matcha's a tap away.")
+            Text("Your usual's ready when you are.")
                 .font(.system(size: 15)).foregroundStyle(P.inkSoft)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,47 +166,91 @@ struct PulseHomeView: View {
                 Rectangle().fill(P.milk)
                 Rectangle().fill(P.matchaLayer)
             }
-            .frame(height: 5)
+            .frame(height: 6)
 
-            VStack(spacing: 16) {
-                HStack(alignment: .top, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("YOUR USUAL").font(.system(size: 11, weight: .heavy)).tracking(1.6).foregroundStyle(P.matcha)
+            VStack(spacing: 18) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 8) {
+                            Text("YOUR USUAL").font(.system(size: 11, weight: .heavy)).tracking(1.6).foregroundStyle(P.matcha)
+                            HStack(spacing: 4) {
+                                Image(systemName: "clock.fill").font(.system(size: 9, weight: .bold))
+                                Text("~4 min").font(.system(size: 10, weight: .heavy))
+                            }
+                            .foregroundStyle(P.matchaDeep)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(P.mint, in: Capsule())
+                        }
                         Text("Iced Strawberry Matcha")
-                            .font(.system(size: 19, weight: .bold)).foregroundStyle(P.ink)
+                            .font(.system(size: 21, weight: .bold)).foregroundStyle(P.ink)
                             .fixedSize(horizontal: false, vertical: true)
                         Text("Oat milk · Large · Light ice")
                             .font(.system(size: 13)).foregroundStyle(P.inkSoft)
-                        Text(money(750))
-                            .font(.system(size: 17, weight: .heavy, design: .rounded)).foregroundStyle(P.ink)
-                            .padding(.top, 2)
+                        qtyStepper.padding(.top, 2)
                     }
                     Spacer(minLength: 0)
-                    LayeredCup(width: 64)
+                    LayeredCup(width: 76)
+                        .scaleEffect(breathe ? 1.02 : 1.0)   // gentle living motion
                 }
-
-                Button {} label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 15, weight: .bold))
-                        Text("Reorder").font(.system(size: 16, weight: .bold))
-                        Spacer()
-                        Image(systemName: "clock").font(.system(size: 13, weight: .semibold))
-                        Text("Ready in ~4 min").font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).frame(height: 52)
-                    .background(LinearGradient(colors: [P.matcha, P.matchaDeep],
-                                               startPoint: .leading, endPoint: .trailing),
-                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Reorder your usual, Iced Strawberry Matcha, ready in about four minutes")
+                reorderButton
             }
-            .padding(18)
+            .padding(20)
         }
         .background(P.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .softShadow(strong: true)
+    }
+
+    /// Quantity multiplier for the usual — underrated repeat-order convenience.
+    private var qtyStepper: some View {
+        HStack(spacing: 0) {
+            stepButton("minus") { if usualQty > 1 { usualQty -= 1 } }
+            Text("\(usualQty)")
+                .font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(P.ink)
+                .frame(minWidth: 28).contentTransition(.numericText())
+            stepButton("plus") { if usualQty < 9 { usualQty += 1 } }
+        }
+        .padding(.horizontal, 6).frame(height: 38)
+        .background(P.bg, in: Capsule())
+        .overlay(Capsule().stroke(P.line, lineWidth: 1))
+        .sensoryFeedback(.selection, trigger: usualQty)
+    }
+
+    private func stepButton(_ symbol: String, _ action: @escaping () -> Void) -> some View {
+        Button { withAnimation(.snappy) { action() } } label: {
+            Image(systemName: symbol).font(.system(size: 13, weight: .bold)).foregroundStyle(P.matcha)
+                .frame(width: 30, height: 30).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The app's one iconic interaction: one-tap reorder. Polished, fast,
+    /// satisfying — flips to a success state with a haptic on tap.
+    private var reorderButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { reordered = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation { reordered = false } }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: reordered ? "checkmark.circle.fill" : "arrow.clockwise")
+                    .font(.system(size: 16, weight: .bold))
+                Text(reordered ? "Added to cart" : "Reorder")
+                    .font(.system(size: 17, weight: .bold))
+                Spacer()
+                Text(money(750 * usualQty))
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .contentTransition(.numericText())
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20).frame(height: 56)
+            .background(LinearGradient(colors: [P.matcha, P.matchaDeep], startPoint: .leading, endPoint: .trailing),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: P.matcha.opacity(0.35), radius: 14, y: 8)
+            .scaleEffect(breathe ? 1.012 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.success, trigger: reordered)
+        .accessibilityLabel("Reorder your usual, \(usualQty) Iced Strawberry Matcha, ready in about four minutes")
     }
 
     // MARK: 4 · Categories
@@ -315,10 +367,14 @@ struct PulseHomeView: View {
     private var rewardsStrip: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("2 stars from a free matcha")
+                Text("\(beansToReward) beans to your next free matcha")
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(P.ink)
                 Spacer()
-                Text("8 / 10").font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(P.matcha)
+                HStack(spacing: 5) {
+                    Image(systemName: "leaf.fill").font(.system(size: 11)).foregroundStyle(P.matcha)
+                    Text(beanBalance, format: .number)
+                        .font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(P.matcha)
+                }
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
