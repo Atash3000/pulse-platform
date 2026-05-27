@@ -1,0 +1,3 @@
+# Build artifacts from the standalone Simulator preview (regenerated on demand)
+.DS_Store
+.preview/PulseDesign.app/
