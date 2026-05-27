@@ -21,6 +21,7 @@ const FLAGS: FlagDef[] = [
   { key: 'flash_deals',        enabled: false, description: 'AI-triggered time-limited offers' },
   { key: 'bundle_suggestions', enabled: false, description: 'AI personalised bundles' },
   { key: 'web_ordering',       enabled: false, description: 'Browser-based ordering' },
+  { key: 'birthday_celebration_state', enabled: false, description: 'Staff-facing birthday/celebration state endpoint' },
 ];
 
 async function run(): Promise<void> {
