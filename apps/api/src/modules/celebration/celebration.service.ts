@@ -13,14 +13,6 @@ export const CELEBRATION_FLAG_KEY = 'birthday_celebration_state';
 /** The safe default returned when the flag is off / customer is unknown. */
 const NONE_STATE = (): CelebrationStateDto => new CelebrationStateDto('NONE', '', []);
 
-/**
- * Reward types attached to a purchase (never standalone giveaways). Default is
- * `true` — a reward applies to an order, per the product rule.
- */
-function requiresPurchaseForType(_type: string): boolean {
-  return true;
-}
-
 /** Display title when an offer has no description of its own. */
 function defaultTitleForType(type: string): string {
   if (type === 'birthday_drink') return 'Birthday drink — on us';
@@ -64,7 +56,18 @@ export class CelebrationService {
       if (!customer) return NONE_STATE();
 
       const location = await this.locations.findOne({ where: { id: staffLocationId } });
-      const { tz } = resolveTimezone(location?.timezone);
+      const resolved = resolveTimezone(location?.timezone);
+      if (resolved.isFallback) {
+        // Match the codebase contract (cf. hours.service.ts): surface a bad
+        // Location.timezone so an operator can fix the row, rather than
+        // silently computing the birthday window in the wrong zone.
+        this.logger.warn(
+          `[celebration] location ${staffLocationId} has invalid timezone ` +
+            `'${resolved.originalTz}'; falling back to '${resolved.tz}'. ` +
+            `Operator should fix the Location row.`,
+        );
+      }
+      const tz = resolved.tz;
 
       const state = computeCelebrationState(customer.date_of_birth, now, tz);
       const label = labelForState(state);
@@ -106,7 +109,9 @@ export class CelebrationService {
             o.id,
             o.type,
             o.description ?? defaultTitleForType(o.type),
-            requiresPurchaseForType(o.type),
+            // Every reward type so far attaches to a purchase (never a standalone
+            // giveaway). Becomes per-type logic the day a non-purchase reward exists.
+            true,
             o.expires_at ? o.expires_at.toISOString() : null,
           ),
       );
