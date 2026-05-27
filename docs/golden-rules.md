@@ -1,6 +1,8 @@
-# 15 Golden Rules
+# Golden Rules
 
 These are non-negotiable. Each one prevents a specific class of incident — the kind that loses real money, breaks customer trust, or leaves the barista holding the bag.
+
+Rules **1–15** are the canonical set from Spec Part 13. Rules **16+** are project-added extensions, each introduced with a decision-log entry recording why it was elevated to a Golden Rule (so future readers know it's a deliberate platform decision, not spec drift).
 
 ---
 
@@ -121,3 +123,19 @@ These are non-negotiable. Each one prevents a specific class of incident — the
 **Rule:** A simple app that takes orders reliably beats a clever app that occasionally double-charges. Trust is everything.
 
 **Why:** The product wins or loses on whether the customer trusts the app to take their money correctly. Every "interesting" addition before that trust is established is a liability. We add cleverness *after* the boring core ships and stays up for a month without incident. Not before.
+
+---
+
+### 16. Staff see derived state, never customer PII
+
+**Rule:** A staff-facing client never receives a customer's raw PII beyond operational need. Date of birth, age, and birth year **never** leave the server to any staff surface — staff receive a *derived state* (e.g. "birthday today"), not the underlying data. Staff DTOs are plain objects built from computed values, never spread from entities; a build-failing test asserts forbidden keys (`birthday`, `date_of_birth`, `age`, `year`, `birth_year`, `dob`, and casing variants) are absent from the payload under every state.
+
+**Why:** A birth date is PII with no operational value at the counter — the warmth comes from the gesture, not from the barista knowing your age. Once raw DOB is on a staff client it leaks into logs, screenshots, CSV exports, and "helpful" personalization nobody signed off on. Computing the state server-side and shipping only the state means a future change to a customer payload physically cannot leak DOB into the POS. This generalizes the `baristaName` privacy-by-design precedent (decision-log, 2026-05-26 "Registration profile fields") into a platform principle. First applied by the celebration-state endpoint (`apps/api/src/modules/celebration/`).
+
+---
+
+### 17. Non-critical surfaces fail safe
+
+**Rule:** Nice-to-have read surfaces (badges, recommendations, celebration state, AI suggestions) must degrade to a neutral default on any error — never propagate a failure onto the order/checkout/payment path, and never turn a slow or broken dependency into a 500 for the caller. If the data can't be determined, return the empty/neutral answer and log it.
+
+**Why:** This is the same DNA as Rule #2 (checkout is sacred) and Rule #6 (Clover failure is not order failure), applied to read surfaces. A birthday badge that throws should make the badge disappear, not break the barista's order ticket. Keeping these features structurally off the critical path — and catching their own errors — means a non-essential nicety can never cause a customer-visible or operations-visible outage. The gesture is never worth the incident.
