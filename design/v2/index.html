@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pulse Coffee — app design v2</title>
+<meta name="description" content="Pulse Coffee app prototype: Your Usual fast reorder, Beats loyalty, menu and live orders." />
+<style>
+  :root{
+    --bg:#F7F6F1; --surface:#ffffff; --ink:#161310; --inkSoft:#726B5F;
+    --line:rgba(22,19,16,.08);
+    --primary:#179B5C; --primaryUp:#21C074; --glow:#67E6A4; --mint:#DDF3E5;
+    --forest1:#0A1E12; --forest2:#123A22;
+    --gold:#DDA63A; --clay:#C06A3C; --deal:#E0503B;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
+    --r: 22px;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body{
+    font-family:var(--font); color:var(--ink);
+    min-height:100vh; display:grid; place-items:center;
+    padding:32px 16px;
+    background:
+      radial-gradient(60% 50% at 50% 0%, #e9efe9, transparent 70%),
+      linear-gradient(160deg,#eceae3,#e2ddcf);
+  }
+
+  /* ── Device frame ─────────────────────────────── */
+  .device{
+    width:402px; max-width:100%; height:858px; position:relative;
+    background:var(--bg); border-radius:46px; overflow:hidden;
+    box-shadow:0 2px 6px rgba(0,0,0,.18), 0 40px 80px -30px rgba(0,0,0,.55), inset 0 0 0 9px #0d0d0d, inset 0 0 0 11px #2a2a2a;
+  }
+  .statusbar{
+    position:absolute; top:0; left:0; right:0; height:54px; z-index:40;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 30px; font-size:15px; font-weight:600; color:var(--ink);
+    pointer-events:none;
+  }
+  .notch{ width:120px; height:32px; background:#0d0d0d; border-radius:0 0 20px 20px; }
+  .statusbar .right{ display:flex; gap:6px; align-items:center; }
+  .statusbar svg{ width:18px; height:18px; }
+
+  .viewport{
+    position:absolute; inset:0; bottom:84px; top:0;
+    overflow-y:auto; overflow-x:hidden;
+    padding:62px 20px 24px;
+    scroll-behavior:smooth;
+  }
+  .viewport::-webkit-scrollbar{ display:none; }
+  .screen{ display:none; flex-direction:column; gap:22px; }
+  .screen.active{ display:flex; animation:fade .35s ease; }
+  @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+
+  /* ── Shared bits ──────────────────────────────── */
+  .card{ background:var(--surface); border-radius:var(--r); box-shadow:0 1px 2px rgba(0,0,0,.04), 0 14px 30px -22px rgba(0,0,0,.4); }
+  .row{ display:flex; align-items:center; }
+  .between{ justify-content:space-between; }
+  .muted{ color:var(--inkSoft); }
+  .num{ font-variant-numeric:tabular-nums; }
+
+  .orb{
+    border-radius:50%; display:grid; place-items:center; color:#fff; flex:none;
+    background:
+      radial-gradient(circle at 30% 26%, rgba(255,255,255,.55), transparent 58%),
+      linear-gradient(135deg, var(--c1,#2FCB7E), var(--c2,#0F7A47));
+    box-shadow:0 8px 16px -6px var(--c2,#0F7A47);
+  }
+  .orb svg{ width:42%; height:42%; }
+
+  .pill{ display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 12px; border-radius:999px; background:var(--surface); border:1px solid var(--line); font-size:14px; font-weight:600; }
+
+  .btn{ border:none; cursor:pointer; font-family:inherit; font-weight:700; display:inline-flex; align-items:center; justify-content:center; gap:8px; transition:transform .15s, filter .2s; }
+  .btn:active{ transform:scale(.97); }
+  .btn-green{ color:#fff; background:linear-gradient(90deg,var(--primary),var(--primaryUp)); }
+
+  .eyebrow{ font-size:11px; font-weight:800; letter-spacing:1.6px; }
+
+  /* ── Top bar ──────────────────────────────────── */
+  .topbar{ align-items:center; gap:12px; }
+  .topbar .hi{ font-size:14px; }
+  .topbar .brand{ font-size:22px; font-weight:800; letter-spacing:-.01em; }
+  .avatar{ width:38px; height:38px; border-radius:50%; background:var(--forest2); color:#fff; display:grid; place-items:center; font-weight:800; font-size:15px; flex:none; }
+
+  /* ── Your Usual ───────────────────────────────── */
+  .usual{ padding:20px; display:flex; flex-direction:column; gap:16px; }
+  .usual .head{ justify-content:space-between; align-items:center; }
+  .usual .head .ready{ color:var(--inkSoft); font-size:12px; font-weight:600; display:inline-flex; gap:4px; align-items:center; }
+  .usual .name{ font-size:17px; font-weight:800; }
+  .usual .config{ display:inline-flex; gap:6px; align-items:center; font-size:13px; font-weight:500; color:var(--inkSoft); border:none; background:none; cursor:pointer; font-family:inherit; padding:0; }
+  .usual .config svg{ width:12px; height:12px; color:var(--primary); }
+  .stepper{ display:flex; align-items:center; background:var(--bg); border:1px solid var(--line); border-radius:999px; }
+  .stepper button{ width:44px; height:44px; border:none; background:none; color:var(--primary); font-size:18px; cursor:pointer; display:grid; place-items:center; }
+  .stepper .qty{ width:38px; text-align:center; font-weight:800; font-size:17px; }
+  .order-btn{ flex:1; height:48px; border-radius:999px; padding:0 18px; }
+  .order-btn .total{ font-weight:800; }
+
+  /* ── Beats card ───────────────────────────────── */
+  .beats{ position:relative; padding:24px; border-radius:28px; overflow:hidden; color:#fff;
+    background:
+      radial-gradient(60% 70% at 100% 0%, rgba(103,230,164,.4), transparent 60%),
+      linear-gradient(135deg,var(--forest1),var(--forest2));
+    box-shadow:0 20px 44px -24px rgba(0,0,0,.6);
+  }
+  .beats .eyebrow{ color:var(--glow); }
+  .beats .count{ font-size:46px; font-weight:800; line-height:1; }
+  .beats .goal{ font-size:16px; font-weight:600; color:rgba(255,255,255,.55); }
+  .beats-track{ height:14px; border-radius:999px; background:rgba(255,255,255,.15); margin:16px 0; overflow:hidden; position:relative; }
+  .beats-fill{ height:100%; width:0; border-radius:999px; position:relative; overflow:hidden;
+    background:linear-gradient(90deg,var(--glow),var(--primaryUp));
+    box-shadow:0 0 10px rgba(103,230,164,.5);
+    transition:width 1s cubic-bezier(.22,.61,.36,1) .3s;
+    animation:beatGlow 1.2s ease-in-out infinite alternate;
+  }
+  .beats-fill::after{ content:""; position:absolute; top:0; bottom:0; width:40px; left:-50px;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.75),transparent);
+    animation:sweep 1.8s linear infinite; }
+  @keyframes beatGlow{ from{ box-shadow:0 0 6px rgba(103,230,164,.3);} to{ box-shadow:0 0 22px rgba(103,230,164,.95);} }
+  @keyframes sweep{ from{ left:-50px;} to{ left:110%; } }
+  .beats .reward{ font-size:14px; font-weight:500; color:rgba(255,255,255,.9); display:inline-flex; gap:6px; align-items:center; }
+  .beats .pulsemark{ animation:beatScale 1.2s ease-in-out infinite alternate; }
+  @keyframes beatScale{ from{ transform:scale(.94);} to{ transform:scale(1.12);} }
+
+  /* ── Section header ───────────────────────────── */
+  .sec{ display:flex; flex-direction:column; gap:14px; }
+  .sec h2{ font-size:19px; font-weight:800; }
+  .sec .link{ color:var(--primary); font-weight:700; font-size:14px; background:none; border:none; cursor:pointer; font-family:inherit; }
+
+  /* ── Horizontal scroll rows ───────────────────── */
+  .hscroll{ display:flex; gap:14px; overflow-x:auto; padding:4px 0; margin:0 -20px; padding-inline:20px; }
+  .hscroll::-webkit-scrollbar{ display:none; }
+  .mini{ width:160px; flex:none; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .mini .orb{ width:64px; height:64px; margin:0 auto; }
+  .mini .nm{ font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mini .pr{ font-weight:800; font-size:15px; }
+  .add{ width:30px; height:30px; border-radius:50%; color:#fff; background:linear-gradient(180deg,var(--primary),var(--primaryUp)); display:grid; place-items:center; flex:none; cursor:pointer; }
+  .add svg{ width:14px; height:14px; }
+
+  /* ── Browse menu button ───────────────────────── */
+  .browse{ height:56px; border-radius:18px; padding:0 20px; background:var(--surface); border:1px solid var(--line); color:var(--ink); font-weight:800; font-size:16px; }
+
+  /* ── Menu hero ────────────────────────────────── */
+  .hero{ position:relative; height:210px; border-radius:28px; overflow:hidden; padding:24px; color:#fff; display:flex; align-items:center;
+    background:radial-gradient(60% 80% at 100% 0%, rgba(103,230,164,.45), transparent 60%), linear-gradient(135deg,var(--forest1),var(--forest2));
+    box-shadow:0 20px 44px -24px rgba(0,0,0,.6); }
+  .hero .eyebrow{ color:var(--glow); }
+  .hero h3{ font-size:27px; font-weight:800; line-height:1.05; margin:8px 0; }
+  .hero .price{ font-size:24px; font-weight:800; }
+  .hero .was{ font-size:14px; font-weight:600; color:rgba(255,255,255,.5); text-decoration:line-through; margin-left:6px; }
+  .hero .cta{ margin-top:12px; height:44px; border-radius:999px; padding:0 22px; background:linear-gradient(180deg,var(--glow),var(--primaryUp)); color:var(--forest1); }
+  .hero .heroOrb{ width:118px; height:118px; margin-left:auto; --c1:var(--glow); --c2:var(--primary); }
+
+  .cats{ display:flex; gap:10px; overflow-x:auto; margin:0 -20px; padding:2px 20px; }
+  .cats::-webkit-scrollbar{ display:none; }
+  .cat{ flex:none; height:40px; padding:0 16px; border-radius:999px; background:var(--surface); border:1px solid var(--line); font-weight:600; font-size:14px; display:inline-flex; gap:7px; align-items:center; cursor:pointer; }
+  .cat.active{ background:linear-gradient(180deg,var(--primary),var(--primaryUp)); color:#fff; border-color:transparent; }
+  .cat svg{ width:14px; height:14px; }
+
+  .deal{ padding:14px; display:flex; gap:14px; align-items:center; border:1.4px dashed rgba(224,80,59,.4); border-radius:18px; background:var(--surface); }
+  .deal .ic{ width:46px; height:46px; border-radius:12px; background:rgba(224,80,59,.12); color:var(--deal); display:grid; place-items:center; flex:none; }
+  .deal .t{ font-weight:800; font-size:15px; }
+  .deal .s{ font-size:13px; color:var(--inkSoft); }
+
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .prod{ padding:0 0 14px; overflow:hidden; }
+  .prod .top{ height:120px; display:grid; place-items:center; position:relative; }
+  .prod .top .orb{ width:92px; height:92px; }
+  .prod .tag{ position:absolute; top:10px; right:10px; font-size:10px; font-weight:800; letter-spacing:.6px; color:#fff; background:var(--deal); padding:5px 9px; border-radius:999px; }
+  .prod .info{ padding:0 14px; display:flex; flex-direction:column; gap:8px; }
+  .prod .nm{ font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .prod .pr{ font-weight:800; font-size:16px; }
+
+  /* ── Cart bar (floats above tab bar on Menu) ──── */
+  .cartbar{ position:absolute; left:20px; right:20px; bottom:96px; height:64px; border-radius:999px; z-index:30;
+    display:none; align-items:center; gap:14px; padding:0 16px; color:#fff;
+    background:linear-gradient(90deg,var(--primary),var(--primaryUp));
+    box-shadow:0 20px 40px -18px rgba(23,155,92,.8); }
+  .device[data-screen="menu"] .cartbar{ display:flex; }
+  .cartbar .b{ width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,.18); display:grid; place-items:center; }
+  .cartbar .ck{ margin-left:auto; height:40px; padding:0 18px; border-radius:999px; background:var(--glow); color:var(--forest1); font-weight:800; }
+
+  /* ── Orders ───────────────────────────────────── */
+  .seg{ display:flex; gap:4px; padding:4px; border-radius:999px; background:rgba(221,243,229,.6); }
+  .seg button{ flex:1; height:38px; border:none; border-radius:999px; background:none; color:var(--primary); font-weight:800; font-size:14px; cursor:pointer; font-family:inherit; }
+  .seg button.active{ color:#fff; background:linear-gradient(180deg,var(--primary),var(--primaryUp)); }
+
+  .order-card{ padding:20px; display:flex; flex-direction:column; gap:18px; }
+  .status-pill{ height:28px; padding:0 12px; border-radius:999px; background:var(--mint); color:var(--primary); font-weight:800; font-size:12px; display:inline-flex; align-items:center; }
+  .eta b{ font-size:22px; font-weight:800; }
+
+  .tracker{ display:flex; position:relative; padding-top:4px; }
+  .tracker .step{ flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; position:relative; }
+  .tracker .line{ position:absolute; top:13px; height:3px; background:var(--line); z-index:0; }
+  .tracker .linefill{ position:absolute; top:13px; height:3px; background:linear-gradient(90deg,var(--primary),var(--primaryUp)); z-index:1; }
+  .tracker .dot{ width:26px; height:26px; border-radius:50%; background:var(--surface); border:1.5px solid var(--line); display:grid; place-items:center; z-index:2; }
+  .tracker .step.done .dot{ background:linear-gradient(180deg,var(--primary),var(--primaryUp)); border-color:transparent; color:#fff; }
+  .tracker .step.current .dot{ background:linear-gradient(180deg,var(--primary),var(--primaryUp)); border-color:transparent; }
+  .tracker .dot .core{ width:9px; height:9px; border-radius:50%; background:#fff; }
+  .tracker .dot svg{ width:12px; height:12px; }
+  .tracker .lbl{ font-size:11px; font-weight:600; color:var(--inkSoft); }
+  .tracker .step.done .lbl, .tracker .step.current .lbl{ color:var(--ink); font-weight:700; }
+
+  .lineitem{ display:flex; align-items:center; gap:12px; }
+  .lineitem .orb{ width:40px; height:40px; }
+  .lineitem .nm{ font-size:14px; font-weight:500; }
+  .lineitem .pr{ margin-left:auto; font-size:14px; font-weight:600; color:var(--inkSoft); }
+  .divider{ height:1px; background:var(--line); }
+  .total-row{ display:flex; justify-content:space-between; align-items:center; }
+  .total-row .v{ font-size:18px; font-weight:800; }
+  .code-btn{ height:50px; border-radius:16px; padding:0 18px; background:linear-gradient(90deg,var(--forest1),var(--forest2)); color:#fff; display:flex; align-items:center; gap:10px; }
+  .code-btn .code{ margin-left:auto; font-weight:800; }
+
+  .past-row{ padding:14px; display:flex; align-items:center; gap:14px; }
+  .past-row .orb{ width:48px; height:48px; }
+  .past-row .when{ font-size:12px; font-weight:500; color:var(--inkSoft); }
+  .past-row .sm{ font-size:14px; font-weight:700; }
+  .past-row .tt{ font-size:13px; font-weight:800; }
+  .reorder{ margin-left:auto; height:34px; padding:0 14px; border-radius:999px; background:var(--mint); color:var(--primary); font-weight:800; font-size:13px; border:none; cursor:pointer; font-family:inherit; }
+
+  .hint{ font-size:13px; color:var(--inkSoft); display:flex; gap:8px; align-items:center; padding:0 4px; }
+
+  /* ── Tab bar ──────────────────────────────────── */
+  .tabbar{ position:absolute; left:0; right:0; bottom:0; height:84px; z-index:50;
+    background:rgba(255,255,255,.96); backdrop-filter:blur(8px);
+    border-top:1px solid var(--line); display:flex; padding-bottom:18px; }
+  .tab{ flex:1; border:none; background:none; cursor:pointer; font-family:inherit;
+    display:flex; flex-direction:column; align-items:center; gap:4px; padding-top:10px;
+    color:var(--inkSoft); font-size:11px; font-weight:600; }
+  .tab svg{ width:24px; height:24px; }
+  .tab.active{ color:var(--primary); font-weight:700; }
+
+  /* ── Edit bottom sheet ────────────────────────── */
+  .sheet-wrap{ position:absolute; inset:0; z-index:60; display:none; }
+  .sheet-wrap.open{ display:block; }
+  .sheet-bg{ position:absolute; inset:0; background:rgba(0,0,0,.35); animation:fade .2s; }
+  .sheet{ position:absolute; left:0; right:0; bottom:0; background:var(--bg);
+    border-radius:28px 28px 0 0; padding:14px 24px 28px;
+    transform:translateY(100%); animation:slideup .3s cubic-bezier(.22,.61,.36,1) forwards; }
+  @keyframes slideup{ to{ transform:translateY(0); } }
+  .grab{ width:38px; height:5px; border-radius:999px; background:rgba(0,0,0,.18); margin:0 auto 18px; }
+  .sheet h3{ font-size:22px; font-weight:800; }
+  .sheet .sub{ font-size:14px; color:var(--inkSoft); margin-bottom:18px; }
+  .optgroup{ margin-bottom:18px; }
+  .optgroup .t{ font-size:13px; font-weight:700; color:var(--inkSoft); margin-bottom:8px; }
+  .opts{ display:flex; gap:8px; }
+  .opt{ flex:1; height:40px; border-radius:999px; border:1px solid var(--line); background:var(--surface); font-weight:700; font-size:14px; cursor:pointer; font-family:inherit; color:var(--ink); }
+  .opt.sel{ background:linear-gradient(180deg,var(--primary),var(--primaryUp)); color:#fff; border-color:transparent; }
+  .save{ width:100%; height:52px; border-radius:999px; margin-top:6px; }
+  .sheet .foot{ text-align:center; font-size:12px; color:var(--inkSoft); margin-top:14px; }
+
+  @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
+</style>
+</head>
+<body>
+
+<!-- icon symbols -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6 7 5 14 9 19c5-1 9-6 9-13c0-1.5-.2-3-1-4c-1.6 0-3.5.4-5 0z"/></symbol>
+  <symbol id="i-cup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4z"/><path d="M16 9h2a2 2 0 0 1 0 4h-2"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 1-5c1 1 2 1 2 3c1-2 1-5 2-8z"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z"/></symbol>
+  <symbol id="i-mug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="7" width="11" height="12" rx="3"/><path d="M15 10h3a2 2 0 0 1 0 5h-3"/></symbol>
+  <symbol id="i-cookie" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="14" cy="13" r="1" fill="currentColor"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l4-1L19 8l-3-3L5 16z"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path fill="currentColor" d="M13 2L4 14h6l-1 8l9-12h-6z"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 32 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8h8l3-6 4 12 3-6h8"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9h16v3H4zM5 12h14v9H5zM11 9h2v12h-2zM7 9a2 2 0 1 1 4 0M17 9a2 2 0 1 0-4 0"/></symbol>
+  <symbol id="i-ticket" viewBox="0 0 24 24"><path fill="currentColor" d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><path d="M14 14h6v6h-6z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2" stroke-linecap="round"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-snow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19"/></symbol>
+  <symbol id="i-cake" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21h16v-7H4zM4 14c2-2 4 0 4 0s2-2 4 0s4 0 4 0M12 7v3M12 4v.01"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path fill="currentColor" d="M12 21C5 15 3 12 3 8.5A4.5 4.5 0 0 1 12 6a4.5 4.5 0 0 1 9 2.5C21 12 19 15 12 21z"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></symbol>
+  <!-- tab icons -->
+  <symbol id="t-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="t-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9h11v5a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4z"/><path d="M16 10h2a2 2 0 0 1 0 4h-2"/></symbol>
+  <symbol id="t-orders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></symbol>
+  <symbol id="t-acct" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></symbol>
+  <symbol id="i-signal" viewBox="0 0 24 24"><path fill="currentColor" d="M2 16h3v4H2zM7 12h3v8H7zM12 8h3v12h-3zM17 4h3v16h-3z"/></symbol>
+  <symbol id="i-batt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="8" width="18" height="8" rx="2"/><rect x="4" y="10" width="13" height="4" rx="1" fill="currentColor" stroke="none"/><path d="M21 11v2" stroke-linecap="round"/></symbol>
+</defs></svg>
+
+<div class="device" data-screen="home" id="device">
+
+  <!-- status bar -->
+  <div class="statusbar">
+    <span>9:41</span>
+    <div class="notch"></div>
+    <span class="right"><svg><use href="#i-signal"/></svg><svg><use href="#i-batt"/></svg></span>
+  </div>
+
+  <div class="viewport">
+
+    <!-- ════════ HOME ════════ -->
+    <section class="screen active" data-screen="home">
+      <div class="row topbar">
+        <div>
+          <div class="hi muted">Good afternoon</div>
+          <div class="brand">Pulse Coffee</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:12px;align-items:center">
+          <span class="pill"><svg style="width:17px;height:11px;color:var(--primary)"><use href="#i-pulse"/></svg> 7</span>
+          <span class="avatar">A</span>
+        </div>
+      </div>
+
+      <!-- Your Usual -->
+      <div class="card usual">
+        <div class="row head">
+          <span class="eyebrow" style="color:var(--primary)">⚡ YOUR USUAL</span>
+          <span class="ready"><svg style="width:11px;height:11px"><use href="#i-bolt"/></svg> Ready in 5 min</span>
+        </div>
+        <div class="row" style="gap:14px">
+          <div class="orb" style="width:56px;height:56px;--c1:#8FBF63;--c2:#4E7A34"><svg><use href="#i-leaf"/></svg></div>
+          <div>
+            <div class="name">Banana Bread Matcha</div>
+            <button class="config" id="usualConfig" onclick="openSheet()">
+              <span id="configText">16 oz • Oat Milk • Iced</span>
+              <svg><use href="#i-pencil"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="row" style="gap:12px">
+          <div class="stepper">
+            <button onclick="step(-1)">−</button>
+            <span class="qty num" id="qty">1</span>
+            <button onclick="step(1)">+</button>
+          </div>
+          <button class="btn btn-green order-btn">
+            <span>Order</span>
+            <span class="total num" id="usualTotal">$7.20</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Beats -->
+      <div class="beats">
+        <div class="row between">
+          <span class="eyebrow">YOUR BEATS</span>
+          <svg class="pulsemark" style="width:34px;height:17px;color:var(--glow)"><use href="#i-pulse"/></svg>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-top:14px">
+          <span class="count num" id="beatCount">0</span>
+          <span class="goal num">/ 10 beats</span>
+        </div>
+        <div class="beats-track"><div class="beats-fill" id="beatFill"></div></div>
+        <div class="reward"><svg style="width:13px;height:13px;color:var(--glow)"><use href="#i-gift"/></svg> 3 more beats until a free drink</div>
+      </div>
+
+      <!-- Order again -->
+      <div class="sec">
+        <div class="row between"><h2>Order again</h2><button class="link" onclick="go('menu')">Menu</button></div>
+        <div class="hscroll">
+          <div class="card mini">
+            <div class="orb" style="--c1:#2FCB7E;--c2:#0F7A47"><svg><use href="#i-cup"/></svg></div>
+            <div class="nm">Iced Matcha Latte</div>
+            <div class="row between"><span class="pr num">$6.00</span><span class="add"><svg><use href="#i-plus"/></svg></span></div>
+          </div>
+          <div class="card mini">
+            <div class="orb" style="--c1:#E3A14E;--c2:#B85F2E"><svg><use href="#i-flame"/></svg></div>
+            <div class="nm">Adjarian Khachapuri</div>
+            <div class="row between"><span class="pr num">$11.00</span><span class="add"><svg><use href="#i-plus"/></svg></span></div>
+          </div>
+          <div class="card mini">
+            <div class="orb" style="--c1:#C7A24A;--c2:#8A6B22"><svg><use href="#i-mug"/></svg></div>
+            <div class="nm">Hojicha Latte</div>
+            <div class="row between"><span class="pr num">$5.75</span><span class="add"><svg><use href="#i-plus"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn browse" onclick="go('menu')">
+        <svg style="width:18px;height:18px"><use href="#i-cup"/></svg>
+        Browse the full menu
+        <svg style="width:18px;height:18px;margin-left:auto"><use href="#i-arrow"/></svg>
+      </button>
+    </section>
+
+    <!-- ════════ MENU ════════ -->
+    <section class="screen" data-screen="menu">
+      <div class="row topbar">
+        <div>
+          <div class="hi muted">Order</div>
+          <div class="brand">Menu</div>
+        </div>
+        <span class="pill" style="margin-left:auto"><svg style="width:14px;height:14px;color:var(--primary)"><use href="#i-pin"/></svg> 14 Linden Walk</span>
+      </div>
+
+      <div class="hero">
+        <div>
+          <span class="eyebrow">LIMITED · SPRING DROP</span>
+          <h3>Spring Harvest<br>Usucha</h3>
+          <div><span class="price num">$5.50</span><span class="was num">$7.50</span></div>
+          <button class="btn cta">Order now</button>
+        </div>
+        <div class="orb heroOrb"><svg><use href="#i-leaf"/></svg></div>
+      </div>
+
+      <div class="cats">
+        <div class="cat active"><svg><use href="#i-leaf"/></svg> Matcha</div>
+        <div class="cat"><svg><use href="#i-snow"/></svg> Iced</div>
+        <div class="cat"><svg><use href="#i-cup"/></svg> Coffee</div>
+        <div class="cat"><svg><use href="#i-cake"/></svg> Bakes</div>
+        <div class="cat"><svg><use href="#i-heart"/></svg> Sweets</div>
+      </div>
+
+      <div class="deal">
+        <div class="ic"><svg style="width:20px;height:20px"><use href="#i-ticket"/></svg></div>
+        <div><div class="t">Members: 2-for-1 matcha</div><div class="s">Today only · ends 6pm</div></div>
+        <svg style="width:13px;height:13px;color:var(--inkSoft);margin-left:auto"><use href="#i-chev"/></svg>
+      </div>
+
+      <div class="sec">
+        <div class="row between"><h2>Popular now</h2><button class="link">See all</button></div>
+        <div class="grid">
+          <div class="card prod"><div class="top"><div class="orb" style="--c1:#2FCB7E;--c2:#0F7A47"><svg><use href="#i-cup"/></svg></div></div><div class="info"><div class="nm">Iced Matcha Latte</div><div class="row between"><span class="pr num">$6.00</span><span class="add"><svg><use href="#i-plus"/></svg></span></div></div></div>
+          <div class="card prod"><div class="top"><div class="orb" style="--c1:#E3A14E;--c2:#B85F2E"><svg><use href="#i-flame"/></svg></div><span class="tag">HOT</span></div><div class="info"><div class="nm">Adjarian Khachapuri</div><div class="row between"><span class="pr num">$11.00</span><span class="add"><svg><use href="#i-plus"/></svg></span></div></div></div>
+          <div class="card prod"><div class="top"><div class="orb" style="--c1:#F59FB0;--c2:#D55C7A"><svg><use href="#i-drop"/></svg></div><span class="tag">NEW</span></div><div class="info"><div class="nm">Strawberry Matcha</div><div class="row between"><span class="pr num">$7.00</span><span class="add"><svg><use href="#i-plus"/></svg></span></div></div></div>
+          <div class="card prod"><div class="top"><div class="orb" style="--c1:#8FBF63;--c2:#4E7A34"><svg><use href="#i-leaf"/></svg></div></div><div class="info"><div class="nm">Herb &amp; Lamb Kutab</div><div class="row between"><span class="pr num">$8.50</span><span class="add"><svg><use href="#i-plus"/></svg></span></div></div></div>
+          <div class="card prod"><div class="top"><div class="orb" style="--c1:#C7A24A;--c2:#8A6B22"><svg><use href="#i-mug"/></svg></div></div><div class="info"><div class="nm">Hojicha Latte</div><div class="row between"><span class="pr num">$5.75</span><span class="add"><svg><use href="#i-plus"/></svg></span></div></div></div>
+          <div class="card prod"><div class="top"><div class="orb" style="--c1:#9BCB6E;--c2:#5E8A3A"><svg><use href="#i-cookie"/></svg></div></div><div class="info"><div class="nm">Matcha-Tahini Cookie</div><div class="row between"><span class="pr num">$4.25</span><span class="add"><svg><use href="#i-plus"/></svg></span></div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════ ORDERS ════════ -->
+    <section class="screen" data-screen="orders">
+      <div class="row topbar">
+        <div>
+          <div class="hi muted">Your</div>
+          <div class="brand">Orders</div>
+        </div>
+        <span class="pill" style="margin-left:auto;width:42px;justify-content:center"><svg style="width:18px;height:18px;color:var(--primary)"><use href="#i-clock"/></svg></span>
+      </div>
+
+      <div class="seg">
+        <button class="active" onclick="seg(this,'active')">Active</button>
+        <button onclick="seg(this,'past')">Past</button>
+      </div>
+
+      <!-- Active -->
+      <div data-seg="active">
+        <div class="card order-card">
+          <div class="row between">
+            <div><div style="font-weight:800;font-size:15px">14 Linden Walk</div><div class="muted" style="font-size:12px">Order #A47 · pickup</div></div>
+            <span class="status-pill">Preparing</span>
+          </div>
+          <div class="eta muted" style="font-size:15px;font-weight:500">Ready in <b style="color:var(--ink)">~6 min</b></div>
+
+          <div class="tracker" id="tracker">
+            <div class="line"></div><div class="linefill"></div>
+            <div class="step done"><div class="dot"><svg><use href="#i-check"/></svg></div><div class="lbl">Received</div></div>
+            <div class="step current"><div class="dot"><span class="core"></span></div><div class="lbl">Preparing</div></div>
+            <div class="step"><div class="dot"></div><div class="lbl">Ready</div></div>
+            <div class="step"><div class="dot"></div><div class="lbl">Pick up</div></div>
+          </div>
+
+          <div class="divider"></div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="lineitem"><div class="orb" style="--c1:#2FCB7E;--c2:#0F7A47"><svg><use href="#i-cup"/></svg></div><span class="nm">1× Iced Matcha Latte</span><span class="pr num">$6.00</span></div>
+            <div class="lineitem"><div class="orb" style="--c1:#E3A14E;--c2:#B85F2E"><svg><use href="#i-flame"/></svg></div><span class="nm">1× Adjarian Khachapuri</span><span class="pr num">$11.00</span></div>
+            <div class="lineitem"><div class="orb" style="--c1:#9BCB6E;--c2:#5E8A3A"><svg><use href="#i-cookie"/></svg></div><span class="nm">1× Matcha-Tahini Cookie</span><span class="pr num">$4.25</span></div>
+          </div>
+          <div class="divider"></div>
+          <div class="total-row"><span style="font-weight:700">Total</span><span class="v num">$21.25</span></div>
+
+          <button class="btn code-btn"><svg style="width:18px;height:18px"><use href="#i-qr"/></svg> Show pickup code <span class="code num">A47</span></button>
+        </div>
+        <div class="hint" style="margin-top:14px"><svg style="width:13px;height:13px"><use href="#i-bolt"/></svg> We'll buzz you the moment it's ready.</div>
+      </div>
+
+      <!-- Past -->
+      <div data-seg="past" style="display:none;flex-direction:column;gap:12px">
+        <div class="card past-row"><div class="orb" style="--c1:#2FCB7E;--c2:#0F7A47"><svg><use href="#i-cup"/></svg></div><div><div class="when">Yesterday · 8:24 AM</div><div class="sm">Iced Matcha Latte · Kutab</div><div class="tt num">$14.50</div></div><button class="reorder">Reorder</button></div>
+        <div class="card past-row"><div class="orb" style="--c1:#C7A24A;--c2:#8A6B22"><svg><use href="#i-leaf"/></svg></div><div><div class="when">Mon · 9:05 AM</div><div class="sm">Hojicha Latte · Cookie</div><div class="tt num">$10.00</div></div><button class="reorder">Reorder</button></div>
+        <div class="card past-row"><div class="orb" style="--c1:#F59FB0;--c2:#D55C7A"><svg><use href="#i-drop"/></svg></div><div><div class="when">Sun · 10:40 AM</div><div class="sm">Strawberry Matcha · Khachapuri</div><div class="tt num">$18.00</div></div><button class="reorder">Reorder</button></div>
+      </div>
+    </section>
+
+    <!-- ════════ ACCOUNT ════════ -->
+    <section class="screen" data-screen="account">
+      <div class="row topbar"><div><div class="hi muted">Your</div><div class="brand">Account</div></div></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:80px">
+        <div class="orb" style="width:84px;height:84px;--c1:#67E6A4;--c2:#179B5C"><svg><use href="#i-pulse"/></svg></div>
+        <div style="font-size:22px;font-weight:800">Account</div>
+        <div class="muted">Designing this next.</div>
+      </div>
+    </section>
+
+  </div><!-- /viewport -->
+
+  <!-- cart bar (Menu only) -->
+  <div class="cartbar">
+    <span class="b"><svg style="width:15px;height:15px"><use href="#t-orders"/></svg></span>
+    <div><div style="font-size:12px;opacity:.75">3 items</div><div class="num" style="font-weight:800">$23.00</div></div>
+    <button class="btn ck">Checkout</button>
+  </div>
+
+  <!-- tab bar -->
+  <div class="tabbar">
+    <button class="tab active" data-tab="home" onclick="go('home')"><svg><use href="#t-home"/></svg>Home</button>
+    <button class="tab" data-tab="menu" onclick="go('menu')"><svg><use href="#t-menu"/></svg>Menu</button>
+    <button class="tab" data-tab="orders" onclick="go('orders')"><svg><use href="#t-orders"/></svg>Orders</button>
+    <button class="tab" data-tab="account" onclick="go('account')"><svg><use href="#t-acct"/></svg>Account</button>
+  </div>
+
+  <!-- edit sheet -->
+  <div class="sheet-wrap" id="sheetWrap">
+    <div class="sheet-bg" onclick="closeSheet()"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <h3>Edit your usual</h3>
+      <div class="sub">Banana Bread Matcha</div>
+      <div class="optgroup"><div class="t">Size</div><div class="opts" data-key="size">
+        <button class="opt">12 oz</button><button class="opt sel">16 oz</button><button class="opt">20 oz</button></div></div>
+      <div class="optgroup"><div class="t">Milk</div><div class="opts" data-key="milk">
+        <button class="opt sel">Oat Milk</button><button class="opt">Whole</button><button class="opt">Almond</button></div></div>
+      <div class="optgroup"><div class="t">Temperature</div><div class="opts" data-key="temp">
+        <button class="opt sel">Iced</button><button class="opt">Hot</button></div></div>
+      <button class="btn btn-green save" onclick="saveSheet()">Save changes</button>
+      <div class="foot">Changes available until preparation starts</div>
+    </div>
+  </div>
+
+</div><!-- /device -->
+
+<script>
+  const device = document.getElementById('device');
+  const PRICE = 720; // cents
+
+  function go(screen){
+    device.dataset.screen = screen;
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === screen));
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === screen));
+    device.querySelector('.viewport').scrollTop = 0;
+  }
+
+  // Your Usual stepper + total
+  let qty = 1;
+  function step(d){
+    qty = Math.min(9, Math.max(1, qty + d));
+    document.getElementById('qty').textContent = qty;
+    document.getElementById('usualTotal').textContent = '$' + ((PRICE * qty)/100).toFixed(2);
+  }
+
+  // Edit sheet
+  const choice = { size:'16 oz', milk:'Oat Milk', temp:'Iced' };
+  function openSheet(){ document.getElementById('sheetWrap').classList.add('open'); }
+  function closeSheet(){ document.getElementById('sheetWrap').classList.remove('open'); }
+  document.querySelectorAll('.opts').forEach(group => {
+    group.addEventListener('click', e => {
+      const btn = e.target.closest('.opt'); if(!btn) return;
+      group.querySelectorAll('.opt').forEach(o => o.classList.remove('sel'));
+      btn.classList.add('sel');
+      choice[group.dataset.key] = btn.textContent;
+    });
+  });
+  function saveSheet(){
+    document.getElementById('configText').textContent = `${choice.size} • ${choice.milk} • ${choice.temp}`;
+    closeSheet();
+  }
+
+  // Orders segment
+  function seg(btn, which){
+    btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelector('[data-seg="active"]').style.display = which==='active' ? 'block' : 'none';
+    document.querySelector('[data-seg="past"]').style.display   = which==='past'   ? 'flex'  : 'none';
+  }
+
+  // Beats animation: count up + fill the bar
+  function animateBeats(){
+    const target = 7, goal = 10;
+    document.getElementById('beatFill').style.width = (target/goal*100) + '%';
+    let n = 0;
+    const el = document.getElementById('beatCount');
+    const t = setInterval(() => { n++; el.textContent = n; if(n>=target) clearInterval(t); }, 95);
+  }
+
+  // Status tracker line geometry (fill up to current step)
+  function layoutTracker(){
+    const tr = document.getElementById('tracker'); if(!tr) return;
+    const steps = tr.querySelectorAll('.step');
+    const n = steps.length, w = tr.clientWidth, cell = w / n, r = 13;
+    const current = 1; // Preparing
+    const base = tr.querySelector('.line'), fillEl = tr.querySelector('.linefill');
+    base.style.left = (cell*0.5) + 'px';
+    base.style.width = (cell*(n-1)) + 'px';
+    fillEl.style.left = (cell*0.5) + 'px';
+    fillEl.style.width = (cell*current) + 'px';
+  }
+
+  window.addEventListener('load', () => { animateBeats(); layoutTracker(); });
+  window.addEventListener('resize', layoutTracker);
+</script>
+</body>
+</html>
