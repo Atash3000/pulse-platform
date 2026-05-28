@@ -21,7 +21,7 @@ import Foundation
 /// and per-item pill. Decoded fail-safe: unknown raw values + missing
 /// JSON key both fall back to `.both` so an item never disappears
 /// silently from the menu (Golden Rule #17).
-enum Temperature: String, Decodable, Equatable, Hashable {
+enum Temperature: String, Codable, Equatable, Hashable {
     case hot
     case iced
     case both
@@ -35,7 +35,7 @@ enum Temperature: String, Decodable, Equatable, Hashable {
 /// How a category renders on the v4 Menu screen. `spotlight` = hero
 /// card + horizontal scroll; `list` = vertical rows. Unknown raw value
 /// + missing JSON key both decode to `.list` (the safest rendering).
-enum CategoryDisplayStyle: String, Decodable, Equatable, Hashable {
+enum CategoryDisplayStyle: String, Codable, Equatable, Hashable {
     case spotlight
     case list
 
@@ -45,7 +45,7 @@ enum CategoryDisplayStyle: String, Decodable, Equatable, Hashable {
     }
 }
 
-struct Menu: Decodable, Equatable {
+struct Menu: Codable, Equatable {
     let locationId: String
     let categories: [MenuCategory]
     /// ISO-8601 timestamp Sentry / debugging can use to spot stale
@@ -57,9 +57,25 @@ struct Menu: Decodable, Equatable {
         case categories
         case cachedAt = "cached_at"
     }
+
+    /// Memberwise init — needed by `replaceCategories` since the
+    /// struct otherwise gets only the auto-synthesized decoder init.
+    init(locationId: String, categories: [MenuCategory], cachedAt: String) {
+        self.locationId = locationId
+        self.categories = categories
+        self.cachedAt = cachedAt
+    }
 }
 
-struct MenuCategory: Decodable, Identifiable, Equatable {
+extension Menu {
+    mutating func replaceCategories(_ newCategories: [MenuCategory]) {
+        self = Menu(locationId: self.locationId,
+                    categories: newCategories,
+                    cachedAt: self.cachedAt)
+    }
+}
+
+struct MenuCategory: Codable, Identifiable, Equatable {
     let id: String
     let name: String
     let sortOrder: Int
@@ -85,9 +101,28 @@ struct MenuCategory: Decodable, Identifiable, Equatable {
         self.items = try c.decode([MenuItem].self, forKey: .items)
         self.displayStyle = (try? c.decode(CategoryDisplayStyle.self, forKey: .displayStyle)) ?? .list
     }
+
+    /// Memberwise init — needed by `replaceItems`.
+    init(id: String, name: String, sortOrder: Int, items: [MenuItem], displayStyle: CategoryDisplayStyle) {
+        self.id = id
+        self.name = name
+        self.sortOrder = sortOrder
+        self.items = items
+        self.displayStyle = displayStyle
+    }
 }
 
-struct MenuItem: Decodable, Identifiable, Equatable, Hashable {
+extension MenuCategory {
+    mutating func replaceItems(_ newItems: [MenuItem]) {
+        self = MenuCategory(id: self.id,
+                            name: self.name,
+                            sortOrder: self.sortOrder,
+                            items: newItems,
+                            displayStyle: self.displayStyle)
+    }
+}
+
+struct MenuItem: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     let description: String?
@@ -181,7 +216,7 @@ struct MenuItem: Decodable, Identifiable, Equatable, Hashable {
     }
 }
 
-struct ModifierGroup: Decodable, Identifiable, Equatable, Hashable {
+struct ModifierGroup: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     let required: Bool
@@ -199,7 +234,7 @@ struct ModifierGroup: Decodable, Identifiable, Equatable, Hashable {
     }
 }
 
-struct Modifier: Decodable, Identifiable, Equatable, Hashable {
+struct Modifier: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     /// Price delta in integer cents (can be 0).
