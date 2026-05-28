@@ -1,14 +1,17 @@
 import SwiftUI
 
-/// v4 Menu screen — ScrollView composition (header + temperature
-/// toggle + sections). Sections render as SpotlightSection or a
-/// vertical list of MenuListRow depending on the category's
+/// v4 Menu screen — ScrollView composition (custom topbar + header +
+/// temperature toggle + sections). Sections render as SpotlightSection
+/// or a vertical list of MenuListRow depending on the category's
 /// `display_style`. Smart-add is wired here: items with no required
 /// modifier groups are added directly to the cart; everything else
-/// opens ItemDetailView. The existing loading / failed / empty
-/// states and pull-to-refresh remain.
+/// opens ItemDetailView. The existing loading / failed / empty states
+/// and pull-to-refresh remain.
+///
+/// Sign-out is intentionally NOT on this screen — it moved to the
+/// Account tab when the v4 topbar landed (see Navigation README +
+/// AccountView in `Features/Navigation/Placeholders.swift`).
 struct MenuView: View {
-    @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var cart: CartManager
     @StateObject private var viewModel = MenuViewModel()
     @State private var showCart = false
@@ -16,48 +19,67 @@ struct MenuView: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(role: .destructive) {
-                            Task { await appState.logout() }
-                        } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .accessibilityLabel("Sign Out")
-                        }
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            showCart = true
-                        } label: {
-                            cartIcon
-                                .accessibilityLabel("Cart with \(cart.totalItemCount) items")
-                        }
-                    }
-                }
-                .task {
-                    if case .idle = viewModel.state {
-                        await viewModel.load()
-                    }
-                }
-                .refreshable {
+            VStack(spacing: 0) {
+                topbar
+                content
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .task {
+                if case .idle = viewModel.state {
                     await viewModel.load()
                 }
-                .sheet(isPresented: $showCart) {
-                    if case .loaded(let location, _) = viewModel.state {
-                        CartView(locationId: location.id)
-                    } else {
-                        CartView(locationId: "")
-                    }
+            }
+            .refreshable {
+                await viewModel.load()
+            }
+            .sheet(isPresented: $showCart) {
+                if case .loaded(let location, _) = viewModel.state {
+                    CartView(locationId: location.id)
+                } else {
+                    CartView(locationId: "")
                 }
-                .sheet(item: $detailItem) { item in
-                    NavigationStack {
-                        ItemDetailView(item: item)
-                    }
+            }
+            .sheet(item: $detailItem) { item in
+                NavigationStack {
+                    ItemDetailView(item: item)
                 }
+            }
         }
+    }
+
+    // MARK: - Topbar
+    //
+    // HTML: `.topbar` is a flex row with `.logo-row` (dot + brand text)
+    // on the left and `.nav-profile` (avatar) on the right. iOS keeps
+    // the same shape but puts the cart icon on the right instead of the
+    // avatar — the cart is a critical commerce affordance and the
+    // logged-in profile chip lives on the Account tab.
+
+    private var topbar: some View {
+        HStack(spacing: 8) {
+            StoreStatusDot(status: currentStoreStatus())
+            Text(topbarLocationName)
+                .font(.system(size: 17, weight: .bold))
+                .tracking(-0.34)  // -0.02em on a 17pt size
+                .foregroundStyle(Color(red: 31 / 255, green: 26 / 255, blue: 20 / 255))  // --ink #1F1A14
+                .lineLimit(1)
+            Spacer()
+            Button { showCart = true } label: {
+                cartIcon.accessibilityLabel("Cart with \(cart.totalItemCount) items")
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    /// Location name string for the topbar. Falls back to "Pulse Coffee"
+    /// before the API responds so the topbar never renders empty.
+    private var topbarLocationName: String {
+        if case .loaded(let location, _) = viewModel.state {
+            return location.name
+        }
+        return "Pulse Coffee"
     }
 
     @ViewBuilder
@@ -75,15 +97,6 @@ struct MenuView: View {
             }
         } else {
             Image(systemName: "cart")
-        }
-    }
-
-    private var title: String {
-        switch viewModel.state {
-        case .loaded(let location, _):
-            return location.name
-        default:
-            return "Menu"
         }
     }
 
