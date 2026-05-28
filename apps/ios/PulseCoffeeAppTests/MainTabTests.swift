@@ -129,6 +129,25 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.account.rawValue, "account")
     }
 
+    func test_tabBadge_visibilityThreshold() {
+        XCTAssertFalse(MainTab.shouldShowBadge(count: 0),
+                       "Badge must be hidden when the count is zero (fail-safe)")
+        XCTAssertFalse(MainTab.shouldShowBadge(count: -1),
+                       "Badge must be hidden for negative counts (defensive)")
+        XCTAssertTrue(MainTab.shouldShowBadge(count: 1),
+                      "Badge must show for any positive count")
+        XCTAssertTrue(MainTab.shouldShowBadge(count: 99),
+                      "Badge must show for large counts")
+    }
+
+    func test_tabBadge_displayText_capsAt99Plus() {
+        XCTAssertEqual(MainTab.badgeText(count: 1),   "1")
+        XCTAssertEqual(MainTab.badgeText(count: 9),   "9")
+        XCTAssertEqual(MainTab.badgeText(count: 99),  "99")
+        XCTAssertEqual(MainTab.badgeText(count: 100), "99+")
+        XCTAssertEqual(MainTab.badgeText(count: 999), "99+")
+    }
+
     private func assertColor(
         _ actual: Color,
         equals expected: Color,

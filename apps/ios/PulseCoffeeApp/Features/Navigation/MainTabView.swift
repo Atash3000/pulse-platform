@@ -38,6 +38,7 @@ struct MainTabView: View {
         }
         .animation(.easeInOut(duration: 0.15), value: selection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            // TODO: when OrdersService lands, pass `badge: { $0 == .orders ? ordersService.activeCount : 0 }`.
             PulseTabBar(selection: $selection)
         }
     }
@@ -56,6 +57,10 @@ struct MainTabView: View {
 
 private struct PulseTabBar: View {
     @Binding var selection: MainTab
+    /// Per-tab badge count. Default 0 for every tab — the closure is
+    /// the seam for future services (OrdersService.activeCount, etc.).
+    /// Counts ≤ 0 hide the badge (fail-safe per Golden Rule #17).
+    var badge: (MainTab) -> Int = { _ in 0 }
 
     @ScaledMetric(relativeTo: .caption) private var iconSize = AppTheme.Metrics.tabBarIconSize
     @ScaledMetric(relativeTo: .caption) private var barHeight = AppTheme.Metrics.tabBarHeight
@@ -73,7 +78,7 @@ private struct PulseTabBar: View {
                     // deep navigation: pop selected tab to root / scroll to top.
                     selection = tab
                 } label: {
-                    tabLabel(tab, isSelected: isSelected)
+                    tabLabel(tab, isSelected: isSelected, badgeCount: badge(tab))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.title)
@@ -90,9 +95,23 @@ private struct PulseTabBar: View {
         }
     }
 
-    private func tabLabel(_ tab: MainTab, isSelected: Bool) -> some View {
+    private func tabLabel(_ tab: MainTab,
+                          isSelected: Bool,
+                          badgeCount: Int) -> some View {
         VStack(spacing: 3) {
-            icon(for: tab, isSelected: isSelected)
+            ZStack(alignment: .topTrailing) {
+                icon(for: tab, isSelected: isSelected)
+                if MainTab.shouldShowBadge(count: badgeCount) {
+                    Text(MainTab.badgeText(count: badgeCount))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(AppTheme.Colors.onBadge)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(AppTheme.Colors.destructive, in: Capsule())
+                        .offset(x: 10, y: -10)
+                        .accessibilityLabel("\(badgeCount) \(tab.title)")
+                }
+            }
             Text(tab.title)
                 .font(.caption.weight(isSelected ? .semibold : .medium))
         }

@@ -76,6 +76,20 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .account: return "person.crop.circle.fill"
         }
     }
+
+    /// Returns true iff a count badge should be rendered for this count.
+    /// Hidden at zero (fail-safe) and for negative numbers (defensive).
+    /// Pure function — kept on the enum so the badge UI and the test
+    /// suite share one source of truth.
+    static func shouldShowBadge(count: Int) -> Bool {
+        count > 0
+    }
+
+    /// Display string for a badge count. Caps at "99+" so the badge
+    /// never grows wider than the tab icon at runtime.
+    static func badgeText(count: Int) -> String {
+        count > 99 ? "99+" : "\(count)"
+    }
 }
 
 struct LayeredTabAsset: Equatable {
