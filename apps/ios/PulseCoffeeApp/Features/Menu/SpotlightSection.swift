@@ -139,9 +139,13 @@ struct SpotlightSection: View {
                         ],
                         startPoint: .top, endPoint: .bottom
                     )
-                    DrinkArt(token: item.artToken, size: 70)
+                    // Bumped from 70 to 90 so the glass silhouette
+                    // reads at the same proportional weight as the hero
+                    // card's drink — without this the compact card looked
+                    // visually different even though the shape is identical.
+                    DrinkArt(token: item.artToken, size: 90)
                 }
-                .frame(height: 110)
+                .frame(height: 120)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 Text(item.name)
