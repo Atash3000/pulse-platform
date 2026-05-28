@@ -17,8 +17,8 @@ import {
 } from '../src/database/entities';
 
 const LOCATION = {
-  name: 'Pulse Coffee — Main St',
-  address: '123 Main Street, New York, NY 10001',
+  name: 'Pulse Coffee — Park Slope',
+  address: '789 7th Avenue, Brooklyn, NY 11215',
   timezone: 'America/New_York',
   phone: null as string | null,
 } as const;

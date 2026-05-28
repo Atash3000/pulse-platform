@@ -71,7 +71,7 @@ import {
 // The seed-dev location name. If the user renames the location row in
 // the DB by hand, this lookup will miss and the seed will tell them
 // (rather than silently creating menu data orphaned from any location).
-const LOCATION_NAME = 'Pulse Coffee — Main St';
+const LOCATION_NAME = 'Pulse Coffee — Park Slope';
 
 type ArtToken =
   | 'strawberry-matcha' | 'raspberry-matcha' | 'brown-sugar-matcha' | 'ginger-matcha'
