@@ -2703,3 +2703,20 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 
 **Considered and explicitly deferred (do not reopen without the scale to justify it):** A FAANG-tier review proposed field-level encryption / a "shadow column" / a vault for DOB, daily Redis pre-computation with 24h negative caching, a hard 200ms query timeout, feature-flag caching, and adaptive/anomaly-detection throttling. All rejected for this feature as premature scale-engineering that contradicts §2.2 ("fast enough for 100k not a million; don't over-engineer for a million when the table has 50 rows") and GR#15. Specific reasons: (a) DOB encryption is a separate cross-cutting data-governance project, not a badge PR — logged here as a future "Privacy Hardening" candidate (incl. the open product question of whether to store the birth *year* at all); (b) 24h negative caching introduces a correctness bug at the store-midnight birthday boundary — the exact moment the feature exists for; (c) a bespoke 200ms timeout is a novel pattern nothing else in the repo uses, and Node's async model means a slow query doesn't block the event loop — the GR#17 error boundary covers the real need; (d) flag caching blunts the kill-switch with no invalidation story (§2.2); (e) adaptive/anomaly throttling is platform infra that doesn't exist, and a per-minute throttle doesn't stop the described once-a-day "fishing" poll anyway (worst-case leak is month/day, never DOB/age/year). The flat admin `@Throttle(30/min)` is kept for consistency and rush-hour headroom.
 
+---
+
+## 2026-05-27 — [api] menu_items.art_token is an opaque string keyed to an iOS-side registry
+
+**Decision:** `menu_items.art_token` is a nullable text column. The backend stores the string verbatim; the iOS `DrinkArt` view owns the mapping from token → drawn abstract symbol. Unknown / null tokens render as a neutral cup symbol.
+
+**Context:** v4 design uses abstract symbolic drink visuals (`design/v4/README.md` — "small navigational surfaces use abstract symbolic representations"). The visuals are SwiftUI gradient layers, not assets. Backend needs to tell iOS which symbol to draw without dragging the drawing logic across the network.
+
+**Alternatives considered:**
+1. Per-item asset URL (image_url) — wrong: forces a photo pipeline, contradicts the design's "abstract symbols" rule.
+2. Enum on the backend (`MATCHA_LAYERED | CLASSIC_CUP | FOOD`) — loses palette granularity; every matcha drink would render identically.
+3. Structured drawing spec on the backend (layer colors, shape) — over-couples the backend to a UI library; iOS would still need a fallback registry.
+
+**Reasoning:** A short opaque string keeps the API lean (one field), keeps drawing logic where drawing tools live (SwiftUI), and degrades gracefully (null → neutral). New tokens are an iOS change only.
+
+**Trade-offs:** Adding a new drink with a new visual requires an iOS code change to register the token. Acceptable: new drinks are rare and already require copy / merchandising decisions; cutting an iOS release for a new symbol is in scope.
+

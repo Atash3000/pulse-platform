@@ -67,6 +67,28 @@ export enum LoyaltyTier {
   PLATINUM = 'PLATINUM',
 }
 
+/**
+ * Drink temperature, drives the v4 Menu screen's temperature toggle and
+ * per-item pill. Stored as text per project convention; safe default
+ * 'both' means an unknown / un-seeded row never disappears from any
+ * filter (Golden Rule #17 — non-critical surfaces fail safe).
+ */
+export enum Temperature {
+  HOT = 'hot',
+  ICED = 'iced',
+  BOTH = 'both',
+}
+
+/**
+ * How a category renders on the v4 Menu screen. 'spotlight' = hero card
+ * + horizontal scroll (the Matcha line); 'list' = vertical rows (Classic
+ * coffee, Food). Default 'list' keeps any un-seeded category safe.
+ */
+export enum CategoryDisplayStyle {
+  SPOTLIGHT = 'spotlight',
+  LIST = 'list',
+}
+
 export enum OutboxEventType {
   ORDER_PAID = 'ORDER_PAID',
   /**
@@ -327,6 +349,9 @@ export class MenuCategory {
   @Column({ type: 'int', default: 0 })
   sort_order!: number;
 
+  @Column({ type: 'text', default: CategoryDisplayStyle.LIST })
+  display_style!: CategoryDisplayStyle;
+
   @Column({ type: 'boolean', default: true })
   active!: boolean;
 }
@@ -358,6 +383,22 @@ export class MenuItem {
 
   @Column({ type: 'text', nullable: true })
   image_url!: string | null;
+
+  @Column({ type: 'text', default: Temperature.BOTH })
+  temperature!: Temperature;
+
+  @Column({ type: 'boolean', default: false })
+  featured!: boolean;
+
+  /**
+   * Opaque key the iOS app maps to a drawn abstract drink symbol
+   * (e.g. 'strawberry-matcha', 'cappuccino', 'croissant'). Nullable;
+   * iOS draws a neutral fallback for unknown / null tokens.
+   * Backend is intentionally ignorant of the registry (see
+   * decision-log entry "[api] menu_items.art_token is opaque…").
+   */
+  @Column({ type: 'text', nullable: true })
+  art_token!: string | null;
 
   @Column({ type: 'boolean', default: true })
   active!: boolean;
