@@ -21,8 +21,9 @@ describe('AddMenuPresentationFields1780099200000', () => {
     // Backfill: existing Matcha-category becomes spotlight; featured Strawberry Matcha; iced temperatures.
     // We assert the *intent* (a backfill UPDATE touching the seed names) rather than exact whitespace.
     const backfills = sql.filter((s) => /^\s*UPDATE/i.test(s));
-    expect(backfills.length).toBeGreaterThanOrEqual(2);
+    expect(backfills.length).toBeGreaterThanOrEqual(3);
     expect(backfills.some((s) => /display_style\s*=\s*'spotlight'/.test(s) && /Matcha/.test(s))).toBe(true);
+    expect(backfills.some((s) => /temperature\s*=\s*'iced'/.test(s) && /Matcha/.test(s))).toBe(true);
     expect(backfills.some((s) => /featured\s*=\s*true/.test(s) && /Strawberry Matcha/.test(s))).toBe(true);
   });
 
