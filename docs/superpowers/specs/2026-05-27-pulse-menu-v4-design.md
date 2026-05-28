@@ -231,17 +231,51 @@ Add to `docs/decision-log.md`:
 
 ## 8. Drink visual system (shared, native SwiftUI)
 
-A `DrinkArt` view: `art_token → ` drawn abstract symbol.
+A `DrinkArt` SwiftUI component maps `art_token` → a drawn abstract symbol. **The HTML at `design/v4/pulse-coffee-v4.html` is the canonical source for colors and shape** — iOS reproduces it pixel-for-pixel using hex codes copied character-for-character, not stylised approximations. (First iOS pass got this wrong by inventing colors and substituting an SF Symbol cup silhouette for classics; corrected in the same PR after founder review.)
 
-- **matcha** tokens → 3 stacked color layers (the recognisable layered-matcha silhouette), palette per token.
-- **classic** tokens → cup silhouette + body tint.
-- **food** tokens → rounded tile + glyph.
-- A local `[token: palette/shape]` registry; **unknown / nil token → neutral cup symbol** (fail-safe).
-- No network images; scales crisply at every Dynamic Type size.
+- **Glass shape (matcha + classic):** `border-radius: 6px 6px 26px 26px` — flat-ish top, deeply rounded bottom (tumbler / pint-glass silhouette). Implemented via `UnevenRoundedRectangle`. Aspect ratio ~60×110 (`matcha-hero-drink` in HTML).
+- **matcha tokens** → three equal-height color layers (`.layer.top / .mid / .bot` at 33.33% each, HTML lines 175–183). Top layer is always matcha green `#6B8E3D`; middle is oat `#F5E6D3` (fruit-flavored matchas) or cream `#FDF6E8` (richer-flavored); bottom is the flavor accent. Exact hex per drink at HTML lines 185–199.
+- **classic tokens** → same glass shape, filled with a vertical gradient body (`linear-gradient(180deg, …)` from HTML lines 211–216, 2–4 stops, top→bottom). **Not** an SF Symbol cup icon — the body itself is the visual.
+- **food tokens** → square tile with a 135° diagonal gradient (`food-mini.*` at HTML lines 1122–1125) + a unicode glyph (🥐 🫓 🧁 🍪).
+- **Glass background** behind the layers / gradient: `var(--bg-deep)` (`#EDE5D3`), so any future layer animation reveals a sensible color rather than transparent.
+- A local `DrinkArtRegistry` `[token: DrinkArtSpec]` covers all 15 seeded tokens. **Unknown / nil token → neutral classic-glass fill `#8E7A5C` with `isFallback: true`** (Golden Rule #17). A test pins that every backend-seeded token is registered, so a future drink lands loud at review time.
+- No network images, no SVG assets — all drawn in SwiftUI; scales crisply at every Dynamic Type size.
+
+**Accent color for editorial labels** ("★ HERO", "FEATURED", warm call-outs): `var(--accent-warm)` = `#C2410C`. Lives on `AppTheme.Colors.accentWarm`.
 
 ---
 
-## 9. Golden Rules compliance
+## 9. v4 Menu topbar (added 2026-05-28 after founder review)
+
+The first iOS pass used the system navigation bar (centered title + leading sign-out icon + trailing cart). The v4 HTML doesn't have a system nav bar at all — the topbar is part of the screen content. Aligned in this iteration:
+
+- **System nav bar hidden** (`.toolbar(.hidden, for: .navigationBar)`); custom topbar is the first row of the Menu screen content.
+- **LEFT side** (HTML `.logo-row`, lines 115–140):
+  - 10pt **status dot** — see §10 for the status-dot contract.
+  - **Location name** in bold 17pt (`-0.02em` tracking, `--ink` foreground `#1F1A14`). Source: `PublicLocation.name` from the API (e.g. "Pulse Coffee — Park Slope"). Fallback "Pulse Coffee" before the menu loads.
+- **RIGHT side** (HTML `.nav-profile`, lines 152–161):
+  - Cart icon with count badge (kept from prior iOS). HTML uses an avatar chip here; iOS keeps the cart because it's a critical commerce affordance and the profile chip lives on the Account tab.
+- **Sign-out** — was a placeholder leading toolbar item on Menu; moved to the Account tab (per the Navigation README's existing follow-up). AccountView's logged-in placeholder gains a `Sign Out` button until the real profile screen lands.
+
+---
+
+## 10. Store status dot (hardcoded now, backend later)
+
+The 10pt dot to the left of the location name encodes operational state with three colors:
+
+- 🟢 **green** (`#4CAF50`) — store is open.
+- 🟡 **amber** (`#F5A623`) — store closes within 60 min (e.g. closes 18:00; current time 17:01 → amber).
+- 🔴 **red** (`AppTheme.Colors.destructive`) — store is closed.
+
+HTML uses `var(--accent-warm)` for the dot with a `gentle-pulse` animation. iOS preserves the pulse animation (`.opacity` / `.scaleEffect` `repeatForever`) and extends the single brand-warm color to the three operational colors above.
+
+**Current implementation: HARDCODED.** `currentStoreStatus(now:calendar:)` in `apps/ios/PulseCoffeeApp/Features/Menu/StoreStatus.swift` computes status from local wall-clock time against hardcoded 7:00–18:00 hours every day. The function carries an explicit TODO pointing at the planned backend hand-off:
+
+→ **see `docs/superpowers/todos/2026-05-28-store-status-backend.md`** for the planned `PublicLocation.status` API field, the hours-aware service-side computation, timezone handling, and how this client function should be deleted (or reduced to a 5-minute fallback) once the backend ships.
+
+---
+
+## 11. Golden Rules compliance
 
 | Rule | How this design complies |
 |---|---|
@@ -252,14 +286,14 @@ A `DrinkArt` view: `art_token → ` drawn abstract symbol.
 | #13 Location scoping | Menu fetch already location-scoped; no change |
 | #17 Non-critical fails safe | Temperature / featured / display_style / art_token all degrade to neutral defaults; nav badge hides at zero |
 
-## 10. Testing plan
+## 12. Testing plan
 
 - **A (backend):** migration up/down; `menu.service` returns the new fields; backfill/default correctness; seed produces the expected catalog + modifier groups.
 - **B (iOS):** `MenuViewModel` temperature-filter unit tests (all/hot/iced, section hiding, hero fallback); spotlight vs list mapping; smart-add routing (item with no required groups → `+` adds to cart; item with a required group → `+` opens detail).
 - **C (iOS):** `MainTab` enum order / titles / symbols / raw-value stability for 5 tabs.
 - **D (iOS):** selected-modifiers → `modifierIds` mapping; running-total computation (base, single delta, multi delta, unknown-group safety); Add-enabled gating; `DrinkArt` unknown-token fallback.
 
-## 11. Follow-ups (not this work)
+## 13. Follow-ups (not this work)
 
 - Menu disk cache / instant load (Golden Rule #1).
 - Loyalty backend + real Rewards screen.
