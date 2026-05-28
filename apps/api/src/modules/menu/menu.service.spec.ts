@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   CategoryDisplayStyle,
   Inventory,
+  Location,
   MenuCategory,
   MenuItem,
   Modifier,
@@ -65,6 +66,10 @@ describe('MenuService — v4 presentation fields', () => {
       providers: [
         MenuService,
         { provide: MenuCache, useValue: cache },
+        {
+          provide: getRepositoryToken(Location),
+          useValue: { findOne: jest.fn() },
+        },
         {
           provide: getRepositoryToken(MenuCategory),
           useValue: { find: jest.fn().mockResolvedValue([category()]) },

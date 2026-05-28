@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -70,10 +70,7 @@ export class MenuService {
   private readonly logger = new Logger(MenuService.name);
 
   constructor(
-    // @Optional: location validation only happens in getMenu() (the controller
-    // path). getFullMenu() is the unchecked internal path; tests that exercise
-    // getFullMenu() / getItemById() do not need to provide this repository.
-    @Optional() @InjectRepository(Location) private readonly locations: Repository<Location>,
+    @InjectRepository(Location) private readonly locations: Repository<Location>,
     @InjectRepository(MenuCategory) private readonly categories: Repository<MenuCategory>,
     @InjectRepository(MenuItem) private readonly items: Repository<MenuItem>,
     @InjectRepository(ModifierGroup) private readonly groups: Repository<ModifierGroup>,
