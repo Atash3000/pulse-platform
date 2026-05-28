@@ -26,6 +26,16 @@ struct OrdersView: View {
     }
 }
 
+struct RewardsView: View {
+    var body: some View {
+        NavigationStack {
+            PlaceholderContent(tab: .rewards,
+                               caption: "10 drinks = 1 free. Track your progress here once the loyalty backend ships.")
+                .navigationTitle(MainTab.rewards.title)
+        }
+    }
+}
+
 /// Account tab — splits on auth state.
 ///
 /// - Logged out: the `WelcomeView` cold-open / join surface. This is the
@@ -80,6 +90,7 @@ private struct PlaceholderContent: View {
 
 #Preview("Home")    { HomeView() }
 #Preview("Orders")  { OrdersView() }
+#Preview("Rewards") { RewardsView() }
 #Preview("Account — guest") {
     AccountView().environmentObject(AppState())
 }

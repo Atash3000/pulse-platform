@@ -33,6 +33,7 @@ struct MainTabView: View {
             tabContent(.home) { HomeView() }
             tabContent(.menu) { MenuView() }
             tabContent(.orders) { OrdersView() }
+            tabContent(.rewards) { RewardsView() }
             tabContent(.account) { AccountView() }
         }
         .animation(.easeInOut(duration: 0.15), value: selection)
