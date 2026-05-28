@@ -27,7 +27,7 @@ export const dataSourceOptions: DataSourceOptions = {
   database: process.env.DATABASE_NAME ?? 'pulse',
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
   entities: ALL_ENTITIES,
-  migrations: [__dirname + '/migrations/*.{ts,js}'],
+  migrations: [__dirname + '/migrations/!(*.spec).{ts,js}'],
   migrationsTableName: 'typeorm_migrations',
   // Schema is now managed exclusively by migration files. Never re-enable
   // synchronize — see Fix 1 in the build plan.
