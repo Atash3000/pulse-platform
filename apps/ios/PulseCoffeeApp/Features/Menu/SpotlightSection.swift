@@ -2,10 +2,15 @@ import SwiftUI
 
 /// Spotlight section for `display_style == spotlight` categories. One
 /// hero card on top + a horizontal scroll of compact cards for the
-/// rest. The hero pick is whichever item is currently first in the
-/// (possibly filtered) items array — `MenuViewModel.filter` puts
-/// `featured` items first when available, otherwise the first
-/// surviving item. See spec §5.3 for the fail-safe ordering.
+/// rest. Hero pick is section-local (`SpotlightSection.hero(in:)`) so
+/// the screen does not depend on backend `ORDER BY` clauses for visual
+/// correctness: backend orders matcha items by `name ASC` per
+/// `apps/api/src/modules/menu/menu.service.ts:184`, which puts
+/// Strawberry Matcha (the seeded `featured: true` drink) last
+/// alphabetically. The hero is the first `featured == true` item;
+/// when none are featured, falls back to the first item in the
+/// category (Golden Rule #17). The scroll row excludes the hero by ID
+/// so the same drink never appears twice.
 struct SpotlightSection: View {
     let category: MenuCategory
     let onOpenDetail: (MenuItem) -> Void
@@ -14,11 +19,12 @@ struct SpotlightSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader
-            if let hero = category.items.first {
+            if let hero = Self.hero(in: category.items) {
                 heroCard(for: hero)
-            }
-            if category.items.count > 1 {
-                scrollRow(items: Array(category.items.dropFirst()))
+                let rest = Self.nonHeroItems(in: category.items, hero: hero)
+                if !rest.isEmpty {
+                    scrollRow(items: rest)
+                }
             }
         }
         .padding(.bottom, 22)
@@ -68,7 +74,7 @@ struct SpotlightSection: View {
                     Text(item.featured ? "★ HERO" : "FEATURED")
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1.4)
-                        .foregroundStyle(AppTheme.Colors.warning)
+                        .foregroundStyle(AppTheme.Colors.accentWarm)
                     Text(item.name)
                         .font(.system(size: 22, weight: .regular, design: .serif))
                         .italic()
@@ -168,5 +174,22 @@ struct SpotlightSection: View {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(AppTheme.Colors.divider.opacity(0.10), lineWidth: 1)
         )
+    }
+}
+
+extension SpotlightSection {
+    /// First `featured == true` item; falls back to the first item in
+    /// the category when none are featured. `nil` only for empty input.
+    /// Pure function — pinned by `SpotlightSectionTests` so the rule
+    /// stays loud at code-review time if a refactor breaks it.
+    static func hero(in items: [MenuItem]) -> MenuItem? {
+        items.first(where: { $0.featured }) ?? items.first
+    }
+
+    /// Items to render in the horizontal scroll row. Drops the hero by
+    /// ID, not by index, so the featured drink can sit anywhere in the
+    /// backend-supplied order without appearing twice on screen.
+    static func nonHeroItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
+        items.filter { $0.id != hero.id }
     }
 }
