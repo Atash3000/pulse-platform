@@ -29,34 +29,47 @@ struct TemperatureToggle: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(TemperatureFilter.allCases, id: \.self) { filter in
-                Button {
-                    selection = filter
-                } label: {
-                    Text(filter.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(selection == filter
-                                         ? AppTheme.Colors.tabBarBackground   // cream "ink-on-dark"
-                                         : AppTheme.Colors.tabLabelInactive)  // taupe
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background(
-                            Capsule().fill(selection == filter
-                                           ? AppTheme.Colors.tabLabelActive   // dark espresso
-                                           : Color.clear)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(filter.title)
-                .accessibilityAddTraits(selection == filter ? .isSelected : [])
+                segment(for: filter)
             }
         }
         .padding(3)
-        .background(
-            Capsule()
-                .fill(AppTheme.Colors.tabBarBackground)
-                .overlay(Capsule().stroke(AppTheme.Colors.divider.opacity(0.10), lineWidth: 1))
-        )
+        .background(trackBackground)
         .padding(.horizontal, 24)
+    }
+
+    // Subviews are extracted so the SwiftUI type checker doesn't have to
+    // solve the whole expression at once — the inline form tripped the
+    // "unable to type-check this expression in reasonable time" warning.
+
+    private func segment(for filter: TemperatureFilter) -> some View {
+        let isActive = selection == filter
+        return Button {
+            selection = filter
+        } label: {
+            Text(filter.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isActive
+                                 ? AppTheme.Colors.tabBarBackground   // cream "ink-on-dark"
+                                 : AppTheme.Colors.tabLabelInactive)  // taupe
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(segmentBackground(isActive: isActive))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(filter.title)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+
+    private func segmentBackground(isActive: Bool) -> some View {
+        Capsule().fill(isActive
+                       ? AppTheme.Colors.tabLabelActive   // dark espresso
+                       : Color.clear)
+    }
+
+    private var trackBackground: some View {
+        Capsule()
+            .fill(AppTheme.Colors.tabBarBackground)
+            .overlay(Capsule().stroke(AppTheme.Colors.divider.opacity(0.10), lineWidth: 1))
     }
 }
 
