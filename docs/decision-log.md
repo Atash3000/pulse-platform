@@ -2720,3 +2720,21 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 
 **Trade-offs:** Adding a new drink with a new visual requires an iOS code change to register the token. Acceptable: new drinks are rare and already require copy / merchandising decisions; cutting an iOS release for a new symbol is in scope.
 
+---
+
+## 2026-05-28 — [api] Menu Redis cache namespace is shape-versioned (`menu:v<N>:…`)
+
+**Decision:** Every menu Redis key prefix carries an explicit shape version (`menu:v2:full:{loc}`, `menu:v2:item:{id}`, `menu:v2:items:loc:{loc}`). The version segment is bumped in `apps/api/src/modules/menu/menu.cache.ts` whenever the cached payload shape (`PublicMenu` / `PublicMenuItem` / `PublicCategory`) gains, loses, or renames a field. Previous-version blobs become unreachable on read and expire on their own 10-minute TTL; new writes land in the new namespace.
+
+**Context:** The menu cache has a 10-minute TTL (Golden Rule #1). Until 2026-05-28 the key prefix was unversioned (`menu:full:`, `menu:item:`, `menu:items:loc:`). When the menu-presentation-fields PR added `display_style` / `temperature` / `featured` / `art_token` to `PublicMenu` / `PublicMenuItem`, the first 10 minutes after deploy would have served cached blobs missing those fields — a silent forwards-compat hazard. iOS today is forgiving (Codable ignores unknown keys, the new fields are not yet in iOS `CodingKeys`), but the moment iOS starts decoding them as non-optional, that deploy window becomes a real bug.
+
+**Alternatives considered:**
+1. `FLUSHDB` on deploy — works but blast-radius is the whole Redis instance (idempotency keys, sessions, rate-limit counters all wiped). Too coarse.
+2. Targeted `DEL menu:*` on deploy — narrower than FLUSHDB, but requires a deploy hook that doesn't currently exist (Render image swap is hands-off) and depends on the deployer remembering to run it.
+3. Shorten the menu TTL to 60s so the stale window is tolerable — degrades Golden Rule #1 cache hit rate on every cold load, not just at deploy.
+4. Version the namespace (chosen) — zero deploy ceremony, zero blast-radius beyond the menu module, old data self-cleans on TTL.
+
+**Reasoning:** Versioning matches the way the schema actually changes — at the seam (`MenuCache`), in one place, when a shape change is being made anyway. Read-after-bump is a guaranteed miss (correct), write-after-bump goes to the new namespace (correct), old keys cost nothing past their TTL. It is the cheapest correct option.
+
+**Trade-offs:** On a rolling deploy where pods A (old) and B (new) coexist briefly, requests routed to A populate `v1` and requests routed to B populate `v2` — both correct in isolation, no cross-contamination, but the cache hit rate is split during the window. Acceptable: the window is one deploy long, and the project's current Render setup is single-pod anyway. The version segment also needs to be kept in sync with operator-facing runbook docs (`docs/troubleshooting.md`, `docs/architecture.md`, `docs/glossary.md`) — flagged here so the next bump (v3, eventually) updates all four sites at once.
+

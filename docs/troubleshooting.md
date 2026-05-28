@@ -78,22 +78,23 @@ The customer's order is still valid. They paid; we owe them a coffee. Don't undo
 
 1. **Did `MenuService.invalidate(locationId)` get called?**
    ```bash
-   docker exec pulse-redis redis-cli KEYS 'menu:*'
+   docker exec pulse-redis redis-cli KEYS 'menu:v2:*'
    ```
-   - If `menu:full:{locationId}` is still present, invalidation didn't run.
+   - If `menu:v2:full:{locationId}` is still present, invalidation didn't run.
    - The admin endpoint that changes prices/inventory must call `MenuService.invalidate()` after the DB commit. If it doesn't, that's the bug — fix it at the source.
+   - The `v2` segment is the cache-shape version; bump it (in `apps/api/src/modules/menu/menu.cache.ts`) when the cached payload shape changes. If a deploy shipped a v3 bump, older runbook examples will silently return `(nil)` — `redis-cli KEYS 'menu:*'` (no version) is the version-agnostic check.
 
 2. **TTL** — even without explicit invalidation, the cache expires after 600s.
    ```bash
-   docker exec pulse-redis redis-cli TTL menu:full:<location-uuid>
+   docker exec pulse-redis redis-cli TTL menu:v2:full:<location-uuid>
    ```
    - If TTL is positive, you're inside the 10-minute stale window. Manually `DEL` the key to force a refresh, then add the missing `invalidate()` call so it doesn't recur.
 
 3. **Item-detail cache** — also drop per-item keys:
    ```bash
-   docker exec pulse-redis redis-cli SMEMBERS menu:items:loc:<location-uuid>
+   docker exec pulse-redis redis-cli SMEMBERS menu:v2:items:loc:<location-uuid>
    ```
-   These are the per-item cache entries for that location. `MenuService.invalidate()` clears them automatically; if you're DELing manually, `DEL menu:item:{x}` for each id and then `DEL menu:items:loc:{location}`.
+   These are the per-item cache entries for that location. `MenuService.invalidate()` clears them automatically; if you're DELing manually, `DEL menu:v2:item:{x}` for each id and then `DEL menu:v2:items:loc:{location}`.
 
 ---
 
