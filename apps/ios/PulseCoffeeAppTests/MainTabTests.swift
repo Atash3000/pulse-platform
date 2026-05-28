@@ -10,7 +10,8 @@ import SwiftUI
 final class MainTabTests: XCTestCase {
 
     func test_allCases_areInExpectedOrderAndCount() {
-        XCTAssertEqual(MainTab.allCases, [.home, .menu, .orders, .account])
+        XCTAssertEqual(MainTab.allCases,
+                       [.home, .menu, .orders, .rewards, .account])
     }
 
     func test_eachTab_hasNonEmptyTitleAndSymbols() {
@@ -35,9 +36,10 @@ final class MainTabTests: XCTestCase {
     }
 
     func test_tabBarSymbols_areStableBaseSymbols() {
-        XCTAssertEqual(MainTab.home.tabBarSymbolName, "house")
-        XCTAssertEqual(MainTab.menu.tabBarSymbolName, "cup.and.saucer")
-        XCTAssertEqual(MainTab.orders.tabBarSymbolName, "bag")
+        XCTAssertEqual(MainTab.home.tabBarSymbolName,    "house")
+        XCTAssertEqual(MainTab.menu.tabBarSymbolName,    "list.bullet")
+        XCTAssertEqual(MainTab.orders.tabBarSymbolName,  "bag")
+        XCTAssertEqual(MainTab.rewards.tabBarSymbolName, "medal")
         XCTAssertEqual(MainTab.account.tabBarSymbolName, "person.crop.circle")
     }
 
@@ -45,12 +47,11 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.home.layeredAssetNames,
                        LayeredTabAsset(baseName: "PulseHomeMark",
                                        accentName: "PulseHomeLeafAccent"))
-        XCTAssertEqual(MainTab.menu.layeredAssetNames,
-                       LayeredTabAsset(baseName: "PulseMenuMark",
-                                       accentName: "PulseMenuAccent"))
+        XCTAssertNil(MainTab.menu.layeredAssetNames)
         XCTAssertEqual(MainTab.orders.layeredAssetNames,
                        LayeredTabAsset(baseName: "PulseOrdersMark",
                                        accentName: "PulseOrdersAccent"))
+        XCTAssertNil(MainTab.rewards.layeredAssetNames)
         XCTAssertNil(MainTab.account.layeredAssetNames)
     }
 
@@ -58,14 +59,13 @@ final class MainTabTests: XCTestCase {
         XCTAssertNil(MainTab.home.customAssetName)
         XCTAssertNil(MainTab.menu.customAssetName)
         XCTAssertNil(MainTab.orders.customAssetName)
+        XCTAssertNil(MainTab.rewards.customAssetName)
         XCTAssertEqual(MainTab.account.customAssetName, "PulseAccountMark")
     }
 
     func test_customAssets_existInBundle() {
         XCTAssertNotNil(UIImage(named: "PulseHomeMark"))
         XCTAssertNotNil(UIImage(named: "PulseHomeLeafAccent"))
-        XCTAssertNotNil(UIImage(named: "PulseMenuMark"))
-        XCTAssertNotNil(UIImage(named: "PulseMenuAccent"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersAccent"))
         XCTAssertNotNil(UIImage(named: "PulseAccountMark"))
@@ -125,6 +125,7 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.home.rawValue,    "home")
         XCTAssertEqual(MainTab.menu.rawValue,    "menu")
         XCTAssertEqual(MainTab.orders.rawValue,  "orders")
+        XCTAssertEqual(MainTab.rewards.rawValue, "rewards")
         XCTAssertEqual(MainTab.account.rawValue, "account")
     }
 
