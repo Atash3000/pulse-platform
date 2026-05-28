@@ -194,6 +194,12 @@ function groupsForItem(seedCategoryName: string, seed: SeedItem): Array<{ name: 
  * name). Updates the row in place on hit; inserts on miss. Does NOT
  * delete groups/modifiers that exist in the DB but not in the seed
  * (out of scope — manual cleanup if the catalog shrinks).
+ *
+ * The `active` flag on existing modifiers is intentionally LEFT ALONE
+ * on re-seed (mirrors the inventory-left-alone safety in the file
+ * header) so an admin can deactivate a modifier (e.g. "we're out of
+ * Oat Milk") without `npm run seed:menu` silently re-enabling it.
+ * New modifiers still default to active=true on insert.
  */
 async function upsertModifierGroups(
   em: import('typeorm').EntityManager,
@@ -230,7 +236,10 @@ async function upsertModifierGroups(
       if (existing) {
         existing.price_cents = mod.price_cents;
         existing.sort_order = mod.sort_order;
-        existing.active = true;
+        // active is intentionally NOT reset — match the inventory-left-alone
+        // precedent at the top of this file: a re-seed must not overwrite
+        // operator-managed state (e.g. "Oat Milk is sold out this week").
+        // New modifiers still default to active=true in the insert branch.
         await modifierRepo.save(existing);
         totals.modifiers_updated += 1;
       } else {
