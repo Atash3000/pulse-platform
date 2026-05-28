@@ -27,6 +27,17 @@
  * not detect or resolve duplicates — it picks the first match returned
  * by findOne, which is non-deterministic on a duplicated set.
  *
+ * Re-seed does NOT sweep obsolete catalog rows. Categories and items
+ * that existed before but aren't in the v4 catalog stay in the DB with
+ * active=true (e.g. the old single "Coffee" category that the pre-v4
+ * seed created, plus its Macchiato / Hot Chocolate / Drip Coffee /
+ * Mocha / Vanilla Latte rows). A dev DB seeded by the old script will
+ * therefore show four categories after re-seed (old Coffee + Matcha +
+ * Classic Coffee + Food). To get a clean v4 menu, drop and re-seed:
+ * `npm run db:reset && npm run seed:dev && npm run seed:menu`. Mirrors
+ * the modifier-group "manual cleanup if the catalog shrinks" policy
+ * below.
+ *
  * Catalog shape
  * --------------
  * Three categories: Matcha (spotlight), Classic Coffee (list), Food
