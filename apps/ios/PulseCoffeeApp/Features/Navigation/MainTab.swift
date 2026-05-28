@@ -1,6 +1,6 @@
 import Foundation
 
-/// The four top-level destinations of the signed-in app, modelled as a
+/// The five top-level destinations of the signed-in app, modelled as a
 /// typed enum so the tab bar, deep-links, and analytics events all share
 /// one identifier set instead of raw strings.
 ///
@@ -9,6 +9,7 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     case home
     case menu
     case orders
+    case rewards
     case account
 
     var id: String { rawValue }
@@ -19,6 +20,7 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .home:    return "Home"
         case .menu:    return "Menu"
         case .orders:  return "Orders"
+        case .rewards: return "Rewards"
         case .account: return "Account"
         }
     }
@@ -27,8 +29,9 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     var symbolName: String {
         switch self {
         case .home:    return "house"
-        case .menu:    return "cup.and.saucer"
+        case .menu:    return "list.bullet"
         case .orders:  return "bag"
+        case .rewards: return "medal"
         case .account: return "person.crop.circle"
         }
     }
@@ -46,9 +49,6 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .home:
             return LayeredTabAsset(baseName: "PulseHomeMark",
                                    accentName: "PulseHomeLeafAccent")
-        case .menu:
-            return LayeredTabAsset(baseName: "PulseMenuMark",
-                                   accentName: "PulseMenuAccent")
         case .orders:
             return LayeredTabAsset(baseName: "PulseOrdersMark",
                                    accentName: "PulseOrdersAccent")
@@ -70,10 +70,25 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     var selectedSymbolName: String {
         switch self {
         case .home:    return "house.fill"
-        case .menu:    return "cup.and.saucer.fill"
+        case .menu:    return "list.bullet.rectangle.fill"
         case .orders:  return "bag.fill"
+        case .rewards: return "medal.fill"
         case .account: return "person.crop.circle.fill"
         }
+    }
+
+    /// Returns true iff a count badge should be rendered for this count.
+    /// Hidden at zero (fail-safe) and for negative numbers (defensive).
+    /// Pure function — kept on the enum so the badge UI and the test
+    /// suite share one source of truth.
+    static func shouldShowBadge(count: Int) -> Bool {
+        count > 0
+    }
+
+    /// Display string for a badge count. Caps at "99+" so the badge
+    /// never grows wider than the tab icon at runtime.
+    static func badgeText(count: Int) -> String {
+        count > 99 ? "99+" : "\(count)"
     }
 }
 
