@@ -6,17 +6,23 @@ import { REDIS_CLIENT } from '../health/redis.token';
 // 10 minutes — matches the spec's "Menu cache (10min TTL)" line in 2.2.
 export const MENU_TTL_SECONDS = 600;
 
-const FULL_KEY = (locationId: string) => `menu:full:${locationId}`;
-const ITEM_KEY = (itemId: string) => `menu:item:${itemId}`;
-const ITEMS_BY_LOC_KEY = (locationId: string) => `menu:items:loc:${locationId}`;
+// Versioned prefix. Bump the `v<N>` segment when the cached payload shape
+// changes — old-shape blobs in Redis are then ignored on read, new-shape
+// blobs are written under the new namespace, and the old keys expire on
+// their own 10-min TTL. v2 bump landed with the menu-presentation-fields
+// rollout (display_style / temperature / featured / art_token) so that the
+// 10-min cache window after deploy doesn't serve pre-schema JSON.
+const FULL_KEY = (locationId: string) => `menu:v2:full:${locationId}`;
+const ITEM_KEY = (itemId: string) => `menu:v2:item:${itemId}`;
+const ITEMS_BY_LOC_KEY = (locationId: string) => `menu:v2:items:loc:${locationId}`;
 
 /**
  * Two-layer Redis cache for the public menu.
  *
- *   L1 — full menu blob:   menu:full:{locationId}
- *   L2 — single item blob: menu:item:{itemId}
+ *   L1 — full menu blob:   menu:v2:full:{locationId}
+ *   L2 — single item blob: menu:v2:item:{itemId}
  *
- * A SET at `menu:items:loc:{locationId}` tracks which item-keys belong to
+ * A SET at `menu:v2:items:loc:{locationId}` tracks which item-keys belong to
  * which location, so invalidateMenu(locationId) can drop both layers cleanly
  * without resorting to SCAN. (SCAN is O(N over the whole keyspace) and would
  * stutter under load.)
