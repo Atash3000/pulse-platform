@@ -33,10 +33,17 @@
  * seed created, plus its Macchiato / Hot Chocolate / Drip Coffee /
  * Mocha / Vanilla Latte rows). A dev DB seeded by the old script will
  * therefore show four categories after re-seed (old Coffee + Matcha +
- * Classic Coffee + Food). To get a clean v4 menu, drop and re-seed:
- * `npm run db:reset && npm run seed:dev && npm run seed:menu`. Mirrors
- * the modifier-group "manual cleanup if the catalog shrinks" policy
- * below.
+ * Classic Coffee + Food). To get a clean v4 menu, wipe the Postgres
+ * volume and re-seed from scratch:
+ *
+ *   docker compose down -v
+ *   docker compose up -d postgres redis
+ *   npm run migration:run
+ *   npm run seed:dev
+ *   npm run seed:menu
+ *
+ * Mirrors the modifier-group "manual cleanup if the catalog shrinks"
+ * policy below.
  *
  * Catalog shape
  * --------------
