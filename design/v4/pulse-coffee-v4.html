@@ -1,0 +1,2488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse Coffee — v6</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  
+  :root {
+    --bg: #f6f1e8;
+    --bg-deep: #ede5d3;
+    --bg-warm: #fdf6e8;
+    --ink: #1f1a14;
+    --ink-soft: #6e6354;
+    --ink-faint: #a8a08f;
+    --paper: #ffffff;
+    --paper-warm: #fdfaf3;
+    --accent: #6b8e3d;
+    --accent-warm: #c2410c;
+    --line: rgba(31,26,20,0.07);
+  }
+  
+  html, body {
+    background: #2a2520;
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    overflow-x: hidden;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+  
+  .screens {
+    display: flex;
+    gap: 32px;
+    padding: 28px 16px 28px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+  
+  .phone {
+    flex-shrink: 0;
+    width: 390px;
+    height: 844px;
+    background: var(--bg);
+    border-radius: 44px;
+    box-shadow: 
+      0 30px 60px -20px rgba(0,0,0,0.4),
+      0 0 0 1px rgba(255,255,255,0.05);
+    overflow: hidden;
+    position: relative;
+    scroll-snap-align: center;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .phone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse 100% 60% at 50% -20%, rgba(255,235,180,0.2) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 1;
+  }
+  
+  .phone-content {
+    flex: 1;
+    overflow-y: auto;
+    position: relative;
+    z-index: 2;
+    padding-bottom: 80px;
+  }
+  
+  .phone-content::-webkit-scrollbar { display: none; }
+  
+  .screen-label {
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: #888;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  
+  /* ===== STATUS ===== */
+  .status {
+    padding: 14px 28px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  
+  .status-right { display: flex; align-items: center; gap: 5px; }
+  
+  /* ===== TOP BAR ===== */
+  .topbar {
+    padding: 22px 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .logo-dot {
+    width: 10px;
+    height: 10px;
+    background: var(--accent-warm);
+    border-radius: 50%;
+    animation: gentle-pulse 2.2s ease-in-out infinite;
+  }
+  
+  @keyframes gentle-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+  }
+  
+  .logo-text {
+    font-family: 'Inter', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  
+  .nav-back {
+    font-size: 15px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .nav-profile {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Instrument Serif', serif;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  
+  /* ============================================ */
+  /* DRINK VISUAL SYSTEM                          */
+  /* ============================================ */
+  
+  /* MATCHA DRINKS */
+  .drink-matcha {
+    position: relative;
+    border-radius: 6px 6px 26px 26px;
+    overflow: hidden;
+    background: var(--bg-deep);
+  }
+  
+  .layer {
+    position: absolute;
+    left: 0; right: 0;
+    transition: transform 1.5s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  
+  .layer.top { top: 0; height: 33.33%; }
+  .layer.mid { top: 33.33%; height: 33.33%; }
+  .layer.bot { bottom: 0; height: 33.33%; }
+  
+  .strawberry-matcha .top { background: #6b8e3d; }
+  .strawberry-matcha .mid { background: #f5e6d3; }
+  .strawberry-matcha .bot { background: #c8556d; }
+  
+  .raspberry-matcha .top { background: #6b8e3d; }
+  .raspberry-matcha .mid { background: #f5e6d3; }
+  .raspberry-matcha .bot { background: #a82d4e; }
+  
+  .brown-sugar-matcha .top { background: #6b8e3d; }
+  .brown-sugar-matcha .mid { background: #fdf6e8; }
+  .brown-sugar-matcha .bot { background: #5c3a1f; }
+  
+  .ginger-matcha .top { background: #6b8e3d; }
+  .ginger-matcha .mid { background: #fdf6e8; }
+  .ginger-matcha .bot { background: #d4912f; }
+  
+  /* CLASSIC DRINKS */
+  .drink-classic {
+    position: relative;
+    border-radius: 6px 6px 26px 26px;
+    overflow: hidden;
+    background: var(--bg-deep);
+  }
+  
+  .drink-classic .body { position: absolute; inset: 0; }
+  
+  .cappuccino .body { background: linear-gradient(180deg, #f5ddc4 0%, #d4a574 25%, #6b3a1e 35%, #4a2611 100%); }
+  .latte .body { background: linear-gradient(180deg, #fdf6e8 0%, #e8d4a8 30%, #b8854a 60%, #8b5a2b 100%); }
+  .americano .body { background: linear-gradient(180deg, #3d1f0a 0%, #2a1505 100%); }
+  .flat-white .body { background: linear-gradient(180deg, #fdf6e8 0%, #c89560 25%, #7a4f2c 100%); }
+  .espresso .body { background: linear-gradient(180deg, #2a1505 0%, #1a0d03 100%); }
+  .cold-brew .body { background: linear-gradient(180deg, #3d1f0a 0%, #1f0d03 100%); }
+  
+  .hot-indicator {
+    position: absolute;
+    top: -14px; left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 14px;
+    opacity: 0.4;
+    z-index: 3;
+    pointer-events: none;
+  }
+  
+  .hot-indicator::before, .hot-indicator::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    background: linear-gradient(180deg, transparent 0%, var(--ink-soft) 50%, transparent 100%);
+    border-radius: 100px;
+  }
+  
+  .hot-indicator::before {
+    height: 14px;
+    left: 30%;
+    animation: steam 2.5s ease-in-out infinite;
+  }
+  
+  .hot-indicator::after {
+    height: 12px;
+    right: 30%;
+    animation: steam 2.5s ease-in-out 0.5s infinite;
+  }
+  
+  @keyframes steam {
+    0%, 100% { opacity: 0.3; transform: translateY(0) scaleY(1); }
+    50% { opacity: 0.6; transform: translateY(-4px) scaleY(1.2); }
+  }
+  
+  /* ============================================ */
+  /* SCREEN 1: HOME — fast reorder + commerce    */
+  /* ============================================ */
+  
+  .greeting-row {
+    padding: 18px 24px 0;
+  }
+  
+  .greeting-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  
+  .greeting-sub {
+    font-size: 13px;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .greeting-sub b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  
+  /* HERO drink — large, photo placeholder */
+  .hero-card {
+    margin: 20px 16px 16px;
+    background: var(--paper-warm);
+    border-radius: 28px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: 0 8px 20px -10px rgba(31,26,20,0.1);
+  }
+  
+  .hero-visual {
+    height: 200px;
+    background: 
+      radial-gradient(ellipse at 30% 30%, rgba(107,142,61,0.1) 0%, transparent 50%),
+      radial-gradient(ellipse at 70% 70%, rgba(200,85,109,0.08) 0%, transparent 50%),
+      linear-gradient(180deg, #faf3ef 0%, #ede0d8 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  
+  /* Photo placeholder marker */
+  .photo-marker {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(31,26,20,0.7);
+    color: white;
+    font-size: 9px;
+    padding: 4px 8px;
+    border-radius: 100px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 500;
+  }
+  
+  .hero-drink {
+    width: 100px;
+    height: 175px;
+    position: relative;
+    filter: drop-shadow(0 20px 28px rgba(31,26,20,0.18));
+  }
+  
+  .hero-info {
+    padding: 18px 22px 20px;
+  }
+  
+  .hero-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+  
+  .hero-text-left {
+    flex: 1;
+  }
+  
+  .hero-eyebrow {
+    font-size: 11px;
+    color: var(--accent-warm);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  
+  .hero-name {
+    font-family: 'Instrument Serif', serif;
+    font-size: 24px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+  }
+  
+  .hero-name em { font-style: italic; }
+  
+  .hero-detail {
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+  }
+  
+  .hero-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    font-size: 12px;
+  }
+  
+  .meta-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 9px;
+    background: var(--bg-deep);
+    border-radius: 100px;
+    font-size: 11px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  
+  .meta-time {
+    color: var(--accent);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+  }
+  
+  .meta-time::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: gentle-pulse 2s ease-in-out infinite;
+  }
+  
+  .reorder-cta {
+    width: 100%;
+    background: var(--ink);
+    color: var(--bg-warm);
+    border: none;
+    padding: 16px;
+    border-radius: 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .reorder-cta:active { opacity: 0.85; }
+  
+  .reorder-cta-right {
+    font-weight: 500;
+    opacity: 0.7;
+  }
+  
+  /* QUICK REORDER row */
+  .quick-h {
+    padding: 0 24px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .quick-h .see-all {
+    color: var(--accent);
+    text-transform: none;
+    letter-spacing: -0.01em;
+    font-weight: 500;
+    font-size: 13px;
+  }
+  
+  .quick-row {
+    padding: 0 16px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    margin-bottom: 22px;
+    scrollbar-width: none;
+  }
+  
+  .quick-row::-webkit-scrollbar { display: none; }
+  
+  .quick-card {
+    flex-shrink: 0;
+    width: 100px;
+    background: var(--paper-warm);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 10px 8px 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+  
+  .quick-card:active { transform: scale(0.96); }
+  
+  .quick-mini {
+    width: 28px; height: 44px;
+    margin: 0 auto 8px;
+    border-radius: 2px 2px 9px 9px;
+    overflow: hidden;
+    position: relative;
+  }
+  
+  .quick-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  
+  .quick-price {
+    font-size: 11px;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  
+  /* LOYALTY mini block */
+  .loyalty-mini {
+    margin: 0 16px 16px;
+    padding: 14px 18px;
+    background: var(--paper-warm);
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  
+  .loyalty-progress {
+    flex: 1;
+  }
+  
+  .loyalty-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  
+  .loyalty-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  
+  .loyalty-count {
+    font-size: 11px;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  
+  .loyalty-bar {
+    width: 100%;
+    height: 5px;
+    background: var(--bg-deep);
+    border-radius: 100px;
+    overflow: hidden;
+  }
+  
+  .loyalty-fill {
+    height: 100%;
+    width: 60%;
+    background: var(--accent);
+    border-radius: 100px;
+  }
+  
+  .loyalty-arrow {
+    color: var(--ink-faint);
+    font-size: 16px;
+  }
+  
+  /* PAIR WITH — food upsell */
+  .pair-h {
+    padding: 0 24px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  
+  .pair-row {
+    padding: 0 16px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    margin-bottom: 22px;
+    scrollbar-width: none;
+  }
+  
+  .pair-row::-webkit-scrollbar { display: none; }
+  
+  .pair-card {
+    flex-shrink: 0;
+    width: 130px;
+    background: var(--paper-warm);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+  
+  .pair-card:active { transform: scale(0.97); }
+  
+  .pair-visual {
+    height: 70px;
+    background: linear-gradient(135deg, #f5e6d3 0%, #d4a574 100%);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+  }
+  
+  .pair-visual.croissant {
+    background: linear-gradient(135deg, #f5e6d3 0%, #d4a574 100%);
+  }
+  .pair-visual.khachapuri {
+    background: linear-gradient(135deg, #fae8c8 0%, #b8854a 100%);
+  }
+  .pair-visual.muffin {
+    background: linear-gradient(135deg, #f0e0d0 0%, #8b5a2b 100%);
+  }
+  .pair-visual.cookie {
+    background: linear-gradient(135deg, #e8d4a8 0%, #6b3a1e 100%);
+  }
+  
+  .pair-info {
+    padding: 10px 12px 12px;
+  }
+  
+  .pair-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.15;
+    margin-bottom: 4px;
+  }
+  
+  .pair-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .pair-price {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  
+  .pair-add {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--bg-warm);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  
+  /* LOCATION at bottom */
+  .location-row {
+    margin: 0 16px 16px;
+    padding: 12px 16px;
+    background: var(--paper-warm);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+  }
+  
+  .loc-icon {
+    width: 32px; height: 32px;
+    background: var(--bg-deep);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  .loc-text { flex: 1; }
+  
+  .loc-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 1px;
+  }
+  
+  .loc-sub {
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  
+  /* ============================================ */
+  /* BOTTOM NAV                                   */
+  /* ============================================ */
+  
+  .bottom-nav {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 80px;
+    background: rgba(246,241,232,0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 8px 12px 24px;
+    z-index: 50;
+  }
+  
+  .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    padding: 4px 8px;
+    position: relative;
+  }
+  
+  .nav-item .nav-icon {
+    color: var(--ink-faint);
+    transition: color 0.2s ease;
+  }
+  
+  .nav-item .nav-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    letter-spacing: -0.01em;
+    transition: color 0.2s ease;
+  }
+  
+  .nav-item.active .nav-icon,
+  .nav-item.active .nav-label {
+    color: var(--ink);
+  }
+  
+  .nav-item .badge {
+    position: absolute;
+    top: 0; right: 4px;
+    background: var(--accent-warm);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 14px;
+    height: 14px;
+    border-radius: 100px;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--bg);
+  }
+  
+  /* ============================================ */
+  /* SCREEN 2: MENU                               */
+  /* ============================================ */
+  
+  .menu-top {
+    padding: 16px 24px 18px;
+  }
+  
+  .menu-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    margin-bottom: 4px;
+  }
+  
+  .menu-sub {
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  
+  /* Temperature toggle */
+  .temp-toggle {
+    margin: 0 24px 22px;
+    display: flex;
+    background: var(--paper-warm);
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    padding: 3px;
+  }
+  
+  .temp-btn {
+    flex: 1;
+    padding: 9px 12px;
+    border-radius: 100px;
+    background: transparent;
+    border: none;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  
+  .temp-btn.active {
+    background: var(--ink);
+    color: var(--bg-warm);
+  }
+  
+  /* Section heading */
+  .section-h {
+    padding: 0 24px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  
+  .section-title {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+  }
+  
+  .section-meta {
+    font-size: 12px;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  
+  /* Matcha hero card — bigger, more sellable */
+  .matcha-hero {
+    margin: 0 16px 12px;
+    background: var(--paper-warm);
+    border-radius: 22px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    display: grid;
+    grid-template-columns: 140px 1fr;
+  }
+  
+  .matcha-hero:active { transform: scale(0.99); }
+  
+  .matcha-hero-visual {
+    background: 
+      radial-gradient(ellipse at center, rgba(200,85,109,0.1) 0%, transparent 70%),
+      linear-gradient(180deg, #faf3ef 0%, #ede0d8 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    height: 160px;
+  }
+  
+  .matcha-hero-drink {
+    width: 60px;
+    height: 110px;
+    position: relative;
+    filter: drop-shadow(0 12px 20px rgba(31,26,20,0.2));
+  }
+  
+  .matcha-hero-info {
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  
+  .matcha-hero-eyebrow {
+    font-size: 10px;
+    color: var(--accent-warm);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  
+  .matcha-hero-name {
+    font-family: 'Instrument Serif', serif;
+    font-size: 22px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+  }
+  
+  .matcha-hero-name em { font-style: italic; }
+  
+  .matcha-hero-desc {
+    font-size: 11px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+    margin-bottom: 12px;
+  }
+  
+  .matcha-hero-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .matcha-hero-price {
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  
+  .matcha-hero-add {
+    background: var(--ink);
+    color: var(--bg-warm);
+    border: none;
+    padding: 7px 14px;
+    border-radius: 100px;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  
+  /* Matcha rest — horizontal scroll */
+  .matcha-row {
+    padding: 0 16px 22px;
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  
+  .matcha-row::-webkit-scrollbar { display: none; }
+  
+  .matcha-card {
+    flex-shrink: 0;
+    width: 140px;
+    background: var(--paper-warm);
+    border-radius: 18px;
+    padding: 12px 12px 14px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+  }
+  
+  .matcha-card-visual {
+    height: 110px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .matcha-card-visual.atm-2 {
+    background: 
+      radial-gradient(ellipse at center, rgba(168,45,78,0.1) 0%, transparent 70%),
+      linear-gradient(180deg, #faf0f2 0%, #ecd8dc 100%);
+  }
+  
+  .matcha-card-visual.atm-3 {
+    background: 
+      radial-gradient(ellipse at center, rgba(92,58,31,0.08) 0%, transparent 70%),
+      linear-gradient(180deg, #f7efe0 0%, #ebe0c8 100%);
+  }
+  
+  .matcha-card-visual.atm-4 {
+    background: 
+      radial-gradient(ellipse at center, rgba(212,145,47,0.12) 0%, transparent 70%),
+      linear-gradient(180deg, #faf2dc 0%, #ecdfb8 100%);
+  }
+  
+  .matcha-card-drink {
+    width: 38px;
+    height: 75px;
+    position: relative;
+    box-shadow: 0 8px 14px -4px rgba(31,26,20,0.2);
+  }
+  
+  .matcha-card-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.15;
+    margin-bottom: 6px;
+    color: var(--ink);
+  }
+  
+  .matcha-card-name em {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-weight: 500;
+  }
+  
+  .matcha-card-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .matcha-card-price {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  
+  .matcha-card-add {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--bg-warm);
+    border: none;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  
+  /* Classics list */
+  .classics-list {
+    padding: 0 16px 22px;
+  }
+  
+  .classic-row {
+    background: var(--paper-warm);
+    border-radius: 14px;
+    margin-bottom: 6px;
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    align-items: center;
+    padding: 10px 12px;
+    gap: 12px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+  }
+  
+  .classic-mini {
+    width: 32px;
+    height: 50px;
+    margin: 0 auto;
+    position: relative;
+    border-radius: 2px 2px 10px 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 10px -3px rgba(31,26,20,0.2);
+  }
+  
+  .classic-row-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+  
+  .classic-row-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  
+  .temp-pill {
+    font-size: 9px;
+    padding: 2px 6px;
+    background: var(--bg-deep);
+    border-radius: 100px;
+    color: var(--ink-soft);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .temp-pill.hot { background: #fae3d3; color: #8b4a1e; }
+  .temp-pill.iced { background: #d8e8f0; color: #2a5a7a; }
+  .temp-pill.both { background: var(--bg-deep); color: var(--ink-soft); }
+  
+  .classic-row-meta {
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  
+  .classic-row-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+  
+  .classic-row-price {
+    font-size: 14px;
+    font-weight: 700;
+  }
+  
+  .classic-row-add {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--bg-warm);
+    border: none;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  
+  /* Food section */
+  .food-list {
+    padding: 0 16px;
+  }
+  
+  .food-row {
+    background: var(--paper-warm);
+    border-radius: 14px;
+    margin-bottom: 6px;
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    align-items: center;
+    padding: 10px 12px;
+    gap: 12px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+  }
+  
+  .food-mini {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+  }
+  
+  .food-mini.croissant { background: linear-gradient(135deg, #f5e6d3 0%, #d4a574 100%); }
+  .food-mini.khachapuri { background: linear-gradient(135deg, #fae8c8 0%, #b8854a 100%); }
+  .food-mini.muffin { background: linear-gradient(135deg, #f0e0d0 0%, #8b5a2b 100%); }
+  .food-mini.cookie { background: linear-gradient(135deg, #e8d4a8 0%, #6b3a1e 100%); }
+  
+  .food-row-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  
+  .food-row-meta {
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  
+  /* ============================================ */
+  /* SCREEN 3: DETAIL (Matcha)                    */
+  /* ============================================ */
+  
+  .detail-hero {
+    padding: 20px 24px 24px;
+    text-align: center;
+    background: 
+      radial-gradient(ellipse at 30% 20%, rgba(107,142,61,0.1) 0%, transparent 50%),
+      radial-gradient(ellipse at 70% 80%, rgba(200,85,109,0.08) 0%, transparent 50%),
+      linear-gradient(180deg, #faf3ef 0%, var(--bg) 100%);
+    position: relative;
+  }
+  
+  .detail-drink {
+    width: 110px;
+    height: 200px;
+    margin: 0 auto 16px;
+    position: relative;
+    filter: drop-shadow(0 28px 36px rgba(31,26,20,0.15));
+  }
+  
+  .detail-name {
+    font-family: 'Instrument Serif', serif;
+    font-size: 30px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    margin-bottom: 8px;
+  }
+  
+  .detail-name em { font-style: italic; }
+  
+  .detail-tagline {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-bottom: 18px;
+    line-height: 1.4;
+    max-width: 280px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  
+  .detail-stats {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+  }
+  
+  .detail-stat {
+    text-align: center;
+  }
+  
+  .detail-stat-num {
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  
+  .detail-stat-label {
+    font-size: 10px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 2px;
+    font-weight: 600;
+  }
+  
+  .layers-explained {
+    padding: 24px 24px 16px;
+  }
+  
+  .layers-h {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 18px;
+    margin-bottom: 14px;
+  }
+  
+  .layer-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  
+  .layer-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+  
+  .layer-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+  
+  .layer-info { flex: 1; }
+  
+  .layer-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  
+  .layer-desc {
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.45;
+  }
+  
+  .customize {
+    padding: 8px 24px 20px;
+  }
+  
+  .customize-h {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  
+  .option-row {
+    margin-bottom: 14px;
+  }
+  
+  .option-label {
+    font-size: 11px;
+    color: var(--ink-soft);
+    margin-bottom: 7px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  
+  .option-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  
+  .pill {
+    padding: 7px 13px;
+    border-radius: 100px;
+    background: var(--paper-warm);
+    border: 1px solid var(--line);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .pill.active {
+    background: var(--ink);
+    color: var(--bg-warm);
+    border-color: var(--ink);
+  }
+  
+  /* Pair with section in detail */
+  .pair-section {
+    padding: 8px 24px 16px;
+  }
+  
+  .pair-section-h {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  
+  .pair-section-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    margin: 0 -24px;
+    padding: 0 24px;
+    scrollbar-width: none;
+  }
+  
+  .pair-section-row::-webkit-scrollbar { display: none; }
+  
+  /* Detail CTA */
+  .detail-cta-wrap {
+    position: sticky;
+    bottom: 0;
+    padding: 16px 24px 20px;
+    background: linear-gradient(180deg, transparent 0%, var(--bg) 30%);
+    z-index: 10;
+  }
+  
+  .detail-cta {
+    width: 100%;
+    background: var(--ink);
+    color: var(--bg-warm);
+    border: none;
+    padding: 17px 22px;
+    border-radius: 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .detail-cta-price {
+    opacity: 0.7;
+    font-weight: 500;
+  }
+  
+  /* ============================================ */
+  /* SCREEN 4: REWARDS                            */
+  /* ============================================ */
+  
+  .rewards-top {
+    padding: 16px 24px 0;
+  }
+  
+  .rewards-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    margin-bottom: 4px;
+  }
+  
+  .rewards-sub {
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  
+  /* Big progress card */
+  .rewards-hero {
+    margin: 20px 16px 16px;
+    padding: 24px;
+    background: linear-gradient(160deg, #fef8ed 0%, #f9ead0 100%);
+    border-radius: 22px;
+    border: 1px solid var(--line);
+    text-align: center;
+  }
+  
+  .rewards-fraction {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  
+  .rewards-current {
+    font-family: 'Instrument Serif', serif;
+    font-size: 72px;
+    font-weight: 400;
+    line-height: 0.9;
+    letter-spacing: -0.04em;
+    color: var(--ink);
+  }
+  
+  .rewards-of {
+    font-family: 'Inter', sans-serif;
+    font-size: 22px;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+  
+  .rewards-status {
+    font-size: 14px;
+    color: var(--ink);
+    font-weight: 500;
+    margin-bottom: 18px;
+  }
+  
+  .rewards-status b {
+    color: var(--accent-warm);
+    font-weight: 700;
+  }
+  
+  .rewards-bar-big {
+    width: 100%;
+    height: 8px;
+    background: rgba(31,26,20,0.08);
+    border-radius: 100px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  
+  .rewards-fill-big {
+    height: 100%;
+    width: 60%;
+    background: var(--accent);
+    border-radius: 100px;
+  }
+  
+  .rewards-dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+  }
+  
+  .rewards-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(31,26,20,0.1);
+  }
+  
+  .rewards-dot.filled {
+    background: var(--accent);
+  }
+  
+  .rewards-dot.next {
+    background: var(--accent-warm);
+    box-shadow: 0 0 0 3px rgba(194,65,12,0.2);
+  }
+  
+  /* How it works */
+  .rewards-how {
+    margin: 0 16px 16px;
+    padding: 18px 20px;
+    background: var(--paper-warm);
+    border-radius: 18px;
+    border: 1px solid var(--line);
+  }
+  
+  .rewards-how-h {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  
+  .rewards-how-text {
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  
+  /* History */
+  .rewards-history-h {
+    padding: 4px 24px 12px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+  }
+  
+  .history-item {
+    margin: 0 16px 6px;
+    padding: 12px 16px;
+    background: var(--paper-warm);
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .history-mini {
+    width: 26px; height: 40px;
+    border-radius: 2px 2px 9px 9px;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+  
+  .history-info {
+    flex: 1;
+  }
+  
+  .history-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 1px;
+  }
+  
+  .history-name em {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-weight: 500;
+  }
+  
+  .history-when {
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  
+  .history-num {
+    font-family: 'Instrument Serif', serif;
+    font-size: 16px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  
+  /* Helper text */
+  .helper-text {
+    padding: 8px 24px 12px;
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-align: center;
+    font-style: italic;
+  }
+  
+  /* ============================================ */
+  /* SHARED                                       */
+  /* ============================================ */
+  
+  .scroll-hint {
+    position: fixed;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: #888;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: rgba(42,37,32,0.9);
+    backdrop-filter: blur(10px);
+    padding: 6px 14px;
+    border-radius: 100px;
+    pointer-events: none;
+    z-index: 100;
+  }
+</style>
+</head>
+<body>
+
+<div class="scroll-hint">← scroll to see all 4 screens →</div>
+
+<div class="screens">
+  
+  <!-- ============================================ -->
+  <!-- SCREEN 1: HOME -->
+  <!-- ============================================ -->
+  
+  <div class="phone">
+    <div class="screen-label">1 · Home</div>
+    
+    <div class="phone-content">
+      
+      <div class="status">
+        <span>9:41</span>
+        <div class="status-right">
+          <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor">
+            <rect x="0" y="8" width="3" height="4" rx="0.5"/>
+            <rect x="5" y="6" width="3" height="6" rx="0.5"/>
+            <rect x="10" y="3" width="3" height="9" rx="0.5"/>
+            <rect x="15" y="0" width="3" height="12" rx="0.5"/>
+          </svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none">
+            <rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/>
+            <rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/>
+            <rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/>
+          </svg>
+        </div>
+      </div>
+      
+      <div class="topbar">
+        <div class="logo-row">
+          <div class="logo-dot"></div>
+          <div class="logo-text">Pulse Coffee</div>
+        </div>
+        <div class="nav-profile">A</div>
+      </div>
+      
+      <div class="greeting-row">
+        <div class="greeting-name">Morning, Alex.</div>
+        <div class="greeting-sub">100 Maiden Ln · <b>no line</b> right now</div>
+      </div>
+      
+      <!-- HERO drink card -->
+      <div class="hero-card">
+        <div class="hero-visual">
+          <div class="photo-marker">[ product photo ]</div>
+          <div class="hero-drink">
+            <div class="drink-matcha strawberry-matcha" style="position:absolute;inset:0;">
+              <div class="layer top"></div>
+              <div class="layer mid"></div>
+              <div class="layer bot"></div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="hero-info">
+          <div class="hero-row">
+            <div class="hero-text-left">
+              <div class="hero-eyebrow">Your usual</div>
+              <div class="hero-name">Strawberry <em>Matcha</em></div>
+              <div class="hero-detail">Large · Oat milk · Light ice</div>
+            </div>
+          </div>
+          
+          <div class="hero-meta">
+            <span class="meta-pill">❄ Iced</span>
+            <span class="meta-time">Ready in 4 min</span>
+          </div>
+          
+          <button class="reorder-cta">
+            <span>Reorder</span>
+            <span class="reorder-cta-right">$6.45</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- Quick reorder -->
+      <div class="quick-h">
+        <span>Order again</span>
+        <span class="see-all">See all →</span>
+      </div>
+      <div class="quick-row">
+        <div class="quick-card">
+          <div class="quick-mini">
+            <div class="drink-classic cappuccino" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div class="quick-name">Cappuccino</div>
+          <div class="quick-price">$5.25</div>
+        </div>
+        <div class="quick-card">
+          <div class="quick-mini">
+            <div class="drink-matcha brown-sugar-matcha" style="position:absolute;inset:0;">
+              <div class="layer top"></div>
+              <div class="layer mid"></div>
+              <div class="layer bot"></div>
+            </div>
+          </div>
+          <div class="quick-name">Brown Sugar M.</div>
+          <div class="quick-price">$6.75</div>
+        </div>
+        <div class="quick-card">
+          <div class="quick-mini">
+            <div class="drink-classic americano" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div class="quick-name">Americano</div>
+          <div class="quick-price">$4.50</div>
+        </div>
+        <div class="quick-card">
+          <div class="quick-mini">
+            <div class="drink-classic latte" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div class="quick-name">Latte</div>
+          <div class="quick-price">$5.50</div>
+        </div>
+      </div>
+      
+      <!-- Loyalty -->
+      <div class="loyalty-mini">
+        <div class="loyalty-progress">
+          <div class="loyalty-top">
+            <span class="loyalty-label">6 of 10 drinks</span>
+            <span class="loyalty-count">4 to next free</span>
+          </div>
+          <div class="loyalty-bar">
+            <div class="loyalty-fill"></div>
+          </div>
+        </div>
+        <div class="loyalty-arrow">→</div>
+      </div>
+      
+      <!-- Pair with food -->
+      <div class="pair-h">Pair with</div>
+      <div class="pair-row">
+        <div class="pair-card">
+          <div class="pair-visual croissant">🥐</div>
+          <div class="pair-info">
+            <div class="pair-name">Croissant</div>
+            <div class="pair-bottom">
+              <span class="pair-price">$4.50</span>
+              <button class="pair-add">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="pair-card">
+          <div class="pair-visual khachapuri">🫓</div>
+          <div class="pair-info">
+            <div class="pair-name">Khachapuri</div>
+            <div class="pair-bottom">
+              <span class="pair-price">$8.00</span>
+              <button class="pair-add">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="pair-card">
+          <div class="pair-visual muffin">🧁</div>
+          <div class="pair-info">
+            <div class="pair-name">Blueberry Muffin</div>
+            <div class="pair-bottom">
+              <span class="pair-price">$3.75</span>
+              <button class="pair-add">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="pair-card">
+          <div class="pair-visual cookie">🍪</div>
+          <div class="pair-info">
+            <div class="pair-name">Chocolate Cookie</div>
+            <div class="pair-bottom">
+              <span class="pair-price">$3.25</span>
+              <button class="pair-add">+</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+    </div>
+    
+    <!-- Bottom Nav -->
+    <div class="bottom-nav">
+      <div class="nav-item active">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="nav-label">Home</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+        <span class="nav-label">Menu</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 01-8 0"/>
+        </svg>
+        <span class="nav-label">Orders</span>
+        <div class="badge">2</div>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="8" r="7"/>
+          <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+        </svg>
+        <span class="nav-label">Rewards</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span class="nav-label">Account</span>
+      </div>
+    </div>
+  </div>
+  
+  <!-- ============================================ -->
+  <!-- SCREEN 2: MENU -->
+  <!-- ============================================ -->
+  
+  <div class="phone">
+    <div class="screen-label">2 · Menu</div>
+    
+    <div class="phone-content">
+      
+      <div class="status">
+        <span>9:41</span>
+        <div class="status-right">
+          <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor">
+            <rect x="0" y="8" width="3" height="4" rx="0.5"/>
+            <rect x="5" y="6" width="3" height="6" rx="0.5"/>
+            <rect x="10" y="3" width="3" height="9" rx="0.5"/>
+            <rect x="15" y="0" width="3" height="12" rx="0.5"/>
+          </svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none">
+            <rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/>
+            <rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/>
+            <rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/>
+          </svg>
+        </div>
+      </div>
+      
+      <div class="topbar">
+        <div class="logo-row">
+          <div class="logo-dot"></div>
+          <div class="logo-text">Pulse Coffee</div>
+        </div>
+        <div class="nav-profile">A</div>
+      </div>
+      
+      <div class="menu-top">
+        <div class="menu-title">Menu</div>
+        <div class="menu-sub">Matcha line · Classic coffee · Food</div>
+      </div>
+      
+      <div class="temp-toggle">
+        <button class="temp-btn active">All</button>
+        <button class="temp-btn">☕ Hot</button>
+        <button class="temp-btn">❄ Iced</button>
+      </div>
+      
+      <!-- Matcha hero card -->
+      <div class="section-h">
+        <div class="section-title">The matcha line</div>
+        <div class="section-meta">All cold · 4 drinks</div>
+      </div>
+      
+      <div class="matcha-hero">
+        <div class="matcha-hero-visual">
+          <div class="photo-marker">[ photo ]</div>
+          <div class="matcha-hero-drink">
+            <div class="drink-matcha strawberry-matcha" style="position:absolute;inset:0;">
+              <div class="layer top"></div>
+              <div class="layer mid"></div>
+              <div class="layer bot"></div>
+            </div>
+          </div>
+        </div>
+        <div class="matcha-hero-info">
+          <div>
+            <div class="matcha-hero-eyebrow">★ Hero</div>
+            <div class="matcha-hero-name">Strawberry <em>Matcha</em></div>
+            <div class="matcha-hero-desc">Matcha · oat milk · strawberry purée</div>
+          </div>
+          <div class="matcha-hero-bottom">
+            <div class="matcha-hero-price">$6.45</div>
+            <button class="matcha-hero-add">Add</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Matcha rest -->
+      <div class="matcha-row">
+        <div class="matcha-card">
+          <div class="matcha-card-visual atm-2">
+            <div class="matcha-card-drink">
+              <div class="drink-matcha raspberry-matcha" style="position:absolute;inset:0;">
+                <div class="layer top"></div>
+                <div class="layer mid"></div>
+                <div class="layer bot"></div>
+              </div>
+            </div>
+          </div>
+          <div class="matcha-card-name">Raspberry <em>Matcha</em></div>
+          <div class="matcha-card-bottom">
+            <div class="matcha-card-price">$6.45</div>
+            <button class="matcha-card-add">+</button>
+          </div>
+        </div>
+        <div class="matcha-card">
+          <div class="matcha-card-visual atm-3">
+            <div class="matcha-card-drink">
+              <div class="drink-matcha brown-sugar-matcha" style="position:absolute;inset:0;">
+                <div class="layer top"></div>
+                <div class="layer mid"></div>
+                <div class="layer bot"></div>
+              </div>
+            </div>
+          </div>
+          <div class="matcha-card-name">Brown Sugar <em>Matcha</em></div>
+          <div class="matcha-card-bottom">
+            <div class="matcha-card-price">$6.75</div>
+            <button class="matcha-card-add">+</button>
+          </div>
+        </div>
+        <div class="matcha-card">
+          <div class="matcha-card-visual atm-4">
+            <div class="matcha-card-drink">
+              <div class="drink-matcha ginger-matcha" style="position:absolute;inset:0;">
+                <div class="layer top"></div>
+                <div class="layer mid"></div>
+                <div class="layer bot"></div>
+              </div>
+            </div>
+          </div>
+          <div class="matcha-card-name">Ginger <em>Matcha</em></div>
+          <div class="matcha-card-bottom">
+            <div class="matcha-card-price">$6.75</div>
+            <button class="matcha-card-add">+</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Classics -->
+      <div class="section-h">
+        <div class="section-title">Classic coffee</div>
+        <div class="section-meta">Hot or iced · 6</div>
+      </div>
+      
+      <div class="classics-list">
+        <div class="classic-row">
+          <div class="classic-mini">
+            <div class="drink-classic cappuccino" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div>
+            <div class="classic-row-top">
+              <div class="classic-row-name">Cappuccino</div>
+              <div class="temp-pill both">Hot · Iced</div>
+            </div>
+            <div class="classic-row-meta">Double shot · steamed milk · foam</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$5.25</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="classic-row">
+          <div class="classic-mini">
+            <div class="drink-classic latte" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div>
+            <div class="classic-row-top">
+              <div class="classic-row-name">Latte</div>
+              <div class="temp-pill both">Hot · Iced</div>
+            </div>
+            <div class="classic-row-meta">Espresso · steamed milk</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$5.50</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="classic-row">
+          <div class="classic-mini">
+            <div class="drink-classic americano" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div>
+            <div class="classic-row-top">
+              <div class="classic-row-name">Americano</div>
+              <div class="temp-pill both">Hot · Iced</div>
+            </div>
+            <div class="classic-row-meta">Double espresso · hot water</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$4.50</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="classic-row">
+          <div class="classic-mini">
+            <div class="drink-classic flat-white" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div>
+            <div class="classic-row-top">
+              <div class="classic-row-name">Flat White</div>
+              <div class="temp-pill hot">Hot</div>
+            </div>
+            <div class="classic-row-meta">Double shot · microfoam</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$5.25</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="classic-row">
+          <div class="classic-mini">
+            <div class="drink-classic cold-brew" style="position:absolute;inset:0;"><div class="body"></div></div>
+          </div>
+          <div>
+            <div class="classic-row-top">
+              <div class="classic-row-name">Cold Brew</div>
+              <div class="temp-pill iced">Iced</div>
+            </div>
+            <div class="classic-row-meta">18-hour slow brew · smooth</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$5.50</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Food -->
+      <div class="section-h" style="margin-top: 12px;">
+        <div class="section-title">Food</div>
+        <div class="section-meta">4 items</div>
+      </div>
+      
+      <div class="food-list">
+        <div class="food-row">
+          <div class="food-mini croissant">🥐</div>
+          <div>
+            <div class="food-row-name">Butter Croissant</div>
+            <div class="food-row-meta">Flaky · French butter · warm</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$4.50</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="food-row">
+          <div class="food-mini khachapuri">🫓</div>
+          <div>
+            <div class="food-row-name">Mini Khachapuri</div>
+            <div class="food-row-meta">Georgian cheese bread</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$8.00</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="food-row">
+          <div class="food-mini muffin">🧁</div>
+          <div>
+            <div class="food-row-name">Blueberry Muffin</div>
+            <div class="food-row-meta">Fresh-baked · gluten-free option</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$3.75</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+        
+        <div class="food-row">
+          <div class="food-mini cookie">🍪</div>
+          <div>
+            <div class="food-row-name">Chocolate Cookie</div>
+            <div class="food-row-meta">Dark chocolate · sea salt</div>
+          </div>
+          <div class="classic-row-right">
+            <div class="classic-row-price">$3.25</div>
+            <button class="classic-row-add">+</button>
+          </div>
+        </div>
+      </div>
+      
+    </div>
+    
+    <div class="bottom-nav">
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="nav-label">Home</span>
+      </div>
+      <div class="nav-item active">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+        <span class="nav-label">Menu</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 01-8 0"/>
+        </svg>
+        <span class="nav-label">Orders</span>
+        <div class="badge">2</div>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="8" r="7"/>
+          <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+        </svg>
+        <span class="nav-label">Rewards</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span class="nav-label">Account</span>
+      </div>
+    </div>
+  </div>
+  
+  <!-- ============================================ -->
+  <!-- SCREEN 3: DETAIL (Matcha) -->
+  <!-- ============================================ -->
+  
+  <div class="phone">
+    <div class="screen-label">3 · Detail (matcha)</div>
+    
+    <div class="phone-content">
+      
+      <div class="status">
+        <span>9:41</span>
+        <div class="status-right">
+          <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor">
+            <rect x="0" y="8" width="3" height="4" rx="0.5"/>
+            <rect x="5" y="6" width="3" height="6" rx="0.5"/>
+            <rect x="10" y="3" width="3" height="9" rx="0.5"/>
+            <rect x="15" y="0" width="3" height="12" rx="0.5"/>
+          </svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none">
+            <rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/>
+            <rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/>
+            <rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/>
+          </svg>
+        </div>
+      </div>
+      
+      <div class="topbar">
+        <div class="nav-back">← Menu</div>
+        <div class="nav-profile">A</div>
+      </div>
+      
+      <div class="detail-hero">
+        <div class="photo-marker" style="top: 12px; left: 12px;">[ product photo ]</div>
+        <div class="detail-drink">
+          <div class="drink-matcha strawberry-matcha" style="position:absolute;inset:0;">
+            <div class="layer top"></div>
+            <div class="layer mid"></div>
+            <div class="layer bot"></div>
+          </div>
+        </div>
+        
+        <div class="detail-name">Strawberry <em>Matcha</em></div>
+        <div class="detail-tagline">Earthy matcha, creamy oat milk, fresh strawberry purée. Three flavors in one cup.</div>
+        
+        <div class="detail-stats">
+          <div class="detail-stat">
+            <div class="detail-stat-num">180</div>
+            <div class="detail-stat-label">kcal</div>
+          </div>
+          <div class="detail-stat">
+            <div class="detail-stat-num">70mg</div>
+            <div class="detail-stat-label">caffeine</div>
+          </div>
+          <div class="detail-stat">
+            <div class="detail-stat-num">16oz</div>
+            <div class="detail-stat-label">size</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="layers-explained">
+        <div class="layers-h">Three layers</div>
+        
+        <div class="layer-item">
+          <div class="layer-swatch" style="background: #6b8e3d;"></div>
+          <div class="layer-info">
+            <div class="layer-name">Ceremonial matcha</div>
+            <div class="layer-desc">Vegetal, slightly bitter, deeply green.</div>
+          </div>
+        </div>
+        
+        <div class="layer-item">
+          <div class="layer-swatch" style="background: #f5e6d3;"></div>
+          <div class="layer-info">
+            <div class="layer-name">Oat milk</div>
+            <div class="layer-desc">Creamy and neutral. Holds the layers.</div>
+          </div>
+        </div>
+        
+        <div class="layer-item">
+          <div class="layer-swatch" style="background: #c8556d;"></div>
+          <div class="layer-info">
+            <div class="layer-name">Strawberry purée</div>
+            <div class="layer-desc">Fresh, slightly tart. Made fresh daily.</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="customize">
+        <div class="customize-h">Customize</div>
+        
+        <div class="option-row">
+          <div class="option-label">Size</div>
+          <div class="option-pills">
+            <div class="pill">12oz</div>
+            <div class="pill active">16oz</div>
+            <div class="pill">20oz</div>
+          </div>
+        </div>
+        
+        <div class="option-row">
+          <div class="option-label">Milk</div>
+          <div class="option-pills">
+            <div class="pill active">Oat</div>
+            <div class="pill">Almond</div>
+            <div class="pill">Whole</div>
+            <div class="pill">Coconut</div>
+          </div>
+        </div>
+        
+        <div class="option-row">
+          <div class="option-label">Ice</div>
+          <div class="option-pills">
+            <div class="pill">Light</div>
+            <div class="pill active">Regular</div>
+            <div class="pill">Extra</div>
+          </div>
+        </div>
+        
+        <div class="option-row">
+          <div class="option-label">Sweetness</div>
+          <div class="option-pills">
+            <div class="pill">None</div>
+            <div class="pill">Half</div>
+            <div class="pill active">Regular</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Pair with -->
+      <div class="pair-section">
+        <div class="pair-section-h">Pair with</div>
+        <div class="pair-section-row">
+          <div class="pair-card">
+            <div class="pair-visual croissant">🥐</div>
+            <div class="pair-info">
+              <div class="pair-name">Croissant</div>
+              <div class="pair-bottom">
+                <span class="pair-price">$4.50</span>
+                <button class="pair-add">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="pair-card">
+            <div class="pair-visual khachapuri">🫓</div>
+            <div class="pair-info">
+              <div class="pair-name">Khachapuri</div>
+              <div class="pair-bottom">
+                <span class="pair-price">$8.00</span>
+                <button class="pair-add">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="pair-card">
+            <div class="pair-visual cookie">🍪</div>
+            <div class="pair-info">
+              <div class="pair-name">Cookie</div>
+              <div class="pair-bottom">
+                <span class="pair-price">$3.25</span>
+                <button class="pair-add">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="detail-cta-wrap">
+        <button class="detail-cta">
+          <span>Add to order</span>
+          <span class="detail-cta-price">$6.45</span>
+        </button>
+      </div>
+      
+    </div>
+    
+    <div class="bottom-nav">
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span class="nav-label">Home</span>
+      </div>
+      <div class="nav-item active">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <span class="nav-label">Menu</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+        <span class="nav-label">Orders</span>
+        <div class="badge">2</div>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+        <span class="nav-label">Rewards</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="nav-label">Account</span>
+      </div>
+    </div>
+  </div>
+  
+  <!-- ============================================ -->
+  <!-- SCREEN 4: REWARDS -->
+  <!-- ============================================ -->
+  
+  <div class="phone">
+    <div class="screen-label">4 · Rewards</div>
+    
+    <div class="phone-content">
+      
+      <div class="status">
+        <span>9:41</span>
+        <div class="status-right">
+          <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor">
+            <rect x="0" y="8" width="3" height="4" rx="0.5"/>
+            <rect x="5" y="6" width="3" height="6" rx="0.5"/>
+            <rect x="10" y="3" width="3" height="9" rx="0.5"/>
+            <rect x="15" y="0" width="3" height="12" rx="0.5"/>
+          </svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none">
+            <rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/>
+            <rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/>
+            <rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/>
+          </svg>
+        </div>
+      </div>
+      
+      <div class="topbar">
+        <div class="logo-row">
+          <div class="logo-dot"></div>
+          <div class="logo-text">Pulse Coffee</div>
+        </div>
+        <div class="nav-profile">A</div>
+      </div>
+      
+      <div class="rewards-top">
+        <div class="rewards-title">Rewards</div>
+        <div class="rewards-sub">Buy 10 drinks · get 1 free. That's it.</div>
+      </div>
+      
+      <!-- Big progress -->
+      <div class="rewards-hero">
+        <div class="rewards-fraction">
+          <span class="rewards-current">6</span>
+          <span class="rewards-of">/ 10</span>
+        </div>
+        <div class="rewards-status"><b>4 drinks</b> to your next free one</div>
+        
+        <div class="rewards-bar-big">
+          <div class="rewards-fill-big"></div>
+        </div>
+        
+        <div class="rewards-dots">
+          <div class="rewards-dot filled"></div>
+          <div class="rewards-dot filled"></div>
+          <div class="rewards-dot filled"></div>
+          <div class="rewards-dot filled"></div>
+          <div class="rewards-dot filled"></div>
+          <div class="rewards-dot filled"></div>
+          <div class="rewards-dot next"></div>
+          <div class="rewards-dot"></div>
+          <div class="rewards-dot"></div>
+          <div class="rewards-dot"></div>
+        </div>
+      </div>
+      
+      <!-- How it works -->
+      <div class="rewards-how">
+        <div class="rewards-how-h">How it works</div>
+        <div class="rewards-how-text">
+          Every drink you buy counts. After 10 drinks, your next one is on us. No tiers, no points, no expiration.
+        </div>
+      </div>
+      
+      <!-- Recent history -->
+      <div class="rewards-history-h">Recent drinks</div>
+      
+      <div class="history-item">
+        <div class="history-mini">
+          <div class="drink-matcha strawberry-matcha" style="position:absolute;inset:0;">
+            <div class="layer top"></div><div class="layer mid"></div><div class="layer bot"></div>
+          </div>
+        </div>
+        <div class="history-info">
+          <div class="history-name">Strawberry <em>Matcha</em></div>
+          <div class="history-when">Today · 9:15 AM</div>
+        </div>
+        <div class="history-num">+1</div>
+      </div>
+      
+      <div class="history-item">
+        <div class="history-mini">
+          <div class="drink-classic cappuccino" style="position:absolute;inset:0;"><div class="body"></div></div>
+        </div>
+        <div class="history-info">
+          <div class="history-name">Cappuccino</div>
+          <div class="history-when">Yesterday · 8:42 AM</div>
+        </div>
+        <div class="history-num">+1</div>
+      </div>
+      
+      <div class="history-item">
+        <div class="history-mini">
+          <div class="drink-matcha brown-sugar-matcha" style="position:absolute;inset:0;">
+            <div class="layer top"></div><div class="layer mid"></div><div class="layer bot"></div>
+          </div>
+        </div>
+        <div class="history-info">
+          <div class="history-name">Brown Sugar <em>Matcha</em></div>
+          <div class="history-when">Mon · 8:50 AM</div>
+        </div>
+        <div class="history-num">+1</div>
+      </div>
+      
+      <div class="history-item">
+        <div class="history-mini">
+          <div class="drink-classic americano" style="position:absolute;inset:0;"><div class="body"></div></div>
+        </div>
+        <div class="history-info">
+          <div class="history-name">Americano</div>
+          <div class="history-when">Sun · 10:22 AM</div>
+        </div>
+        <div class="history-num">+1</div>
+      </div>
+      
+      <div class="helper-text">Pulse rewards never expire.</div>
+      
+    </div>
+    
+    <div class="bottom-nav">
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span class="nav-label">Home</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <span class="nav-label">Menu</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+        <span class="nav-label">Orders</span>
+        <div class="badge">2</div>
+      </div>
+      <div class="nav-item active">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+        <span class="nav-label">Rewards</span>
+      </div>
+      <div class="nav-item">
+        <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="nav-label">Account</span>
+      </div>
+    </div>
+  </div>
+  
+</div>
+
+<script>
+  document.querySelectorAll('.temp-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.parentElement.querySelectorAll('.temp-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  
+  document.querySelectorAll('.option-row').forEach(row => {
+    row.querySelectorAll('.pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        row.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
