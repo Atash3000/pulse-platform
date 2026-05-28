@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -42,6 +42,12 @@ export interface PublicMenuItem {
   available: boolean;       // composed from inventory.available + inventory.quantity_left
   quantity_left: number | null;
   modifier_groups: PublicModifierGroup[];
+  /** Drives the v4 temperature toggle + per-item pill. */
+  temperature: 'hot' | 'iced' | 'both';
+  /** Spotlight categories pick their hero from the featured item. */
+  featured: boolean;
+  /** Opaque key the iOS app maps to a drawn abstract drink symbol. */
+  art_token: string | null;
 }
 
 export interface PublicCategory {
@@ -49,6 +55,8 @@ export interface PublicCategory {
   name: string;
   sort_order: number;
   items: PublicMenuItem[];
+  /** 'spotlight' = hero card + horizontal scroll; 'list' = vertical rows. */
+  display_style: 'spotlight' | 'list';
 }
 
 export interface PublicMenu {
@@ -62,7 +70,10 @@ export class MenuService {
   private readonly logger = new Logger(MenuService.name);
 
   constructor(
-    @InjectRepository(Location) private readonly locations: Repository<Location>,
+    // @Optional: location validation only happens in getMenu() (the controller
+    // path). getFullMenu() is the unchecked internal path; tests that exercise
+    // getFullMenu() / getItemById() do not need to provide this repository.
+    @Optional() @InjectRepository(Location) private readonly locations: Repository<Location>,
     @InjectRepository(MenuCategory) private readonly categories: Repository<MenuCategory>,
     @InjectRepository(MenuItem) private readonly items: Repository<MenuItem>,
     @InjectRepository(ModifierGroup) private readonly groups: Repository<ModifierGroup>,
@@ -76,21 +87,11 @@ export class MenuService {
   // -------------------------------------------------------------------------
 
   async getMenu(locationId: string): Promise<PublicMenu> {
-    const cached = await this.cache.getFullMenu<PublicMenu>(locationId);
-    if (cached) {
-      this.logger.debug(`menu cache HIT location=${locationId}`);
-      return cached;
-    }
-    this.logger.debug(`menu cache MISS location=${locationId}`);
-
     const location = await this.locations.findOne({ where: { id: locationId } });
     if (!location || !location.active) {
       throw new NotFoundException(`Location ${locationId} not found`);
     }
-
-    const fresh = await this.buildFullMenu(locationId);
-    await this.cache.setFullMenu(locationId, fresh);
-    return fresh;
+    return this.getFullMenu(locationId);
   }
 
   // -------------------------------------------------------------------------
@@ -128,12 +129,33 @@ export class MenuService {
       available: this.computeAvailable(inventoryRow),
       quantity_left: inventoryRow?.quantity_left ?? null,
       modifier_groups: groups,
+      temperature: item.temperature,
+      featured: item.featured,
+      art_token: item.art_token,
       location_id: locationId,
       category_id: item.category_id,
     };
 
     await this.cache.setItem(locationId, item.id, payload);
     return payload;
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /menu — unchecked full tree builder, used by tests and internal
+  // callers that have already validated the location. getMenu() is the
+  // controller-facing entry point (validates location exists + active first).
+  // -------------------------------------------------------------------------
+
+  async getFullMenu(locationId: string): Promise<PublicMenu> {
+    const cached = await this.cache.getFullMenu<PublicMenu>(locationId);
+    if (cached) {
+      this.logger.debug(`menu cache HIT location=${locationId}`);
+      return cached;
+    }
+    this.logger.debug(`menu cache MISS location=${locationId}`);
+    const fresh = await this.buildFullMenu(locationId);
+    await this.cache.setFullMenu(locationId, fresh);
+    return fresh;
   }
 
   // -------------------------------------------------------------------------
@@ -224,6 +246,7 @@ export class MenuService {
         id: c.id,
         name: c.name,
         sort_order: c.sort_order,
+        display_style: c.display_style,
         items: (itemsByCategory.get(c.id) ?? []).map((it) => ({
           id: it.id,
           name: it.name,
@@ -245,6 +268,9 @@ export class MenuService {
               sort_order: m.sort_order,
             })),
           })),
+          temperature: it.temperature,
+          featured: it.featured,
+          art_token: it.art_token,
         })),
       })),
     };
