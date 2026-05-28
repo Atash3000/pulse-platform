@@ -76,6 +76,180 @@ interface SeedCategory {
   items: ReadonlyArray<SeedItem>;
 }
 
+// ---------------------------------------------------------------------
+// Modifier-group catalog
+// ---------------------------------------------------------------------
+//
+// Items reference groups by symbolic name. The actual ModifierGroup +
+// Modifier rows live PER ITEM (one row per item × group), so each
+// drink's required Milk choice is independent — matches the existing
+// schema in entities.ts (modifier_groups.item_id is a FK to a single
+// MenuItem).
+//
+// Sort order = the order the GROUPS render on the detail screen.
+// Within a group, modifiers render by their per-modifier sort_order.
+// For a required single-select group, iOS pre-selects the lowest
+// sort_order option as the default — keep the "Whole" / "12 oz" /
+// "Regular" options at sort_order 0 so the default is sensible.
+
+type GroupName = 'Size' | 'Milk' | 'Extras' | 'Sweetness';
+
+interface ModifierSpec {
+  name: string;
+  price_cents: number;
+  sort_order: number;
+}
+
+interface GroupSpec {
+  required: boolean;
+  multi_select: boolean;
+  sort_order: number;
+  modifiers: ReadonlyArray<ModifierSpec>;
+}
+
+const SIZE_STANDARD: GroupSpec = {
+  required: true,
+  multi_select: false,
+  sort_order: 0,
+  modifiers: [
+    { name: '12 oz', price_cents: 0,  sort_order: 0 },
+    { name: '16 oz', price_cents: 60, sort_order: 1 },
+  ],
+};
+
+const MILK: GroupSpec = {
+  required: true,
+  multi_select: false,
+  sort_order: 1,
+  modifiers: [
+    { name: 'Whole',       price_cents: 0,  sort_order: 0 },
+    { name: '2%',          price_cents: 0,  sort_order: 1 },
+    { name: 'Skim',        price_cents: 0,  sort_order: 2 },
+    { name: 'Half & Half', price_cents: 0,  sort_order: 3 },
+    { name: 'Oat',         price_cents: 75, sort_order: 4 },
+    { name: 'Almond',      price_cents: 75, sort_order: 5 },
+    { name: 'Coconut',     price_cents: 75, sort_order: 6 },
+    { name: 'Soy',         price_cents: 75, sort_order: 7 },
+  ],
+};
+
+const SWEETNESS: GroupSpec = {
+  required: false,
+  multi_select: false,
+  sort_order: 3,
+  modifiers: [
+    { name: 'Regular',     price_cents: 0, sort_order: 0 },
+    { name: 'Half',        price_cents: 0, sort_order: 1 },
+    { name: 'Unsweetened', price_cents: 0, sort_order: 2 },
+  ],
+};
+
+const EXTRAS_ESPRESSO: GroupSpec = {
+  required: false,
+  multi_select: true,
+  sort_order: 2,
+  modifiers: [
+    { name: 'Add espresso shot', price_cents: 100, sort_order: 0 },
+  ],
+};
+
+const EXTRAS_MATCHA: GroupSpec = {
+  required: false,
+  multi_select: true,
+  sort_order: 2,
+  modifiers: [
+    { name: 'Add matcha shot', price_cents: 100, sort_order: 0 },
+  ],
+};
+
+/**
+ * Resolves the modifier groups that apply to a given seed item.
+ * - Size:      standard drinks only (excludes fixed-size Flat White, Cortado, Espresso).
+ * - Milk:      milk drinks only (excludes Americano, Cold Brew, Espresso).
+ * - Extras:    matcha drinks get the matcha-shot toggle, all other drinks get espresso-shot.
+ * - Sweetness: all drinks.
+ *
+ * Food items get NO modifier groups (no required choices → smart-add
+ * via "+" works inline; see iOS spec §5.1).
+ */
+function groupsForItem(seedCategoryName: string, seed: SeedItem): Array<{ name: GroupName; spec: GroupSpec }> {
+  if (seedCategoryName === 'Food') return [];
+
+  const FIXED_SIZE = new Set(['Flat White', 'Cortado', 'Espresso']);
+  const BLACK = new Set(['Americano', 'Cold Brew', 'Espresso']);
+  const isMatcha = seedCategoryName === 'Matcha';
+
+  const groups: Array<{ name: GroupName; spec: GroupSpec }> = [];
+  if (!FIXED_SIZE.has(seed.name)) groups.push({ name: 'Size', spec: SIZE_STANDARD });
+  if (!BLACK.has(seed.name))      groups.push({ name: 'Milk', spec: MILK });
+  groups.push({ name: 'Extras',    spec: isMatcha ? EXTRAS_MATCHA : EXTRAS_ESPRESSO });
+  groups.push({ name: 'Sweetness', spec: SWEETNESS });
+  return groups;
+}
+
+/**
+ * Idempotent upsert of one item's modifier groups + modifiers.
+ *
+ * Group natural key: (item_id, name). Modifier natural key: (group_id,
+ * name). Updates the row in place on hit; inserts on miss. Does NOT
+ * delete groups/modifiers that exist in the DB but not in the seed
+ * (out of scope — manual cleanup if the catalog shrinks).
+ */
+async function upsertModifierGroups(
+  em: import('typeorm').EntityManager,
+  itemId: string,
+  groups: ReadonlyArray<{ name: GroupName; spec: GroupSpec }>,
+  totals: Counts,
+): Promise<void> {
+  const groupRepo = em.getRepository(ModifierGroup);
+  const modifierRepo = em.getRepository(Modifier);
+
+  for (const { name, spec } of groups) {
+    let group = await groupRepo.findOne({ where: { item_id: itemId, name } });
+    if (group) {
+      group.required = spec.required;
+      group.multi_select = spec.multi_select;
+      group.sort_order = spec.sort_order;
+      group = await groupRepo.save(group);
+      totals.modifier_groups_updated += 1;
+    } else {
+      group = await groupRepo.save(
+        groupRepo.create({
+          item_id: itemId,
+          name,
+          required: spec.required,
+          multi_select: spec.multi_select,
+          sort_order: spec.sort_order,
+        }),
+      );
+      totals.modifier_groups_inserted += 1;
+    }
+
+    for (const mod of spec.modifiers) {
+      const existing = await modifierRepo.findOne({ where: { group_id: group.id, name: mod.name } });
+      if (existing) {
+        existing.price_cents = mod.price_cents;
+        existing.sort_order = mod.sort_order;
+        existing.active = true;
+        await modifierRepo.save(existing);
+        totals.modifiers_updated += 1;
+      } else {
+        await modifierRepo.save(
+          modifierRepo.create({
+            group_id: group.id,
+            name: mod.name,
+            price_cents: mod.price_cents,
+            sort_order: mod.sort_order,
+            active: true,
+            clover_mod_id: null,
+          }),
+        );
+        totals.modifiers_inserted += 1;
+      }
+    }
+  }
+}
+
 // Three-category v4 catalog. Prices in cents (Golden Rule #7). Featured
 // flag is the spotlight hero pick — only one per spotlight category.
 const CATEGORIES: ReadonlyArray<SeedCategory> = [
@@ -237,7 +411,7 @@ async function run(): Promise<void> {
           totals.inventory_inserted += 1;
         }
 
-        // Modifier groups land in Task 5 — placeholder pass-through here.
+        await upsertModifierGroups(em, item.id, groupsForItem(seedCategory.name, seed), totals);
       }
     }
   });
