@@ -49,7 +49,7 @@ SwiftUI view rendering itself is not unit-tested (would require a snapshot harne
 | Menu | shipped (MVP-2 + MVP-3) | Left-sidebar category picker (Luckin-style) |
 | Orders | placeholder | Order-status polling list (MVP-4) |
 | Rewards | placeholder | Loyalty progress + reward history (depends on loyalty backend) |
-| Account | **guest: `WelcomeView` cold-open / join surface; logged-in: placeholder** | Profile + sign-out for logged-in users (currently sign-out lives in `MenuView` toolbar — moves here when real content lands) |
+| Account | **guest: `WelcomeView` cold-open / join surface; logged-in: placeholder + Sign Out button** | Real profile screen (payment methods, order history, edit profile) — sign-out moved here when the v4 Menu topbar dropped the old leading toolbar item |
 
 ## Auth-state routing
 
@@ -70,8 +70,8 @@ Note that auth changes do trigger a full re-render: `ContentView`'s `switch` re-
 - **Real Welcome hero asset.** `WelcomeView` currently uses 🍵 + a gradient. Replace with `WelcomeHero.imageset` (real photo) when brand supplies one.
 - **Fraunces + DM Sans fonts.** Welcome and Home-v3 both want custom typography. Bundle the font files, register in `project.yml`, swap `.system(.serif)` call-sites in a single typography commit.
 - **Loyalty copy on Welcome screen is hardcoded.** The "50 beats welcome gift", "10 beats ≈ $1", and "free birthday drink" promises in `WelcomeView` are unmocked stubs awaiting the backend loyalty module — see decision-log entry "[iOS] WelcomeView ships hardcoded loyalty marketing copy" for the override of the 2026-05-14 loyalty-placeholder decision and the swap-when-backend-lands TODOs.
-- **Move "Sign Out" off the Menu toolbar onto Account.** The toolbar button in `Features/Menu/MenuView.swift` is left untouched for now to keep this commit scope-clean; it should be deleted once the Account tab gains real content. Tracking as a separate commit.
-- **Cart icon placement.** The cart button currently lives in `MenuView`'s toolbar. Once Orders/Account gain content the bag may want to be tab-bar-adjacent (Luckin floats a checkout bar above the tab bar). Defer until the cart UX is revisited.
+- ~~**Move "Sign Out" off the Menu toolbar onto Account.**~~ Done — `AccountView` (`Placeholders.swift`) now hosts the `Sign Out` button under its logged-in placeholder. The Menu toolbar dropped the leading sign-out icon when the v4 topbar landed. Will be replaced by a richer profile screen later.
+- **Cart icon placement.** The cart button currently lives in the v4 Menu topbar (right side, where the HTML `nav-profile` chip sits). The HTML mockup uses an avatar there; iOS keeps the cart because it's a critical commerce affordance and the profile chip is on the Account tab. Once a richer customer-profile UI ships, revisit whether the cart belongs tab-bar-adjacent (Luckin floats a checkout bar above the tab bar).
 - **Lazy tab mounting before real Home / Orders / Rewards / Account data work.** `MainTabView` keeps all five tab roots alive and hides inactive tabs with opacity so the custom bar can own selection. That is fine while only Menu does real work, but before other tabs add API fetches or polling we should lazy-mount inactive tabs or gate their `.task` bodies on the selected tab.
 - **Order-status icon treatment.** The old Orders cup-status overlay was removed when product supplied the final flat Orders nav icon. Once MVP-4 order polling lands, add a badge or a separate status affordance rather than changing the base nav icon without a design pass.
 - **Repeat-tap native tab behavior.** Native `TabView` can pop the selected tab to root or scroll a list to top when the already-selected tab is tapped. The custom bar intentionally defers this until Home / Orders / Account have deeper navigation stacks.

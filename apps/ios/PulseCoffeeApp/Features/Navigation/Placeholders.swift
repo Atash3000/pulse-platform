@@ -59,9 +59,22 @@ struct AccountView: View {
 
         case .loggedIn:
             NavigationStack {
-                PlaceholderContent(tab: .account,
-                                   caption: "Profile, payment methods, and sign-out move here.")
-                    .navigationTitle(MainTab.account.title)
+                VStack(spacing: 24) {
+                    PlaceholderContent(tab: .account,
+                                       caption: "Profile, payment methods, and order history land here.")
+                    // Temporary sign-out CTA. Moved off the Menu toolbar when
+                    // the v4 topbar landed; will live inside a proper profile
+                    // screen once the Account tab gets real content.
+                    Button(role: .destructive) {
+                        Task { await appState.logout() }
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.body.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.bottom, 32)
+                }
+                .navigationTitle(MainTab.account.title)
             }
         }
     }

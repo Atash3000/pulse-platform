@@ -185,4 +185,138 @@ final class MenuTests: XCTestCase {
         )
         XCTAssertEqual(item.displayPrice, "$7.00")
     }
+
+    // MARK: - v4 presentation fields
+
+    func test_menu_decodes_temperature_featured_artToken_and_displayStyle() throws {
+        let json = """
+        {
+          "location_id": "loc-1",
+          "categories": [
+            {
+              "id": "cat-matcha",
+              "name": "Matcha",
+              "sort_order": 0,
+              "display_style": "spotlight",
+              "items": [
+                {
+                  "id": "item-strawberry",
+                  "name": "Strawberry Matcha",
+                  "description": "Matcha, oat milk, strawberry purée.",
+                  "base_price_cents": 645,
+                  "image_url": null,
+                  "available": true,
+                  "quantity_left": null,
+                  "modifier_groups": [],
+                  "temperature": "iced",
+                  "featured": true,
+                  "art_token": "strawberry-matcha"
+                }
+              ]
+            }
+          ],
+          "cached_at": "2026-05-28T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+
+        let menu = try JSONDecoder().decode(Menu.self, from: json)
+        XCTAssertEqual(menu.categories.first?.displayStyle, .spotlight)
+        let item = try XCTUnwrap(menu.categories.first?.items.first)
+        XCTAssertEqual(item.temperature, .iced)
+        XCTAssertTrue(item.featured)
+        XCTAssertEqual(item.artToken, "strawberry-matcha")
+    }
+
+    func test_menu_failSafe_unknownTemperature_decodesAsBoth() throws {
+        let json = """
+        {
+          "location_id": "loc-1",
+          "categories": [
+            {
+              "id": "cat-1",
+              "name": "Test",
+              "sort_order": 0,
+              "display_style": "list",
+              "items": [
+                {
+                  "id": "i",
+                  "name": "X",
+                  "description": null,
+                  "base_price_cents": 100,
+                  "image_url": null,
+                  "available": true,
+                  "quantity_left": null,
+                  "modifier_groups": [],
+                  "temperature": "lukewarm",
+                  "featured": false,
+                  "art_token": null
+                }
+              ]
+            }
+          ],
+          "cached_at": "2026-05-28T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+
+        let menu = try JSONDecoder().decode(Menu.self, from: json)
+        XCTAssertEqual(menu.categories.first?.items.first?.temperature, .both)
+    }
+
+    func test_menu_failSafe_unknownDisplayStyle_decodesAsList() throws {
+        let json = """
+        {
+          "location_id": "loc-1",
+          "categories": [
+            {
+              "id": "cat-1",
+              "name": "Mystery",
+              "sort_order": 0,
+              "display_style": "carousel",
+              "items": []
+            }
+          ],
+          "cached_at": "2026-05-28T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+
+        let menu = try JSONDecoder().decode(Menu.self, from: json)
+        XCTAssertEqual(menu.categories.first?.displayStyle, .list)
+    }
+
+    func test_menu_failSafe_missingNewFields_decodeWithDefaults() throws {
+        // Models v3 JSON (missing temperature/featured/art_token/display_style).
+        // Defaults: temperature=.both, featured=false, artToken=nil, displayStyle=.list.
+        let json = """
+        {
+          "location_id": "loc-1",
+          "categories": [
+            {
+              "id": "cat-1",
+              "name": "Legacy",
+              "sort_order": 0,
+              "items": [
+                {
+                  "id": "i",
+                  "name": "X",
+                  "description": null,
+                  "base_price_cents": 100,
+                  "image_url": null,
+                  "available": true,
+                  "quantity_left": null,
+                  "modifier_groups": []
+                }
+              ]
+            }
+          ],
+          "cached_at": "2026-05-28T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+
+        let menu = try JSONDecoder().decode(Menu.self, from: json)
+        XCTAssertEqual(menu.categories.first?.displayStyle, .list)
+        let item = try XCTUnwrap(menu.categories.first?.items.first)
+        XCTAssertEqual(item.temperature, .both)
+        XCTAssertFalse(item.featured)
+        XCTAssertNil(item.artToken)
+    }
 }

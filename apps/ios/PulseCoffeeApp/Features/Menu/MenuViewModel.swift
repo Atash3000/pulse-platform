@@ -23,6 +23,16 @@ final class MenuViewModel: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    @Published var selectedTemperature: TemperatureFilter = .all
+
+    /// Returns the loaded menu with the current temperature filter
+    /// applied. `nil` if the menu hasn't loaded yet. Pure derivation —
+    /// no side effects, no caching (the menu fits in memory at this
+    /// scale, and re-filtering on selection change is cheap).
+    var filteredMenu: Menu? {
+        guard case .loaded(_, let menu) = state else { return nil }
+        return Self.filter(menu, by: selectedTemperature)
+    }
 
     private let locations: LocationService
     private let menus: MenuService
@@ -79,6 +89,36 @@ final class MenuViewModel: ObservableObject {
             return "Hit a rate limit. Please wait a minute and try again."
         case .unexpected(let code):
             return "Menu request failed with status \(code)."
+        }
+    }
+
+    /// Pure filter. Keeps the original category and item order; drops
+    /// items that don't match the temperature; drops categories that
+    /// end up empty. Behavior pinned by `MenuViewModelTests`.
+    /// `nonisolated` so test code can call it synchronously outside the
+    /// main actor (the function touches no actor state).
+    nonisolated static func filter(_ menu: Menu, by filter: TemperatureFilter) -> Menu {
+        let filteredCategories: [MenuCategory] = menu.categories.compactMap { category in
+            let keptItems = category.items.filter { item in
+                Self.matches(temperature: item.temperature, filter: filter)
+            }
+            guard !keptItems.isEmpty else { return nil }
+            // Reconstruct the category with the filtered item list.
+            var copy = category
+            copy.replaceItems(keptItems)
+            return copy
+        }
+
+        var copy = menu
+        copy.replaceCategories(filteredCategories)
+        return copy
+    }
+
+    private nonisolated static func matches(temperature: Temperature, filter: TemperatureFilter) -> Bool {
+        switch filter {
+        case .all:  return true
+        case .hot:  return temperature == .hot  || temperature == .both
+        case .iced: return temperature == .iced || temperature == .both
         }
     }
 }
