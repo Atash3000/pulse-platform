@@ -10,6 +10,11 @@ enum AppTheme {
         static let iconSecondary = Color.secondary
         static let warning = Color.orange
         static let destructive = Color.red
+        /// Brand warm accent — used for the matcha hero "★ HERO" eyebrow,
+        /// "FEATURED" labels, and any informational call-out where the v4
+        /// design uses `var(--accent-warm)` (`#c2410c`). NOT for destructive
+        /// actions (that's `.destructive`).
+        static let accentWarm = Color(red: 194 / 255, green: 65 / 255, blue: 12 / 255)
         static let onBadge = Color.white
         static let tabBarBackground = Color(red: 251 / 255, green: 247 / 255, blue: 240 / 255)
         static let divider = Color(red: 122 / 255, green: 92 / 255, blue: 68 / 255)

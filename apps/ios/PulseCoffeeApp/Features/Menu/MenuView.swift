@@ -1,59 +1,85 @@
 import SwiftUI
 
-/// Personal-MVP menu screen: sectioned list (one section per category),
-/// item rows with name + price + sold-out indicator. Tapping a row opens
-/// the read-only `ItemDetailView`.
+/// v4 Menu screen — ScrollView composition (custom topbar + header +
+/// temperature toggle + sections). Sections render as SpotlightSection
+/// or a vertical list of MenuListRow depending on the category's
+/// `display_style`. Smart-add is wired here: items with no required
+/// modifier groups are added directly to the cart; everything else
+/// opens ItemDetailView. The existing loading / failed / empty states
+/// and pull-to-refresh remain.
 ///
-/// Add-to-cart action is wired in MVP-3 (when the `CartManager` lands).
-/// For now, the detail screen has a "Cart coming soon" disabled button so
-/// the navigation flow is testable end-to-end.
+/// Sign-out is intentionally NOT on this screen — it moved to the
+/// Account tab when the v4 topbar landed (see Navigation README +
+/// AccountView in `Features/Navigation/Placeholders.swift`).
 struct MenuView: View {
-    @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var cart: CartManager
     @StateObject private var viewModel = MenuViewModel()
     @State private var showCart = false
+    @State private var detailItem: MenuItem?
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(title)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(role: .destructive) {
-                            Task { await appState.logout() }
-                        } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .accessibilityLabel("Sign Out")
-                        }
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            showCart = true
-                        } label: {
-                            cartIcon
-                                .accessibilityLabel("Cart with \(cart.totalItemCount) items")
-                        }
-                    }
-                }
-                .task {
-                    if case .idle = viewModel.state {
-                        await viewModel.load()
-                    }
-                }
-                .refreshable {
+            VStack(spacing: 0) {
+                topbar
+                content
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .task {
+                if case .idle = viewModel.state {
                     await viewModel.load()
                 }
-                .sheet(isPresented: $showCart) {
-                    if case .loaded(let location, _) = viewModel.state {
-                        CartView(locationId: location.id)
-                    } else {
-                        // Cart can still be opened before menu loads —
-                        // CartView shows the empty state until items
-                        // get added (which requires the menu loading first).
-                        CartView(locationId: "")
-                    }
+            }
+            .refreshable {
+                await viewModel.load()
+            }
+            .sheet(isPresented: $showCart) {
+                if case .loaded(let location, _) = viewModel.state {
+                    CartView(locationId: location.id)
+                } else {
+                    CartView(locationId: "")
                 }
+            }
+            .sheet(item: $detailItem) { item in
+                NavigationStack {
+                    ItemDetailView(item: item)
+                }
+            }
         }
+    }
+
+    // MARK: - Topbar
+    //
+    // HTML: `.topbar` is a flex row with `.logo-row` (dot + brand text)
+    // on the left and `.nav-profile` (avatar) on the right. iOS keeps
+    // the same shape but puts the cart icon on the right instead of the
+    // avatar — the cart is a critical commerce affordance and the
+    // logged-in profile chip lives on the Account tab.
+
+    private var topbar: some View {
+        HStack(spacing: 8) {
+            StoreStatusDot(status: currentStoreStatus())
+            Text(topbarLocationName)
+                .font(.system(size: 17, weight: .bold))
+                .tracking(-0.34)  // -0.02em on a 17pt size
+                .foregroundStyle(Color(red: 31 / 255, green: 26 / 255, blue: 20 / 255))  // --ink #1F1A14
+                .lineLimit(1)
+            Spacer()
+            Button { showCart = true } label: {
+                cartIcon.accessibilityLabel("Cart with \(cart.totalItemCount) items")
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    /// Location name string for the topbar. Falls back to "Pulse Coffee"
+    /// before the API responds so the topbar never renders empty.
+    private var topbarLocationName: String {
+        if case .loaded(let location, _) = viewModel.state {
+            return location.name
+        }
+        return "Pulse Coffee"
     }
 
     @ViewBuilder
@@ -74,15 +100,6 @@ struct MenuView: View {
         }
     }
 
-    private var title: String {
-        switch viewModel.state {
-        case .loaded(let location, _):
-            return location.name
-        default:
-            return "Menu"
-        }
-    }
-
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
@@ -90,26 +107,8 @@ struct MenuView: View {
             ProgressView("Loading menu…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        case .loaded(_, let menu):
-            if menu.categories.isEmpty {
-                emptyMenu
-            } else {
-                List {
-                    ForEach(menu.categories.sorted(by: { $0.sortOrder < $1.sortOrder })) { category in
-                        Section(category.name) {
-                            ForEach(category.items) { item in
-                                NavigationLink(value: item) {
-                                    MenuItemRow(item: item)
-                                }
-                                .disabled(!item.available)
-                            }
-                        }
-                    }
-                }
-                .navigationDestination(for: MenuItem.self) { item in
-                    ItemDetailView(item: item)
-                }
-            }
+        case .loaded:
+            loadedView
 
         case .failed(let message):
             VStack(spacing: 16) {
@@ -133,73 +132,110 @@ struct MenuView: View {
         }
     }
 
+    @ViewBuilder
+    private var loadedView: some View {
+        if let menu = viewModel.filteredMenu, !menu.categories.isEmpty {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    header
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
+                        .padding(.bottom, 18)
+
+                    TemperatureToggle(selection: $viewModel.selectedTemperature)
+                        .padding(.bottom, 22)
+
+                    ForEach(menu.categories.sorted(by: { $0.sortOrder < $1.sortOrder })) { category in
+                        section(for: category)
+                    }
+
+                    Color.clear.frame(height: 24)
+                }
+            }
+            .background(AppTheme.Colors.tabBarBackground.opacity(0.6).ignoresSafeArea())
+        } else {
+            emptyMenu
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Menu")
+                .font(.system(size: 26, weight: .bold))
+                .tracking(-0.5)
+            Text("Matcha line · Classic coffee · Food")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func section(for category: MenuCategory) -> some View {
+        switch category.displayStyle {
+        case .spotlight:
+            SpotlightSection(
+                category: category,
+                onOpenDetail: { item in detailItem = item },
+                onAdd: { item in handleAdd(item) }
+            )
+        case .list:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .lastTextBaseline) {
+                    Text(category.name)
+                        .italic()
+                        .font(.system(size: 22, weight: .regular, design: .serif))
+                    Spacer()
+                    Text("\(category.items.count) items")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 6)
+
+                VStack(spacing: 6) {
+                    ForEach(category.items) { item in
+                        MenuListRow(
+                            item: item,
+                            onOpenDetail: { detailItem = item },
+                            onAdd: { handleAdd(item) }
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.bottom, 22)
+        }
+    }
+
     private var emptyMenu: some View {
         VStack(spacing: 12) {
             Image(systemName: "cup.and.saucer")
                 .font(.largeTitle)
                 .foregroundStyle(AppTheme.Colors.iconSecondary)
-            Text("Menu is empty")
+            Text("Nothing matches this filter")
                 .font(.headline)
-            Text("No items configured for this location yet.")
+            Text("Try the All tab to see everything available.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-}
 
-private struct MenuItemRow: View {
-    let item: MenuItem
-
-    var body: some View {
-        HStack(spacing: 12) {
-            AsyncImage(url: item.imageURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    Image(systemName: "cup.and.saucer.fill")
-                        .resizable()
-                        .scaledToFit()
-                        .padding(AppTheme.Metrics.menuItemIconPadding)
-                        .foregroundStyle(AppTheme.Colors.iconSecondary)
-                }
-            }
-            .frame(width: AppTheme.Metrics.menuItemIconSize,
-                   height: AppTheme.Metrics.menuItemIconSize)
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Metrics.cardCornerRadius))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.name)
-                    .font(.body.weight(.medium))
-                if let description = item.description, !description.isEmpty {
-                    Text(description)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                if !item.available {
-                    Text("Sold out")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.warning)
-                } else if let left = item.quantityLeft, left <= 5 {
-                    Text("Only \(left) left")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.Colors.warning)
-                }
-            }
-
-            Spacer()
-
-            Text(item.displayPrice)
-                .font(.body.monospacedDigit())
-                .foregroundStyle(item.available ? .primary : .secondary)
+    /// Smart-add dispatch: instant add for modifier-free items,
+    /// detail-sheet open for items that need required choices.
+    private func handleAdd(_ item: MenuItem) {
+        if MenuListRow.canInstantAdd(item) {
+            cart.add(item: item)
+        } else {
+            detailItem = item
         }
-        .padding(.vertical, 4)
     }
 }
 
 #Preview {
     MenuView()
+        .environmentObject(AppState())
+        .environmentObject(CartManager())
 }
