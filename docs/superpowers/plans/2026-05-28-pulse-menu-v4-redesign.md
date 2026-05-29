@@ -741,6 +741,8 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 Small segmented pill (All / ☕ Hot / ❄ Iced). Pure view bound to a value of type `TemperatureFilter` (declared here for the first time — used by `MenuViewModel` in Task 4).
 
+> **Follow-up shipped (2026-05-29):** The active pill now *slides* between segments instead of snapping. A single dark-espresso `Capsule` is rendered only behind the selected segment and tagged with `matchedGeometryEffect(id:in:)`; the tap wraps `selection = filter` in `withAnimation(.spring(response: 0.32, dampingFraction: 0.72))` so SwiftUI interpolates that one pill's frame from the old segment to the new one. Segment labels cross-fade taupe ↔ cream as the pill passes. **Reduce Motion** is honored via `@Environment(\.accessibilityReduceMotion)` — when on, the animation collapses to `nil` (instant). The Step 1 code below predates this; the live file in `apps/ios/.../TemperatureToggle.swift` and the Menu `README.md` ("Toggle slide animation") are the current source of truth.
+
 - [ ] **Step 1: Create the component**
 
 Create `apps/ios/PulseCoffeeApp/Features/Menu/TemperatureToggle.swift`:

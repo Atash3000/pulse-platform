@@ -42,8 +42,33 @@ enum TemperatureFilter: String, CaseIterable, Hashable {
 /// Selected-state visual contract: a 6pt filled dot replaces the
 /// `unselectedIconName` in the same leading slot, so the segment width
 /// stays stable as selection moves between Hot ↔ Iced ↔ All.
+///
+/// Motion contract: a single dark-espresso pill is rendered only behind
+/// the active segment and tagged with `matchedGeometryEffect`, so on a
+/// selection change SwiftUI interpolates its frame from the old segment
+/// to the new one — the pill *slides* rather than snapping (the standard
+/// iOS segmented-control feel). The slide uses a spring; the segment
+/// label colors cross-fade taupe ↔ cream as the pill passes under them.
+/// Honors Reduce Motion: when that setting is on, the change is instant.
 struct TemperatureToggle: View {
     @Binding var selection: TemperatureFilter
+
+    /// Geometry namespace shared by the active-segment pill so it can
+    /// animate its position between segments instead of snapping.
+    @Namespace private var pill
+
+    /// When the system "Reduce Motion" accessibility setting is on, the
+    /// selection changes instantly (no slide) — see `switchAnimation`.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Single stable id for the shared sliding pill.
+    private static let pillID = "tempToggleActivePill"
+
+    /// Spring driving the slide; `nil` (instant) under Reduce Motion.
+    /// Tuned short + lightly damped so it feels responsive, not bouncy.
+    private var switchAnimation: Animation? {
+        reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.72)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -63,7 +88,9 @@ struct TemperatureToggle: View {
     private func segment(for filter: TemperatureFilter) -> some View {
         let isActive = selection == filter
         return Button {
-            selection = filter
+            withAnimation(switchAnimation) {
+                selection = filter
+            }
         } label: {
             HStack(spacing: 6) {
                 leadingGlyph(for: filter, isActive: isActive)
@@ -99,10 +126,18 @@ struct TemperatureToggle: View {
         // else: no glyph (only `.all` when inactive lands here).
     }
 
+    /// Renders the dark-espresso pill ONLY behind the active segment,
+    /// tagged with `matchedGeometryEffect`. Because exactly one segment
+    /// is active, exactly one pill exists, so SwiftUI slides its frame
+    /// from the previous segment to the new one on a selection change.
+    /// Inactive segments draw nothing — the pill animates away to them.
+    @ViewBuilder
     private func segmentBackground(isActive: Bool) -> some View {
-        Capsule().fill(isActive
-                       ? AppTheme.Colors.tabLabelActive   // dark espresso
-                       : Color.clear)
+        if isActive {
+            Capsule()
+                .fill(AppTheme.Colors.tabLabelActive)   // dark espresso
+                .matchedGeometryEffect(id: Self.pillID, in: pill)
+        }
     }
 
     private var trackBackground: some View {
