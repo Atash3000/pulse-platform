@@ -2762,3 +2762,18 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 - **Prod-like / non-wipeable:** deactivate the obsolete modifiers manually (`active=false`), do not hard-delete (order history references them by snapshot, but the modifier rows should be retained for referential safety).
 - **Future, if this recurs:** a `cleanup-obsolete-modifiers.ts` script (mirroring `cleanup-duplicate-categories.ts`) that deactivates modifiers/groups not in the current catalog. **Deliberately not built now** — premature for a ~50-row dev catalog (§2.2 / GR#15).
 
+---
+
+## 2026-05-29 — [ios] — Display-only price preview on the product detail page
+
+**Decision:** The iOS product detail page (`ItemCustomization.displayPriceCents`) computes a price preview locally as `base + Σ selected modifier deltas`, purely for display on the "Add to order" CTA. This preview is never sent to the server and never reaches the charged amount. iOS sends only the selected modifier IDs; the backend computes the authoritative charge at `POST /checkout`.
+
+**Considered:**
+1. Base-price-only / "from $X" CTA that doesn't move with selections — strictest reading of Golden Rule #8, but a worse, static UX.
+2. A backend price-preview endpoint called (debounced) on every change — fully authoritative live pricing, but adds a network round-trip on a hot path and new backend work.
+3. Local display-only sum (chosen).
+
+**Reasoning:** Matches Starbucks / Blank Street UX (instant local price, server-authoritative charge). No network round-trip on a hot path. The charged amount is structurally untouched — iOS never sends a price — so Golden Rule #8's intent (the customer can never be charged a client-computed number) is preserved. All math is integer cents (Golden Rule #7); `Double` appears only in the final display string. A preview endpoint is unjustified while modifier pricing is static — no promos, no dynamic pricing (YAGNI, Golden Rule #15).
+
+**Trade-offs:** The displayed preview can briefly diverge from the backend under the 10-minute menu cache (e.g. a modifier price changed). This is display-only drift: the checkout/pay screen renders the backend's authoritative `CheckoutDisplay`, so the customer always sees and pays the backend figure. A reconciliation guard (compare local preview vs. backend at checkout, log a breadcrumb on mismatch) was scoped but deliberately deferred — the current `CheckoutResponse` exposes `totalCents` (tax/tip-inclusive) and pre-formatted display strings, with no integer pre-tax subtotal to compare the local preview against cleanly. Revisit if/when the backend returns a `subtotalCents`.
+
