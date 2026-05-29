@@ -39,8 +39,14 @@ struct MenuView: View {
                     CartView(locationId: "")
                 }
             }
-            .sheet(item: $detailItem) { item in
-                NavigationStack {
+            // `navigationDestination(item:)` is iOS 17+, but the app
+            // targets iOS 16. The `isPresented:` overload is iOS 16 and
+            // drives off the same `detailItem` state via a derived binding.
+            .navigationDestination(isPresented: Binding(
+                get: { detailItem != nil },
+                set: { presented in if !presented { detailItem = nil } }
+            )) {
+                if let item = detailItem {
                     ItemDetailView(item: item)
                 }
             }
