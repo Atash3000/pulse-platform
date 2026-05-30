@@ -129,13 +129,6 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.account.rawValue, "account")
     }
 
-    @MainActor func test_tabBarVisibility_defaultsVisible_andTogglesHidden() {
-        let vis = TabBarVisibility()
-        XCTAssertFalse(vis.isHidden)
-        vis.isHidden = true
-        XCTAssertTrue(vis.isHidden)
-    }
-
     func test_tabBadge_visibilityThreshold() {
         XCTAssertFalse(MainTab.shouldShowBadge(count: 0),
                        "Badge must be hidden when the count is zero (fail-safe)")

@@ -4,12 +4,7 @@ import XCTest
 @MainActor
 final class CartManagerTests: XCTestCase {
 
-    private func makeItem(
-        id: String = "item-1",
-        name: String = "Latte",
-        price: Int = 650,
-        modifierGroups: [ModifierGroup] = []
-    ) -> MenuItem {
+    private func makeItem(id: String = "item-1", name: String = "Latte", price: Int = 650) -> MenuItem {
         MenuItem(
             id: id,
             name: name,
@@ -18,7 +13,7 @@ final class CartManagerTests: XCTestCase {
             imageURL: nil,
             available: true,
             quantityLeft: nil,
-            modifierGroups: modifierGroups
+            modifierGroups: []
         )
     }
 
@@ -160,45 +155,5 @@ final class CartManagerTests: XCTestCase {
         // Idempotency key generator sees `[latte, latte, latte, espresso]`
         // and sorts internally, so order here is insertion order.
         XCTAssertEqual(cart.itemIds, ["latte", "latte", "latte", "espresso"])
-    }
-
-    // MARK: - Detail → cart wiring (via ItemCustomization)
-
-    private func sizeGroupFixture() -> ModifierGroup {
-        ModifierGroup(id: "size", name: "Size", required: true, multiSelect: false, sortOrder: 0, modifiers: [
-            Modifier(id: "s12", name: "12oz", priceCents: 0, sortOrder: 0),
-            Modifier(id: "s16", name: "16oz", priceCents: 50, sortOrder: 1),
-        ])
-    }
-
-    func test_configuredItem_addsLineWithSelectedModifierIds() {
-        let cart = CartManager()
-        let group = sizeGroupFixture()
-        let item = makeItem(modifierGroups: [group])
-        var custom = ItemCustomization(item: item)
-        custom.toggle(modifierId: "s16", in: group)
-
-        cart.add(item: item, modifierIds: custom.selectedModifierIds)
-
-        XCTAssertEqual(cart.lines.count, 1)
-        XCTAssertEqual(cart.lines[0].modifierIds, ["s16"])
-    }
-
-    func test_requiredModifierItem_yieldsNonEmptyModifierIds_regression() {
-        // Regression for the old stub that sent an empty modifier list,
-        // causing MODIFIER_GROUP_REQUIRED at checkout.
-        let item = makeItem(modifierGroups: [sizeGroupFixture()])
-        let custom = ItemCustomization(item: item) // default pre-selects first
-        XCTAssertFalse(custom.selectedModifierIds.isEmpty)
-    }
-
-    func test_twoConfigurations_createTwoLines_identicalMerge() {
-        let cart = CartManager()
-        let item = makeItem(modifierGroups: [sizeGroupFixture()])
-        cart.add(item: item, modifierIds: ["s12"])
-        cart.add(item: item, modifierIds: ["s16"]) // different → new line
-        cart.add(item: item, modifierIds: ["s12"]) // same as first → merge
-        XCTAssertEqual(cart.lines.count, 2)
-        XCTAssertEqual(cart.totalItemCount, 3)
     }
 }

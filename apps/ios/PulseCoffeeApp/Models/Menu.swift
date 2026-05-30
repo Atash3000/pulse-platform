@@ -147,10 +147,6 @@ struct MenuItem: Codable, Identifiable, Equatable, Hashable {
     /// Opaque key the iOS `DrinkArt` view maps to a drawn abstract
     /// symbol. `nil` / unknown → neutral fallback.
     let artToken: String?
-    /// Optional monochrome merchandising badge: "signature" | "staff_pick"
-    /// | "seasonal". `nil` / unknown → no badge (Golden Rule #17). Never a
-    /// social-proof number.
-    let badgeType: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -164,7 +160,6 @@ struct MenuItem: Codable, Identifiable, Equatable, Hashable {
         case temperature
         case featured
         case artToken = "art_token"
-        case badgeType = "badge_type"
     }
 
     init(from decoder: Decoder) throws {
@@ -180,7 +175,6 @@ struct MenuItem: Codable, Identifiable, Equatable, Hashable {
         self.temperature = (try? c.decode(Temperature.self, forKey: .temperature)) ?? .both
         self.featured = (try? c.decode(Bool.self, forKey: .featured)) ?? false
         self.artToken = try c.decodeIfPresent(String.self, forKey: .artToken)
-        self.badgeType = try c.decodeIfPresent(String.self, forKey: .badgeType)
     }
 
     /// Memberwise init used by tests (e.g. `displayPrice` assertions) and
@@ -198,8 +192,7 @@ struct MenuItem: Codable, Identifiable, Equatable, Hashable {
         modifierGroups: [ModifierGroup],
         temperature: Temperature = .both,
         featured: Bool = false,
-        artToken: String? = nil,
-        badgeType: String? = nil
+        artToken: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -212,7 +205,6 @@ struct MenuItem: Codable, Identifiable, Equatable, Hashable {
         self.temperature = temperature
         self.featured = featured
         self.artToken = artToken
-        self.badgeType = badgeType
     }
 
     /// Display string for the base price (e.g. "$6.50"). Display only —

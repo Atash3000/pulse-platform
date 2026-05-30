@@ -19,11 +19,6 @@ struct PulseCoffeeApp: App {
     /// by `CheckoutViewModel`.
     @StateObject private var cart = CartManager()
 
-    /// Local UserDefaults-backed favorite item-ID store. Non-critical
-    /// surface (GR#17); degrades to empty on parse failure. Backend sync
-    /// is a deferred seam (docs/todo-endpoints.md).
-    @StateObject private var favorites = FavoritesStore()
-
     init() {
         // Golden Rule #9: Sentry MUST be the first call in App.init() —
         // before any other code can throw, log, or crash. We need errors
@@ -129,7 +124,6 @@ struct PulseCoffeeApp: App {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(cart)
-                .environmentObject(favorites)
         }
     }
 

@@ -48,8 +48,6 @@ export interface PublicMenuItem {
   featured: boolean;
   /** Opaque key the iOS app maps to a drawn abstract drink symbol. */
   art_token: string | null;
-  /** Optional monochrome badge ('signature' | 'staff_pick' | 'seasonal'); null = none. */
-  badge_type: string | null;
 }
 
 export interface PublicCategory {
@@ -131,7 +129,6 @@ export class MenuService {
       temperature: item.temperature,
       featured: item.featured,
       art_token: item.art_token,
-      badge_type: item.badge_type,
       location_id: locationId,
       category_id: item.category_id,
     };
@@ -271,7 +268,6 @@ export class MenuService {
           temperature: it.temperature,
           featured: it.featured,
           art_token: it.art_token,
-          badge_type: it.badge_type,
         })),
       })),
     };

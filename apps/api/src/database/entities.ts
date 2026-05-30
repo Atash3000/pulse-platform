@@ -400,17 +400,6 @@ export class MenuItem {
   @Column({ type: 'text', nullable: true })
   art_token!: string | null;
 
-  /**
-   * Optional monochrome merchandising badge shown on the iOS product
-   * detail screen: 'signature' | 'staff_pick' | 'seasonal' | null.
-   * Nullable; the value set is validated in app code (no DB CHECK,
-   * matching temperature / display_style). iOS decodes fail-safe —
-   * unknown / null renders no badge (Golden Rule #17). Never carries
-   * social-proof numbers.
-   */
-  @Column({ type: 'text', nullable: true })
-  badge_type!: string | null;
-
   @Column({ type: 'boolean', default: true })
   active!: boolean;
 

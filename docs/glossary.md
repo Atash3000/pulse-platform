@@ -78,9 +78,9 @@ Behaviour on duplicate keys:
 
 ## Tracking Set
 
-A Redis `SET` named `menu:v3:items:loc:{locationId}` that records every item-cache key currently populated for that location. `MenuCache.setItem()` adds the item id; `MenuCache.invalidateMenu()` reads the set with `SMEMBERS` and `DEL`s each tracked item key in one pipeline. The `v<N>` segment is the cached-payload shape version, bumped in `apps/api/src/modules/menu/menu.cache.ts` when `PublicMenu` / `PublicMenuItem` shape changes.
+A Redis `SET` named `menu:v2:items:loc:{locationId}` that records every item-cache key currently populated for that location. `MenuCache.setItem()` adds the item id; `MenuCache.invalidateMenu()` reads the set with `SMEMBERS` and `DEL`s each tracked item key in one pipeline. The `v<N>` segment is the cached-payload shape version, bumped in `apps/api/src/modules/menu/menu.cache.ts` when `PublicMenu` / `PublicMenuItem` shape changes.
 
-Exists because the obvious alternative — `SCAN MATCH menu:v3:item:*` — is O(N over the whole Redis keyspace) and becomes a noisy neighbour at scale. See `docs/architecture.md` flow #5 and `docs/decision-log.md` for the full reasoning.
+Exists because the obvious alternative — `SCAN MATCH menu:v2:item:*` — is O(N over the whole Redis keyspace) and becomes a noisy neighbour at scale. See `docs/architecture.md` flow #5 and `docs/decision-log.md` for the full reasoning.
 
 ## Integer Cents
 
