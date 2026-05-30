@@ -76,9 +76,25 @@ final class ItemCustomizationTests: XCTestCase {
 
     // MARK: - Required-group validation
 
-    func test_defaultSelection_preselectsFirstRequiredSingleSelectBySortOrder() {
+    func test_defaultSelection_preselectsCheapestRequiredSingleSelect() {
         let c = ItemCustomization(item: item(groups: [sizeGroup]))
-        XCTAssertTrue(c.isSelected("s12", in: sizeGroup)) // first by sortOrder
+        XCTAssertTrue(c.isSelected("s12", in: sizeGroup)) // first by sortOrder AND cheapest (0 cents)
+        XCTAssertTrue(c.isSatisfied)
+    }
+
+    func test_defaultSelection_preselectsCheapestNotFirstBySortOrder() {
+        // Oat (+75) is sort 0 (renders first); Whole (0) is sort 1. Default
+        // must be the cheapest (Whole), not the first by sortOrder.
+        let milk = group("milk", "Milk", required: true, multiSelect: false, sort: 0, modifiers: [
+            mod("oat", "Oat", 75, 0),
+            mod("whole", "Whole", 0, 1),
+            mod("almond", "Almond", 75, 2),
+        ])
+        let item = self.item(basePriceCents: 645, groups: [milk])
+        let c = ItemCustomization(item: item)
+        XCTAssertTrue(c.isSelected("whole", in: milk))
+        XCTAssertFalse(c.isSelected("oat", in: milk))
+        XCTAssertEqual(c.displayPriceCents, 645) // opens at base price, no premium default
         XCTAssertTrue(c.isSatisfied)
     }
 

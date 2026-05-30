@@ -20,14 +20,17 @@ struct ItemCustomization {
         self.item = item
         var seeded: [String: Set<String>] = [:]
         for grp in item.modifierGroups {
-            // Default-selection rule (interim, pending a backend `is_default`
-            // flag — see spec §6): pre-select the first option by sortOrder
-            // for required single-select groups so the CTA and price are live
-            // immediately. Required multi-select and optional groups start
-            // empty.
+            // Default-selection rule (spec §5.1): pre-select the CHEAPEST
+            // option (lowest priceCents, tie-break lowest sortOrder) for
+            // required single-select groups, so the screen opens at the
+            // menu's listed price and never defaults to a premium option
+            // (e.g. Milk renders Oat first but defaults to free Whole).
+            // Required multi-select and optional groups start empty.
             if grp.required && !grp.multiSelect,
-               let first = grp.modifiers.sorted(by: { $0.sortOrder < $1.sortOrder }).first {
-                seeded[grp.id] = [first.id]
+               let cheapest = grp.modifiers.min(by: {
+                   ($0.priceCents, $0.sortOrder) < ($1.priceCents, $1.sortOrder)
+               }) {
+                seeded[grp.id] = [cheapest.id]
             } else {
                 seeded[grp.id] = []
             }
