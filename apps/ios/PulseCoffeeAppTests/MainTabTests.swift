@@ -129,7 +129,7 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.account.rawValue, "account")
     }
 
-    func test_tabBarVisibility_defaultsVisible_andTogglesHidden() {
+    @MainActor func test_tabBarVisibility_defaultsVisible_andTogglesHidden() {
         let vis = TabBarVisibility()
         XCTAssertFalse(vis.isHidden)
         vis.isHidden = true

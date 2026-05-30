@@ -1,6 +1,7 @@
 import XCTest
 @testable import PulseCoffeeApp
 
+@MainActor
 final class FavoritesStoreTests: XCTestCase {
     private func makeDefaults() -> UserDefaults {
         // Isolated suite per test so cases don't bleed into each other.

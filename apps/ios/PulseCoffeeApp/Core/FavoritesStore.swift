@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 /// Local, fail-safe store of favorited menu-item IDs, backed by
 /// `UserDefaults`. Powers the heart toggle on the product detail screen
@@ -7,6 +6,7 @@ import Combine
 /// a deferred seam (`docs/todo-endpoints.md`). A read/parse failure
 /// degrades to "no favorites" rather than crashing (Golden Rule #17):
 /// favorites are a non-critical surface and must never block the screen.
+@MainActor
 final class FavoritesStore: ObservableObject {
     static let storageKey = "pulse.favorites.itemIDs.v1"
 
