@@ -22,6 +22,16 @@ struct ItemDetailView: View {
 
     @State private var customization: ItemCustomization
     @State private var didAdd = false
+    /// A pair-with item that needs modifier choices — pushed as its own
+    /// detail rather than instant-added (see the smart-add guard in §5.5).
+    @State private var pairDetail: MenuItem?
+
+    // Dynamic Type: the primary hero text scales with the user's text-size
+    // setting (the rest of the screen's micro-labels remain fixed, matching
+    // the app-wide pattern — a full Dynamic Type pass is a separate task).
+    @ScaledMetric(relativeTo: .largeTitle) private var heroNameSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .title3) private var priceSize: CGFloat = 18
+    @ScaledMetric(relativeTo: .footnote) private var descriptionSize: CGFloat = 13
 
     init(item: MenuItem, pairings: [MenuItem] = []) {
         self.item = item
@@ -40,6 +50,11 @@ struct ItemDetailView: View {
             .padding(.horizontal, 24)
             .padding(.top, 4)
         }
+        // Paint the page background explicitly — the screen uses a fixed
+        // all-light palette (DetailPalette.ink text), so it must not sit on
+        // the system background. (The app is also locked to Light in
+        // Info.plist; this is the per-screen belt-and-suspenders.)
+        .background(DetailPalette.warmCream.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) { stickyCTA }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -54,6 +69,15 @@ struct ItemDetailView: View {
         // switched while detail is up because the bar is hidden. Any stray system-overlay
         // disappear self-corrects on the next navigation push.
         .onDisappear { tabBarVisibility.isHidden = false }
+        // Defensive: a pair-with item that needs modifiers opens its own detail.
+        .navigationDestination(isPresented: Binding(
+            get: { pairDetail != nil },
+            set: { presented in if !presented { pairDetail = nil } }
+        )) {
+            if let food = pairDetail {
+                ItemDetailView(item: food)
+            }
+        }
     }
 
     // MARK: - Hero (spec §5.2 / §5.3)
@@ -64,19 +88,21 @@ struct ItemDetailView: View {
                 .padding(.top, 4)
             ItemBadge(badgeType: item.badgeType)
             Text(item.name)
-                .font(.system(size: 30, weight: .regular, design: .serif))
+                .font(.system(size: heroNameSize, weight: .regular, design: .serif))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(DetailPalette.ink)
 
             // Price (18pt semibold) + estimate label (GR#8 acceptance).
             VStack(spacing: 2) {
                 Text(customization.displayPrice)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: priceSize, weight: .semibold))
                     .foregroundStyle(DetailPalette.ink)
                 Text("Estimated total")
                     .font(.system(size: 10, weight: .medium))
                     .tracking(0.4)
-                    .foregroundStyle(DetailPalette.inkFaint)
+                    // inkSoft (~4.4:1 on warmCream), not inkFaint (~1.8:1) —
+                    // this is the GR#8 estimate label, so it must be legible.
+                    .foregroundStyle(DetailPalette.inkSoft)
             }
 
             ReadyPill()
@@ -91,7 +117,7 @@ struct ItemDetailView: View {
             // Boutique ingredient line (backend-provided description; spec §5/§5.3).
             if let desc = item.description, !desc.isEmpty {
                 Text(desc)
-                    .font(.system(size: 13))
+                    .font(.system(size: descriptionSize))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
@@ -179,7 +205,19 @@ struct ItemDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(pairings) { food in
-                        PairWithCard(item: food) { cart.add(item: food) }
+                        PairWithCard(item: food) {
+                            // Smart-add guard (mirrors MenuView.handleAdd): only
+                            // instant-add modifier-free items. Anything with a
+                            // required group routes to its own detail so we never
+                            // send an empty modifier set that fails checkout
+                            // (MODIFIER_GROUP_REQUIRED). Today's pairings are all
+                            // modifier-free food, so this is defensive.
+                            if MenuListRow.canInstantAdd(food) {
+                                cart.add(item: food)
+                            } else {
+                                pairDetail = food
+                            }
+                        }
                     }
                 }
             }
@@ -232,7 +270,9 @@ struct ItemDetailView: View {
     private func addToOrder() {
         cart.add(item: item, quantity: 1, modifierIds: customization.selectedModifierIds)
         didAdd = true
-        Task {
+        // Pin to the main actor: `dismiss()` and view state must run on main
+        // (explicit, not relying on Task's inherited isolation).
+        Task { @MainActor in
             try? await Task.sleep(nanoseconds: 600_000_000)
             dismiss()
         }

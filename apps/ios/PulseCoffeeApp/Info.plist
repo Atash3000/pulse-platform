@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Lock the app to Light mode. The UI uses a fixed all-light brand
+	     palette (DetailPalette / AppTheme) with no dark variants; without
+	     this lock, dark mode paints system-dark backgrounds under those
+	     fixed-light surfaces and near-black text (e.g. the product detail
+	     hero/price) becomes unreadable. Revisit only if real dark variants
+	     are designed. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 	<!--
 		Most CFBundle*/UI* values are resolved at build time from build
 		settings in `project.yml` (CFBundleIdentifier from
