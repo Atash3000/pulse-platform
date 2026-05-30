@@ -128,4 +128,21 @@ final class ItemCustomizationTests: XCTestCase {
         c.toggle(modifierId: "shot", in: extrasGroup)
         XCTAssertEqual(Set(c.selectedModifierIds), ["s16", "shot"])
     }
+
+    // MARK: - Preselect init (edit-drink flow)
+
+    func test_preselectInit_seedsExactlyTheGivenIds() {
+        let size = group("size", "Size", required: true, multiSelect: false, sort: 0, modifiers: [
+            mod("s12", "12 oz", 0, 0), mod("s16", "16 oz", 60, 1),
+        ])
+        let extras = group("extras", "Extras", required: false, multiSelect: true, sort: 1, modifiers: [
+            mod("shot", "Shot", 100, 0), mod("foam", "Foam", 65, 1),
+        ])
+        let item = self.item(basePriceCents: 645, groups: [size, extras])
+        let c = ItemCustomization(item: item, preselectedModifierIds: ["s16", "shot"])
+        XCTAssertTrue(c.isSelected("s16", in: size))
+        XCTAssertFalse(c.isSelected("s12", in: size))
+        XCTAssertTrue(c.isSelected("shot", in: extras))
+        XCTAssertEqual(Set(c.selectedModifierIds), ["s16", "shot"])
+    }
 }

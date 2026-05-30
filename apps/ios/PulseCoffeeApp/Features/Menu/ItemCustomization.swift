@@ -38,6 +38,19 @@ struct ItemCustomization {
         self.selections = seeded
     }
 
+    /// Seeds selections from an existing cart line's modifier IDs (for the
+    /// edit-drink flow) instead of the cheapest-option defaults. Each group
+    /// keeps only the preselected IDs that belong to it.
+    init(item: MenuItem, preselectedModifierIds: [String]) {
+        self.item = item
+        let preselected = Set(preselectedModifierIds)
+        var seeded: [String: Set<String>] = [:]
+        for grp in item.modifierGroups {
+            seeded[grp.id] = Set(grp.modifiers.map(\.id)).intersection(preselected)
+        }
+        self.selections = seeded
+    }
+
     /// Toggles `modifierId` within `group`, applying single- vs.
     /// multi-select rules. Single-select replaces the group's selection
     /// (radio); multi-select inserts/removes independently.
