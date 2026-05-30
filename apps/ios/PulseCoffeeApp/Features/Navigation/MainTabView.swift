@@ -21,6 +21,7 @@ import SwiftUI
 struct MainTabView: View {
 
     @State private var selection: MainTab
+    @StateObject private var tabBarVisibility = TabBarVisibility()
 
     init(initialTab: MainTab = .menu) {
         _selection = State(initialValue: initialTab)
@@ -37,10 +38,15 @@ struct MainTabView: View {
             tabContent(.account) { AccountView() }
         }
         .animation(.easeInOut(duration: 0.15), value: selection)
+        .environmentObject(tabBarVisibility)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            // TODO: when OrdersService lands, pass `badge: { $0 == .orders ? ordersService.activeCount : 0 }`.
-            PulseTabBar(selection: $selection)
+            if !tabBarVisibility.isHidden {
+                // TODO: when OrdersService lands, pass `badge: { $0 == .orders ? ordersService.activeCount : 0 }`.
+                PulseTabBar(selection: $selection)
+                    .transition(.move(edge: .bottom))
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: tabBarVisibility.isHidden)
     }
 
     @ViewBuilder
