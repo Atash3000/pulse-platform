@@ -283,6 +283,29 @@ final class MenuTests: XCTestCase {
         XCTAssertEqual(menu.categories.first?.displayStyle, .list)
     }
 
+    // MARK: - badge_type
+
+    func test_menuItem_decodesBadgeType() throws {
+        let json = """
+        {"id":"i1","name":"Ginger Matcha","description":null,"base_price_cents":675,
+         "image_url":null,"available":true,"quantity_left":null,"modifier_groups":[],
+         "temperature":"iced","featured":false,"art_token":"ginger-matcha",
+         "badge_type":"signature"}
+        """.data(using: .utf8)!
+        let item = try JSONDecoder().decode(MenuItem.self, from: json)
+        XCTAssertEqual(item.badgeType, "signature")
+    }
+
+    func test_menuItem_missingBadgeType_decodesNil() throws {
+        let json = """
+        {"id":"i1","name":"Latte","description":null,"base_price_cents":550,
+         "image_url":null,"available":true,"quantity_left":null,"modifier_groups":[],
+         "temperature":"both","featured":false,"art_token":"latte"}
+        """.data(using: .utf8)!
+        let item = try JSONDecoder().decode(MenuItem.self, from: json)
+        XCTAssertNil(item.badgeType)
+    }
+
     func test_menu_failSafe_missingNewFields_decodeWithDefaults() throws {
         // Models v3 JSON (missing temperature/featured/art_token/display_style).
         // Defaults: temperature=.both, featured=false, artToken=nil, displayStyle=.list.

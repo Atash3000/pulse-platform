@@ -9,7 +9,7 @@ NestJS + TypeScript + TypeORM. Owns Postgres, Redis, Stripe, Clover, push, Teleg
 | `auth` | Built | Customer + staff JWT, bcrypt, refresh, RBAC roles guard. Features phone normalization (E.164) and automatic name trimming. |
 | `health` | Built | `GET /health` checks Postgres + Redis with 2s cap. ECS task health check. |
 | `locations` | Built | List, detail, `canAcceptOrders()` implementing spec 5.5. |
-| `menu` | Built | Two-layer Redis cache (`menu:v2:full:{loc}` + `menu:v2:item:{id}`), tracking-set invalidation. |
+| `menu` | Built | Two-layer Redis cache (`menu:v3:full:{loc}` + `menu:v3:item:{id}`), tracking-set invalidation. |
 | `pricing` | Built | All money math. Integer cents. 22/22 unit tests pass. |
 | `payments` | Built | Stripe webhook + atomic outbox transaction (`ORDER_PAID`). |
 | `checkout` | Built | 6-step flow (idempotency → location → items → pricing → atomic txn → response). |

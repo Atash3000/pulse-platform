@@ -106,33 +106,33 @@ UI rules:
 Two key types in Redis, both under a versioned namespace:
 
 ```
-menu:v2:full:{locationId}      STRING  JSON of the full menu tree     TTL 600s
-menu:v2:item:{itemId}          STRING  JSON of one item with mods    TTL 600s
-menu:v2:items:loc:{locationId} SET     item ids cached for that loc   TTL 600s
+menu:v3:full:{locationId}      STRING  JSON of the full menu tree     TTL 600s
+menu:v3:item:{itemId}          STRING  JSON of one item with mods    TTL 600s
+menu:v3:items:loc:{locationId} SET     item ids cached for that loc   TTL 600s
 ```
 
-The `v<N>` segment is the cached-payload shape version. Bump it (`apps/api/src/modules/menu/menu.cache.ts`) any time `PublicMenu` / `PublicMenuItem` adds, removes, or renames a field; previous-version blobs become unreachable on read and expire on their own TTL. v2 landed with the menu-presentation-fields rollout (`display_style`, `temperature`, `featured`, `art_token`).
+The `v<N>` segment is the cached-payload shape version. Bump it (`apps/api/src/modules/menu/menu.cache.ts`) any time `PublicMenu` / `PublicMenuItem` adds, removes, or renames a field; previous-version blobs become unreachable on read and expire on their own TTL. v2 landed with the menu-presentation-fields rollout (`display_style`, `temperature`, `featured`, `art_token`). v3 landed with the product-detail-v2 work (`badge_type` added to `PublicMenuItem`).
 
 **Read path:**
 
-- `GET /menu` → look up `menu:v2:full:{loc}`. Hit → return. Miss → query DB, build JSON, `SET` with TTL, also implicitly populate the tracking set on item-detail calls.
-- `GET /menu/items/:id` → look up `menu:v2:item:{id}`. Hit → return. Miss → query DB, `SET` the item, **also `SADD` the item id into `menu:v2:items:loc:{loc}`** so we can find it again.
+- `GET /menu` → look up `menu:v3:full:{loc}`. Hit → return. Miss → query DB, build JSON, `SET` with TTL, also implicitly populate the tracking set on item-detail calls.
+- `GET /menu/items/:id` → look up `menu:v3:item:{id}`. Hit → return. Miss → query DB, `SET` the item, **also `SADD` the item id into `menu:v3:items:loc:{loc}`** so we can find it again.
 
 **Invalidation path** (`MenuService.invalidate(locationId)`):
 
 ```
-SMEMBERS menu:v2:items:loc:{locationId}    ← the ids we cached
-DEL menu:v2:full:{locationId}
-DEL menu:v2:item:{x}                       ← for each id from above
-DEL menu:v2:items:loc:{locationId}
+SMEMBERS menu:v3:items:loc:{locationId}    ← the ids we cached
+DEL menu:v3:full:{locationId}
+DEL menu:v3:item:{x}                       ← for each id from above
+DEL menu:v3:items:loc:{locationId}
 ```
 
 All in one Redis pipeline.
 
-**Why `SCAN` was rejected.** The obvious alternative is `SCAN MATCH menu:v2:item:*` to find all per-item keys. That's bad for two reasons:
+**Why `SCAN` was rejected.** The obvious alternative is `SCAN MATCH menu:v3:item:*` to find all per-item keys. That's bad for two reasons:
 
 1. `SCAN` walks the entire keyspace. On a shared Redis at scale (think 100k keys for menus, sessions, idempotency, etc.), each `SCAN` becomes a noisy neighbour that slows down every other tenant. There's no `SCAN MATCH` index.
-2. We don't know which items belong to which location without parsing the JSON value of every match. Even an item-key naming scheme like `menu:v2:item:{loc}:{id}` would prevent cross-location item lookups.
+2. We don't know which items belong to which location without parsing the JSON value of every match. Even an item-key naming scheme like `menu:v3:item:{loc}:{id}` would prevent cross-location item lookups.
 
 The tracking set is O(N items cached for this location), runs in one pipeline, and shares no state with anyone else's keys. It's a sliding TTL — every `setItem` call refreshes the set's TTL — so if a location goes idle, the set expires alongside the data.
 
