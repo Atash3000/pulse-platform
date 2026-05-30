@@ -81,8 +81,8 @@ struct ItemDetailView: View {
             ReadyPill()
 
             // Fixed-size metadata line when there is no Size group (spec §5.3).
-            if fixedSizeMetadata != nil {
-                Text(fixedSizeMetadata!)
+            if let meta = fixedSizeMetadata {
+                Text(meta)
                     .font(.system(size: 12))
                     .foregroundStyle(DetailPalette.inkSoft)
             }
@@ -99,10 +99,12 @@ struct ItemDetailView: View {
             // Static brand recommend (spec §5.3). TODO: replace with real
             // "Your Usual ✓ — … + Apply" once order history exists
             // (docs/todo-endpoints.md).
-            Text("Pulse recommends: 16 oz · Oat · Full sweet")
-                .font(.system(size: 12))
-                .foregroundStyle(DetailPalette.inkSoft)
-                .padding(.top, 2)
+            if showsRecommendation {
+                Text("Pulse recommends: 16 oz · Oat · Full sweet")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DetailPalette.inkSoft)
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity)
     }
@@ -125,6 +127,13 @@ struct ItemDetailView: View {
         return "\(item.name) · \(size) oz · \(temp)"
     }
 
+    /// The static recommend only makes sense for sized milk drinks; hide it
+    /// for black/fixed-size coffees where "16 oz · Oat" would be wrong.
+    private var showsRecommendation: Bool {
+        let names = Set(item.modifierGroups.map { $0.name.lowercased() })
+        return names.contains("size") && names.contains("milk")
+    }
+
     // MARK: - Customize (spec §5.4) — "Customize" header removed
 
     private var customizeSection: some View {
@@ -137,10 +146,13 @@ struct ItemDetailView: View {
 
     private func optionRow(_ group: ModifierGroup) -> some View {
         VStack(alignment: .leading, spacing: 7) {
+            // VoiceOver: isHeader lets swipe navigation announce this as a
+            // section heading (e.g. "Size, heading") before the focusable pills.
             Text(group.name.uppercased())
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.8)                       // ~0.08em on 10pt
                 .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
             FlowLayout(spacing: 6) {
                 ForEach(group.modifiers.sorted(by: { $0.sortOrder < $1.sortOrder })) { modifier in
                     OptionPill(
@@ -154,16 +166,6 @@ struct ItemDetailView: View {
                 }
             }
         }
-        // VoiceOver: group label + current selection (spec §5.4).
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(group.name), current selection \(currentSelectionLabel(group))")
-    }
-
-    private func currentSelectionLabel(_ group: ModifierGroup) -> String {
-        let names = group.modifiers
-            .filter { customization.isSelected($0.id, in: group) }
-            .map(\.name)
-        return names.isEmpty ? "none" : names.joined(separator: ", ")
     }
 
     // MARK: - Pair with (spec §5.5)
@@ -259,6 +261,9 @@ private struct OptionPill: View {
                 )
         }
         .buttonStyle(.plain)
+        // VoiceOver announces "selected" when the pill is active so the user
+        // hears e.g. "16 oz, selected, button" during normal swipe navigation.
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
