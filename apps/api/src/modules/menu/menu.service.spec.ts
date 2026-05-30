@@ -134,4 +134,72 @@ describe('MenuService — v4 presentation fields', () => {
     const payload = await service.getItemById('item-strawberry');
     expect(payload.badge_type).toBe('signature');
   });
+
+  describe('null badge_type — GR#17 fail-safe (dominant production state)', () => {
+    let nullBadgeService: MenuService;
+
+    beforeEach(async () => {
+      const nullBadgeCache = {
+        getFullMenu: jest.fn().mockResolvedValue(null),
+        setFullMenu: jest.fn().mockResolvedValue(undefined),
+        getItem: jest.fn().mockResolvedValue(null),
+        setItem: jest.fn().mockResolvedValue(undefined),
+      };
+
+      // Build the null-badge item by spreading the default fixture and then
+      // explicitly overriding badge_type to null. We cannot pass null through
+      // item({ badge_type: null }) because the fixture uses `??` which treats
+      // null as nullish and substitutes the 'signature' default.
+      const nullItem = { ...item(), badge_type: null } as unknown as MenuItem;
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          MenuService,
+          { provide: MenuCache, useValue: nullBadgeCache },
+          {
+            provide: getRepositoryToken(Location),
+            useValue: { findOne: jest.fn() },
+          },
+          {
+            provide: getRepositoryToken(MenuCategory),
+            useValue: { find: jest.fn().mockResolvedValue([category()]) },
+          },
+          {
+            provide: getRepositoryToken(MenuItem),
+            useValue: {
+              createQueryBuilder: jest.fn().mockReturnValue(qb([nullItem])),
+              findOne: jest.fn().mockResolvedValue({ ...nullItem, category: category() }),
+            },
+          },
+          {
+            provide: getRepositoryToken(ModifierGroup),
+            useValue: { createQueryBuilder: jest.fn().mockReturnValue(qb([])), find: jest.fn().mockResolvedValue([]) },
+          },
+          {
+            provide: getRepositoryToken(Modifier),
+            useValue: { createQueryBuilder: jest.fn().mockReturnValue(qb([])) },
+          },
+          {
+            provide: getRepositoryToken(Inventory),
+            useValue: {
+              createQueryBuilder: jest.fn().mockReturnValue(qb([])),
+              findOne: jest.fn().mockResolvedValue(null),
+            },
+          },
+        ],
+      }).compile();
+
+      nullBadgeService = moduleRef.get(MenuService);
+    });
+
+    it('getFullMenu() propagates null badge_type without substituting a fallback', async () => {
+      const menu = await nullBadgeService.getFullMenu(LOC);
+      expect(menu.categories[0].items[0].badge_type).toBeNull();
+    });
+
+    it('getItemById() propagates null badge_type without substituting a fallback', async () => {
+      const payload = await nullBadgeService.getItemById('item-strawberry');
+      expect(payload.badge_type).toBeNull();
+    });
+  });
 });

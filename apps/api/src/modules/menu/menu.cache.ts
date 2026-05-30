@@ -13,7 +13,7 @@ export const MENU_TTL_SECONDS = 600;
 // rollout (display_style / temperature / featured / art_token) so that the
 // 10-min cache window after deploy doesn't serve pre-schema JSON.
 // v3 bump landed with the product-detail-v2 work (PublicMenuItem gains
-// badge_type) for the same reason.
+// badge_type) for the same reason (see decision-log 2026-05-28 + 2026-05-29).
 const FULL_KEY = (locationId: string) => `menu:v3:full:${locationId}`;
 const ITEM_KEY = (itemId: string) => `menu:v3:item:${itemId}`;
 const ITEMS_BY_LOC_KEY = (locationId: string) => `menu:v3:items:loc:${locationId}`;

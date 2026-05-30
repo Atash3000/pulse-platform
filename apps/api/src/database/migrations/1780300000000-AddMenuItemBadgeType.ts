@@ -15,7 +15,7 @@ import { MigrationInterface, QueryRunner } from "typeorm";
  *
  * PublicMenuItem in menu.service.ts surfaces the field verbatim; the
  * menu cache namespace is bumped to v3 in the same slice because the
- * cached payload shape gains a field (see decision-log 2026-05-28).
+ * cached payload shape gains a field (see decision-log 2026-05-28 + 2026-05-29).
  *
  * down() drops the column.
  */
