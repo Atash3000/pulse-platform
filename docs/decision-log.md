@@ -2777,3 +2777,18 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 
 **Trade-offs:** The displayed preview can briefly diverge from the backend under the 10-minute menu cache (e.g. a modifier price changed). This is display-only drift: the checkout/pay screen renders the backend's authoritative `CheckoutDisplay`, so the customer always sees and pays the backend figure. A reconciliation guard (compare local preview vs. backend at checkout, log a breadcrumb on mismatch) was scoped but deliberately deferred — the current `CheckoutResponse` exposes `totalCents` (tax/tip-inclusive) and pre-formatted display strings, with no integer pre-tax subtotal to compare the local preview against cleanly. Revisit if/when the backend returns a `subtotalCents`.
 
+---
+
+## 2026-05-29 — [ios] Product Detail v2 — generic renderer, local favorites, custom tab-bar hide
+
+**Decision:** The product detail screen v2 keeps three non-obvious iOS choices:
+1. **Generic modifier rendering.** iOS renders whatever modifier groups the backend sends, sorted by `sort_order`, with zero per-drink conditionals. The only per-item iOS logic is the fixed-size metadata line (shown when no Size group is present), the `artToken`-based matcha/coffee split for "Pair with", and the hardcoded oz labels for the 3 fixed-size drinks.
+2. **Tab bar hidden via a shared `TabBarVisibility` flag**, not `.toolbar(.hidden, for: .tabBar)` — the latter is a no-op because the app uses a hand-rolled `PulseTabBar` (a `.safeAreaInset` on a `ZStack`), not a system `TabView`. `ItemDetailView` sets the flag on appear / clears on disappear; `MainTabView` conditionally renders the bar.
+3. **Favorites stored locally** in `FavoritesStore` (UserDefaults set of item IDs), fail-safe to empty on parse error (GR#17). Backend sync is a deferred seam (`docs/todo-endpoints.md`).
+
+**Context:** The v2 brief asked for a premium product page (drink-as-hero, instant price, favorite, pair-with, focused mode) on top of the working v1 customization core.
+
+**Reasoning:** Keeping iOS a generic renderer means new drinks / modifier changes are backend-only. The custom tab-bar flag is the minimal correct mechanism given the existing navigation shape. Local favorites ship the feature now without blocking on a backend.
+
+**Trade-offs:** "Your Usual" is replaced by a static "Pulse recommends" line until order history exists; the ready-time is hardcoded `~4 min`; fixed-size oz labels are hardcoded on iOS. All three are recorded as seams in `docs/todo-endpoints.md`.
+
