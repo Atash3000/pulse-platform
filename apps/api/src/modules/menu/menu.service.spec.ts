@@ -38,6 +38,7 @@ const item = (overrides: Partial<MenuItem> = {}): MenuItem =>
     temperature: overrides.temperature ?? Temperature.ICED,
     featured: overrides.featured ?? true,
     art_token: overrides.art_token ?? 'strawberry-matcha',
+    badge_type: overrides.badge_type ?? 'signature',
   }) as unknown as MenuItem;
 
 // Convenience: a query-builder mock that returns a fixed list for getMany().
@@ -121,5 +122,16 @@ describe('MenuService — v4 presentation fields', () => {
     expect(payload.temperature).toBe('iced');
     expect(payload.featured).toBe(true);
     expect(payload.art_token).toBe('strawberry-matcha');
+  });
+
+  it('getFullMenu() exposes badge_type on each item', async () => {
+    const menu = await service.getFullMenu(LOC);
+    const it = menu.categories[0].items[0];
+    expect(it.badge_type).toBe('signature');
+  });
+
+  it('getItemById() returns badge_type', async () => {
+    const payload = await service.getItemById('item-strawberry');
+    expect(payload.badge_type).toBe('signature');
   });
 });
