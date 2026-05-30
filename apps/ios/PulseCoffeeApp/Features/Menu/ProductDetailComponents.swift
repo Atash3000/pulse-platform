@@ -26,7 +26,9 @@ struct FavoriteHeart: View {
         } label: {
             Image(systemName: saved ? "heart.fill" : "heart")
                 .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(saved ? DetailPalette.accentWarm : DetailPalette.inkFaint)
+                // inkSoft (~4.4:1), not inkFaint (~1.8:1) — clears the 3:1
+                // non-text contrast threshold for the empty-heart glyph.
+                .foregroundStyle(saved ? DetailPalette.accentWarm : DetailPalette.inkSoft)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
