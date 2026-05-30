@@ -99,13 +99,13 @@ final class CartManager: ObservableObject {
     func updateLine(lineId: Line.ID, modifierIds: [String]) {
         guard let index = lines.firstIndex(where: { $0.id == lineId }) else { return }
         let old = lines[index]
+        lines.remove(at: index)
         if let mergeIndex = lines.firstIndex(where: {
-            $0.id != lineId && $0.item.id == old.item.id && $0.modifierIds == modifierIds
+            $0.item.id == old.item.id && $0.modifierIds == modifierIds
         }) {
             lines[mergeIndex].quantity += old.quantity
-            lines.remove(at: index)
         } else {
-            lines[index] = Line(item: old.item, quantity: old.quantity, modifierIds: modifierIds)
+            lines.insert(Line(item: old.item, quantity: old.quantity, modifierIds: modifierIds), at: index)
         }
     }
 

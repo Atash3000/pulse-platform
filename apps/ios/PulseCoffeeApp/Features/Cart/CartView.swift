@@ -266,4 +266,6 @@ private struct UpsellRow: View {
     return CartView(locationId: "loc", foodItems: [])
         .environmentObject(cart)
         .environmentObject(AppState())
+        .environmentObject(FavoritesStore())
+        .environmentObject(TabBarVisibility())
 }

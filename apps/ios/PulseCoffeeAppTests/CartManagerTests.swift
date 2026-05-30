@@ -250,4 +250,17 @@ final class CartManagerTests: XCTestCase {
         XCTAssertEqual(cart.lines[0].modifierIds, ["oat"])
         XCTAssertEqual(cart.lines[0].quantity, 2)
     }
+
+    func test_updateLine_mergesIntoForwardLine_whenEditedLinePrecedesTarget() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])    // index 0 — edited
+        cart.add(item: item, quantity: 1, modifierIds: ["whole"])  // index 1 — collision target
+        let editedId = cart.lines[0].id
+        cart.updateLine(lineId: editedId, modifierIds: ["whole"])  // mergeIndex(1) > index(0)
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+        XCTAssertEqual(cart.lines[0].quantity, 3)
+    }
 }
