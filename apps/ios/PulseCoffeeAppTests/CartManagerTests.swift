@@ -201,4 +201,44 @@ final class CartManagerTests: XCTestCase {
         XCTAssertEqual(cart.lines.count, 2)
         XCTAssertEqual(cart.totalItemCount, 3)
     }
+
+    // MARK: - updateLine
+
+    @MainActor
+    func test_updateLine_changesModifiers_preservingQuantity() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 3, modifierIds: ["oat"])
+        let id = cart.lines[0].id
+        cart.updateLine(lineId: id, modifierIds: ["whole"])
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+        XCTAssertEqual(cart.lines[0].quantity, 3)
+    }
+
+    @MainActor
+    func test_updateLine_mergesIntoCollidingLine() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 1, modifierIds: ["whole"])   // line A
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])     // line B
+        let bId = cart.lines[1].id
+        cart.updateLine(lineId: bId, modifierIds: ["whole"])        // B now matches A → merge
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].quantity, 3)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+    }
+
+    @MainActor
+    func test_updateLine_unknownId_isNoOp() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 1, modifierIds: [])
+        cart.updateLine(lineId: UUID(), modifierIds: ["x"])
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, [])
+    }
 }
