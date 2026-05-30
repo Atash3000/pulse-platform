@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse Coffee — Cart (consolidated, v9-informed)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #f6f1e8; --bg-deep: #ede5d3; --bg-warm: #fdf6e8;
+    --ink: #1f1a14; --ink-soft: #6e6354; --ink-faint: #a8a08f;
+    --paper-warm: #fdfaf3; --accent: #6b8e3d; --accent-warm: #c2410c;
+    --hot: #c2410c; --iced: #4a7a9e; --line: rgba(31,26,20,0.07);
+  }
+  html, body { background: #2a2520; color: var(--ink); font-family: 'Inter', -apple-system, sans-serif; overflow-x: hidden; min-height: 100vh; -webkit-font-smoothing: antialiased; padding: 30px 0 70px; }
+  .header-banner { text-align: center; color: #f0e6d3; padding: 0 20px 28px; max-width: 1200px; margin: 0 auto; }
+  .banner-title { font-family: 'Instrument Serif', serif; font-size: 32px; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .banner-sub { font-size: 13px; opacity: 0.6; }
+  .screens { display: flex; gap: 40px; padding: 0 16px; overflow-x: auto; align-items: flex-start; }
+  .phone-wrap { flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .phone-label { color: #f0e6d3; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 12px; border-radius: 100px; background: rgba(107,142,61,0.22); color: #b8d695; }
+  .phone-label.alt { background: rgba(168,140,80,0.2); color: #e8c98b; }
+  .phone-caption { color: #c8c0b0; font-size: 12px; text-align: center; max-width: 380px; line-height: 1.5; }
+  .phone { flex-shrink: 0; width: 390px; height: 844px; background: var(--bg); border-radius: 44px; box-shadow: 0 30px 60px -20px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .phone::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 100% 60% at 50% -20%, rgba(255,235,180,0.2) 0%, transparent 70%); pointer-events: none; z-index: 1; }
+  .phone-content { flex: 1; overflow-y: auto; position: relative; z-index: 2; }
+  .phone-content::-webkit-scrollbar { display: none; }
+
+  .status { padding: 14px 28px 0; display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+  .status-right { display: flex; align-items: center; gap: 5px; }
+  .topbar { padding: 22px 24px 0; display: flex; justify-content: space-between; align-items: center; }
+  .nav-back { font-size: 15px; color: var(--ink-soft); cursor: pointer; font-weight: 500; }
+
+  .page-head { padding: 18px 24px 0; }
+  .page-title { font-family: 'Instrument Serif', serif; font-size: 38px; line-height: 1; letter-spacing: -0.025em; margin-bottom: 8px; }
+  .page-sub { font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .page-sub .dot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 0 4px rgba(107,142,61,0.14); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
+
+  /* drink cup symbols (v9) — larger, drop-shadowed, layered identity */
+  .drink-cup { position: relative; border-radius: 6px 6px 22px 22px; overflow: hidden; }
+  .drink-cup .layer { position: absolute; left: 0; right: 0; }
+  .ginger-matcha .layer.top { top: 0; height: 33%; background: #6b8e3d; }
+  .ginger-matcha .layer.mid { top: 33%; height: 33%; background: #fdf6e8; }
+  .ginger-matcha .layer.bot { bottom: 0; height: 34%; background: #d4912f; }
+  .strawberry-matcha .layer.top { top: 0; height: 33%; background: #6b8e3d; }
+  .strawberry-matcha .layer.mid { top: 33%; height: 33%; background: #f5e6d3; }
+  .strawberry-matcha .layer.bot { bottom: 0; height: 34%; background: #c8556d; }
+  .cappuccino-cup { background: linear-gradient(180deg, #f5ddc4 0%, #d4a574 25%, #6b3a1e 55%, #4a2611 100%); }
+  .item-cup { width: 74px; height: 100px; flex-shrink: 0; filter: drop-shadow(0 10px 16px rgba(31,26,20,0.18)); }
+
+  /* cart item */
+  .items-list { padding: 20px 16px 0; }
+  .cart-item { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; padding: 14px 4px 16px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .cart-item.last { border-bottom: none; }
+  .item-info { min-width: 0; padding-top: 2px; }
+  .usual { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 5px; }
+  .usual svg { width: 11px; height: 11px; color: var(--accent); }
+  .item-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px; }
+  .item-temp-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .temp-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px 3px 7px; border-radius: 100px; font-size: 11px; font-weight: 700; }
+  .temp-pill svg { width: 12px; height: 12px; }
+  .temp-pill.iced { background: rgba(74,122,158,0.13); color: var(--iced); }
+  .temp-pill.hot  { background: rgba(194,65,12,0.13); color: var(--hot); }
+  .item-modifiers { font-size: 12.5px; color: var(--ink-soft); line-height: 1.4; }
+  .item-extra { color: var(--accent); font-size: 12.5px; font-weight: 500; margin-top: 2px; }
+  .item-edit-row { display: flex; gap: 14px; margin-top: 9px; }
+  .item-edit { font-size: 12.5px; color: var(--ink); background: none; border: none; cursor: pointer; font-weight: 600; text-decoration: underline; text-decoration-color: var(--ink-faint); text-underline-offset: 3px; }
+  .item-remove-after { font-size: 12.5px; color: var(--ink-faint); background: none; border: none; cursor: pointer; font-weight: 500; }
+  .item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+  .item-price { font-size: 17px; font-weight: 700; }
+  /* qty: single + when qty=1; full stepper only when >1 */
+  .qty-compact { width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--bg-warm); border: none; font-size: 17px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .qty-full { display: inline-flex; align-items: center; background: var(--paper-warm); border: 1px solid var(--line); border-radius: 100px; padding: 4px 6px; gap: 10px; }
+  .qty-btn { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--ink); font-size: 16px; cursor: pointer; }
+  .qty-num { font-size: 13px; font-weight: 600; min-width: 12px; text-align: center; }
+
+  /* smart upsell */
+  .upsell { margin: 16px 16px 14px; padding: 12px 14px; background: var(--paper-warm); border-radius: 16px; border: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  .upsell-visual { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+  .upsell-visual.khachapuri { background: linear-gradient(135deg, #fae8c8 0%, #b8854a 100%); }
+  .upsell-info { flex: 1; min-width: 0; }
+  .upsell-title { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+  .upsell-sub { font-size: 11.5px; color: var(--ink-soft); }
+  .upsell-add { width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--bg-warm); border: none; font-size: 16px; cursor: pointer; flex-shrink: 0; }
+
+  /* loyalty — forward-looking two-segment bar */
+  .loyalty { margin: 6px 16px 14px; padding: 14px 16px; background: var(--paper-warm); border-radius: 14px; border: 1px solid var(--line); }
+  .loyalty-eyebrow { font-size: 10px; color: var(--accent-warm); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; margin-bottom: 4px; }
+  .loyalty-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .loyalty-label { font-size: 12.5px; font-weight: 600; }
+  .loyalty-count { font-size: 11px; color: var(--ink-soft); }
+  .loyalty-track { position: relative; width: 100%; height: 6px; background: rgba(31,26,20,0.08); border-radius: 100px; margin-top: 9px; }
+  .loyalty-now { position: absolute; left: 0; top: 0; height: 100%; width: 60%; background: var(--ink-faint); border-radius: 100px; }
+  .loyalty-gain { position: absolute; left: 60%; top: 0; height: 100%; width: 20%; background: var(--accent); border-radius: 0 100px 100px 0; animation: gain 1.6s ease-in-out infinite; }
+  @keyframes gain { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+  /* summary */
+  .summary { padding: 6px 24px 14px; }
+  .summary-row { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; font-size: 14px; }
+  .summary-row .label { color: var(--ink-soft); }
+  .summary-row .value { color: var(--ink); font-weight: 600; }
+  .tax-disclaimer { font-size: 11px; color: var(--ink-faint); margin-top: 8px; line-height: 1.4; }
+
+  /* Apple Pay-first checkout */
+  .apple-pay-btn { margin: 6px 16px 8px; width: calc(100% - 32px); background: #000; color: #fff; border: none; padding: 17px 22px; border-radius: 16px; font-size: 18px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: space-between; letter-spacing: -0.01em; }
+  .apple-pay-btn .pay-left { display: flex; align-items: center; gap: 8px; }
+  .apple-pay-btn svg { width: 16px; height: 20px; }
+  .other-payment { text-align: center; margin: 0 16px 4px; font-size: 13px; color: var(--ink-soft); cursor: pointer; padding: 8px; font-weight: 500; }
+
+  /* empty cart (v9 rich) */
+  .empty-cart { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 40px 32px; text-align: center; }
+  .empty-title { font-family: 'Instrument Serif', serif; font-style: italic; font-size: 34px; line-height: 1.05; margin-bottom: 14px; letter-spacing: -0.02em; }
+  .empty-sub { font-size: 15px; color: var(--ink-soft); line-height: 1.5; margin-bottom: 32px; max-width: 280px; }
+  .empty-sub b { color: var(--ink); font-weight: 600; }
+  .empty-card { background: var(--paper-warm); border: 1px solid var(--line); border-radius: 22px; padding: 22px; width: 100%; max-width: 300px; margin-bottom: 16px; }
+  .empty-drink-wrap { display: flex; justify-content: center; margin-bottom: 14px; }
+  .empty-drink { width: 70px; height: 110px; filter: drop-shadow(0 12px 20px rgba(31,26,20,0.15)); }
+  .empty-card-eyebrow { font-size: 10px; color: var(--accent-warm); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; margin-bottom: 4px; }
+  .empty-card-name { font-family: 'Instrument Serif', serif; font-size: 22px; line-height: 1; margin-bottom: 6px; }
+  .empty-card-name em { font-style: italic; }
+  .empty-card-desc { font-size: 12px; color: var(--ink-soft); margin-bottom: 16px; }
+  .empty-reorder-btn { width: 100%; background: var(--ink); color: #fff; border: none; padding: 14px; border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .empty-browse { margin-top: 10px; background: none; border: none; color: var(--ink-soft); font-size: 13px; cursor: pointer; font-weight: 500; padding: 8px; }
+
+  /* entry-points frame (cart icon + floating view-order bar) */
+  .logo-row { display: flex; align-items: center; gap: 8px; }
+  .logo-dot { width: 10px; height: 10px; background: var(--accent-warm); border-radius: 50%; }
+  .logo-text { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+  .cart-btn { position: relative; width: 38px; height: 38px; border-radius: 50%; background: var(--paper-warm); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--ink); cursor: pointer; }
+  .cart-btn .badge { position: absolute; top: -4px; right: -4px; background: var(--accent-warm); color: #fff; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 100px; padding: 0 4px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
+  .menu-h { padding: 16px 24px 4px; } .menu-h .t { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; } .menu-h .s { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .fake-card { margin: 10px 24px; height: 92px; border-radius: 18px; background: var(--paper-warm); border: 1px solid var(--line); } .fake-card.tall { height: 150px; }
+  .view-order { position: absolute; left: 16px; right: 16px; bottom: 92px; background: var(--ink); color: var(--bg-warm); border-radius: 16px; padding: 14px 18px; display: flex; align-items: center; gap: 12px; box-shadow: 0 14px 30px -10px rgba(31,26,20,0.5); z-index: 40; cursor: pointer; }
+  .vo-count { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .vo-txt { flex: 1; font-size: 14px; font-weight: 600; } .vo-txt small { display: block; font-weight: 500; opacity: 0.6; font-size: 11px; }
+  .bottom-nav { position: absolute; bottom: 0; left: 0; right: 0; height: 80px; background: rgba(246,241,232,0.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-around; padding: 8px 12px 24px; z-index: 50; }
+  .nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; position: relative; }
+  .nav-item .nav-icon { color: var(--ink-faint); } .nav-item .nav-label { font-size: 10px; font-weight: 600; color: var(--ink-faint); }
+  .nav-item.active .nav-icon, .nav-item.active .nav-label { color: var(--ink); }
+  .nav-item .nbadge { position: absolute; top: 0; right: 2px; background: var(--accent-warm); color: #fff; font-size: 9px; font-weight: 700; min-width: 14px; height: 14px; border-radius: 100px; padding: 0 4px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
+  .iconlab { max-width: 1200px; margin: 36px auto 0; }
+  .iconlab h2 { font-family: 'Instrument Serif', serif; font-size: 24px; font-weight: 400; color: #efe7d8; margin-bottom: 14px; }
+  .ic-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .ic { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 9px; width: 150px; }
+  .ic.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .ic .glyph { width: 46px; height: 46px; border-radius: 50%; background: var(--paper-warm); display: flex; align-items: center; justify-content: center; color: var(--ink); position: relative; }
+  .ic .glyph .b { position: absolute; top: -3px; right: -3px; background: var(--accent-warm); color: #fff; font-size: 9px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 100px; display: flex; align-items: center; justify-content: center; border: 2px solid #2a2520; }
+  .ic .lab { font-size: 12.5px; font-weight: 600; color: #e8e0d2; } .ic .tag { font-size: 10.5px; color: #b8ad9b; text-align: center; } .ic.pick .tag { color: var(--accent); font-weight: 600; }
+  .note { max-width: 1200px; margin: 36px auto 0; color: #d9d0c0; font-size: 14px; line-height: 1.7; }
+  .note h2 { font-family: 'Instrument Serif', serif; font-size: 24px; font-weight: 400; color: #efe7d8; margin-bottom: 10px; }
+  .note ul { margin: 8px 0 0 18px; } .note li { margin: 6px 0; }
+  .note code { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="header-banner">
+  <div class="banner-title">Pulse Coffee — Cart (consolidated)</div>
+  <div class="banner-sub">v9 improvements applied + cart entry-points. Scroll right →</div>
+</div>
+
+<div class="screens">
+
+  <!-- FRAME 1: YOUR ORDER -->
+  <div class="phone-wrap">
+    <div class="phone-label">Your order</div>
+    <div class="phone">
+      <div class="phone-content">
+        <div class="status">
+          <span>9:41</span>
+          <div class="status-right">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="0.5"/><rect x="5" y="6" width="3" height="6" rx="0.5"/><rect x="10" y="3" width="3" height="9" rx="0.5"/><rect x="15" y="0" width="3" height="12" rx="0.5"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/><rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/></svg>
+          </div>
+        </div>
+        <div class="topbar"><div class="nav-back">‹ Menu</div><div style="width:34px;"></div></div>
+        <div class="page-head">
+          <div class="page-title">Your order</div>
+          <div class="page-sub"><span class="dot"></span><span>2 drinks · ready in ~6 min</span></div>
+        </div>
+
+        <div class="items-list">
+          <!-- Ginger Matcha -->
+          <div class="cart-item">
+            <div class="drink-cup ginger-matcha item-cup"><div class="layer top"></div><div class="layer mid"></div><div class="layer bot"></div></div>
+            <div class="item-info">
+              <div class="usual"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Your usual</div>
+              <div class="item-name">Ginger Matcha</div>
+              <div class="item-temp-row">
+                <span class="temp-pill iced"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>Iced</span>
+              </div>
+              <div class="item-modifiers">16 oz · Oat · Half sweet</div>
+              <div class="item-extra">+ Matcha shot</div>
+              <div class="item-edit-row"><button class="item-edit">Edit drink</button><button class="item-remove-after">Remove</button></div>
+            </div>
+            <div class="item-right"><div class="item-price">$8.10</div><button class="qty-compact" aria-label="Add another">+</button></div>
+          </div>
+          <!-- Cappuccino -->
+          <div class="cart-item last">
+            <div class="drink-cup cappuccino-cup item-cup"></div>
+            <div class="item-info">
+              <div class="item-name">Cappuccino</div>
+              <div class="item-temp-row">
+                <span class="temp-pill hot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.4-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 002.5 2.5z"/></svg>Hot</span>
+              </div>
+              <div class="item-modifiers">12 oz · Whole</div>
+              <div class="item-edit-row"><button class="item-edit">Edit drink</button><button class="item-remove-after">Remove</button></div>
+            </div>
+            <div class="item-right"><div class="item-price">$5.25</div><button class="qty-compact" aria-label="Add another">+</button></div>
+          </div>
+        </div>
+
+        <!-- smart upsell: matcha in cart → khachapuri -->
+        <div class="upsell">
+          <div class="upsell-visual khachapuri">🫓</div>
+          <div class="upsell-info"><div class="upsell-title">Perfect with mini khachapuri</div><div class="upsell-sub">Georgian cheese bread · $8.00</div></div>
+          <button class="upsell-add" aria-label="Add khachapuri">+</button>
+        </div>
+
+        <!-- forward-looking loyalty -->
+        <div class="loyalty">
+          <div class="loyalty-eyebrow">After this order</div>
+          <div class="loyalty-row"><span class="loyalty-label">8 of 10 drinks</span><span class="loyalty-count">2 to your next free</span></div>
+          <div class="loyalty-track"><div class="loyalty-now"></div><div class="loyalty-gain"></div></div>
+        </div>
+
+        <div class="summary">
+          <div class="summary-row"><span class="label">Subtotal (est.)</span><span class="value">$13.35</span></div>
+          <div class="summary-row"><span class="label">Pickup · Park Slope</span><span class="value">Today</span></div>
+          <div class="tax-disclaimer">Tax &amp; final total calculated securely at checkout.</div>
+        </div>
+
+        <button class="apple-pay-btn">
+          <span class="pay-left"><svg viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg> Pay</span>
+          <span style="font-weight:700;">$13.35</span>
+        </button>
+        <div class="other-payment">Other payment methods</div>
+      </div>
+    </div>
+    <div class="phone-caption"><b>v9 applied:</b> larger drinks · single “+” at qty 1 · Edit drink action · smart upsell · forward loyalty · Apple&nbsp;Pay first · location shown once</div>
+  </div>
+
+  <!-- FRAME 2: EMPTY -->
+  <div class="phone-wrap">
+    <div class="phone-label">Empty</div>
+    <div class="phone">
+      <div class="phone-content" style="display:flex;flex-direction:column;">
+        <div class="status"><span>9:41</span><div class="status-right"><svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="0.5"/><rect x="5" y="6" width="3" height="6" rx="0.5"/><rect x="10" y="3" width="3" height="9" rx="0.5"/><rect x="15" y="0" width="3" height="12" rx="0.5"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/><rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/></svg></div></div>
+        <div class="topbar"><div class="nav-back">‹ Menu</div><div style="width:34px;"></div></div>
+        <div class="empty-cart">
+          <div class="empty-title">Nothing here yet.</div>
+          <div class="empty-sub">Your usual <b>Strawberry Matcha</b><br>is waiting for you.</div>
+          <div class="empty-card">
+            <div class="empty-drink-wrap"><div class="drink-cup strawberry-matcha empty-drink"><div class="layer top"></div><div class="layer mid"></div><div class="layer bot"></div></div></div>
+            <div class="empty-card-eyebrow">Your usual</div>
+            <div class="empty-card-name">Strawberry <em>Matcha</em></div>
+            <div class="empty-card-desc">16 oz · Oat milk · Light ice · $6.45</div>
+            <button class="empty-reorder-btn">Reorder<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button>
+          </div>
+          <button class="empty-browse">or browse the menu →</button>
+        </div>
+      </div>
+    </div>
+    <div class="phone-caption"><b>From v9:</b> warm voice + one-tap reorder of the actual usual drink (needs order history; gated on backend).</div>
+  </div>
+
+  <!-- FRAME 3: CART ENTRY POINTS (my addition — not in v9) -->
+  <div class="phone-wrap">
+    <div class="phone-label alt">Cart entry points</div>
+    <div class="phone">
+      <div class="phone-content">
+        <div class="status"><span>9:41</span><div class="status-right"><svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="0.5"/><rect x="5" y="6" width="3" height="6" rx="0.5"/><rect x="10" y="3" width="3" height="9" rx="0.5"/><rect x="15" y="0" width="3" height="12" rx="0.5"/></svg><svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.5" y="0.5" width="21" height="11" rx="2.5" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="14" height="8" rx="1" fill="currentColor"/><rect x="23" y="4" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/></svg></div></div>
+        <div class="topbar">
+          <div class="logo-row"><span class="logo-dot"></span><span class="logo-text">Pulse Coffee</span></div>
+          <div class="cart-btn" aria-label="Your order, 2 items">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1 12.2a2 2 0 0 1-2 1.8H8a2 2 0 0 1-2-1.8L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>
+            <span class="badge">2</span>
+          </div>
+        </div>
+        <div class="menu-h"><div class="t">Menu</div><div class="s">Matcha line · Classic coffee · Food</div></div>
+        <div class="fake-card tall"></div><div class="fake-card"></div><div class="fake-card"></div>
+        <div class="view-order"><span class="vo-count">2</span><span class="vo-txt">View order<small>Ginger Matcha, Cappuccino</small></span><span style="font-weight:600;">$13.35 ›</span></div>
+        <div class="bottom-nav">
+          <div class="nav-item active"><svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><span class="nav-label">Home</span></div>
+          <div class="nav-item"><svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg><span class="nav-label">Menu</span></div>
+          <div class="nav-item"><svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg><span class="nav-label">Orders</span><span class="nbadge">2</span></div>
+          <div class="nav-item"><svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg><span class="nav-label">Rewards</span></div>
+          <div class="nav-item"><svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="nav-label">Account</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-caption"><b>Cart entry:</b> top-right bag icon (count badge) + a floating “View order” bar when items exist. Not a bottom-nav tab.</div>
+  </div>
+
+</div>
+
+<div class="iconlab">
+  <h2>Cart icon — options (badge = item count)</h2>
+  <div class="ic-row">
+    <div class="ic pick"><div class="glyph"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1 12.2a2 2 0 0 1-2 1.8H8a2 2 0 0 1-2-1.8L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg><span class="b">2</span></div><div class="lab">Takeaway bag</div><div class="tag">✓ Recommended — “your order”, distinct from Orders tab</div></div>
+    <div class="ic"><div class="glyph"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l-1.1 12.2a2 2 0 0 1-2 1.8H9.1a2 2 0 0 1-2-1.8L6 8z"/><path d="M6.6 8l1-4h8.8l1 4"/></svg><span class="b">2</span></div><div class="lab">Cup</div><div class="tag">On-brand but reads as “a drink”</div></div>
+    <div class="ic"><div class="glyph"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg><span class="b">2</span></div><div class="lab">Cart (trolley)</div><div class="tag">Generic grocery feel</div></div>
+    <div class="ic"><div class="glyph"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 11l1.5-7h10l1.5 7"/><path d="M3 11h18l-1.4 8.2a2 2 0 0 1-2 1.8H6.4a2 2 0 0 1-2-1.8z"/></svg><span class="b">2</span></div><div class="lab">Basket</div><div class="tag">Heavier silhouette</div></div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>What I took from v9 (and reconciled)</h2>
+  <ul>
+    <li><strong>Larger, drop-shadowed layered drink cups</strong> (74×100) — premium, craveable, keeps the matcha layering as brand identity.</li>
+    <li><strong>Quantity simplified</strong> — a single ink “+” when qty = 1; the full −/+ stepper only appears once qty &gt; 1. Removes the always-on “stepper noise”.</li>
+    <li><strong>Explicit “Edit drink”</strong> text action (+ quiet “Remove”) under each line → reopens the configurator prefilled.</li>
+    <li><strong>Smart upsell</strong> — matcha in cart suggests <em>mini khachapuri</em>, not a generic croissant.</li>
+    <li><strong>Forward-looking loyalty</strong> — “After this order · 8 of 10 · 2 to next free”, with a two-segment bar (current vs the gain this order earns).</li>
+    <li><strong>Apple Pay-first</strong> checkout + “Other payment methods”.</li>
+    <li><strong>Rich empty state</strong> — the actual usual drink on a card with one-tap Reorder.</li>
+    <li><strong>Location once</strong> (pickup row only); SVG flame/snowflake temp pills instead of emoji (per the no-emoji-icons rule).</li>
+  </ul>
+  <h2>Two reconciliation calls (your earlier brief vs v9)</h2>
+  <ul>
+    <li><strong>Title:</strong> kept v9’s “Your order” (ETA in the sub). Your earlier brief #1 wanted <em>“Ready in ~6 min”</em> as the hero — say the word and I’ll promote it.</li>
+    <li><strong>“Your usual” badge on the matcha line:</strong> v9 didn’t include it; your brief #6 did, so I kept a quiet version. Easy to drop if you prefer v9’s cleaner line.</li>
+  </ul>
+  <p style="margin-top:12px;color:#b8ad9b;">Reminder: “Your usual”, prefill-on-edit, and reorder all depend on <strong>order-history data</strong> iOS doesn’t have yet — the mockup shows the target; backend has to catch up.</p>
+</div>
+
+</body>
+</html>
