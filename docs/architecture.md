@@ -111,7 +111,7 @@ menu:v3:item:{itemId}          STRING  JSON of one item with mods    TTL 600s
 menu:v3:items:loc:{locationId} SET     item ids cached for that loc   TTL 600s
 ```
 
-The `v<N>` segment is the cached-payload shape version. Bump it (`apps/api/src/modules/menu/menu.cache.ts`) any time `PublicMenu` / `PublicMenuItem` adds, removes, or renames a field; previous-version blobs become unreachable on read and expire on their own TTL. v2 landed with the menu-presentation-fields rollout (`display_style`, `temperature`, `featured`, `art_token`).
+The `v<N>` segment is the cached-payload shape version. Bump it (`apps/api/src/modules/menu/menu.cache.ts`) any time `PublicMenu` / `PublicMenuItem` adds, removes, or renames a field; previous-version blobs become unreachable on read and expire on their own TTL. v2 landed with the menu-presentation-fields rollout (`display_style`, `temperature`, `featured`, `art_token`). v3 landed with the product-detail-v2 work (`badge_type` added to `PublicMenuItem`).
 
 **Read path:**
 

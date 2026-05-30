@@ -38,7 +38,7 @@ const item = (overrides: Partial<MenuItem> = {}): MenuItem =>
     temperature: overrides.temperature ?? Temperature.ICED,
     featured: overrides.featured ?? true,
     art_token: overrides.art_token ?? 'strawberry-matcha',
-    badge_type: overrides.badge_type ?? 'signature',
+    badge_type: overrides.badge_type !== undefined ? overrides.badge_type : 'signature',
   }) as unknown as MenuItem;
 
 // Convenience: a query-builder mock that returns a fixed list for getMany().
@@ -146,11 +146,7 @@ describe('MenuService — v4 presentation fields', () => {
         setItem: jest.fn().mockResolvedValue(undefined),
       };
 
-      // Build the null-badge item by spreading the default fixture and then
-      // explicitly overriding badge_type to null. We cannot pass null through
-      // item({ badge_type: null }) because the fixture uses `??` which treats
-      // null as nullish and substitutes the 'signature' default.
-      const nullItem = { ...item(), badge_type: null } as unknown as MenuItem;
+      const nullItem = item({ badge_type: null });
 
       const moduleRef = await Test.createTestingModule({
         providers: [
