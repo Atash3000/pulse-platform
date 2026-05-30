@@ -47,7 +47,7 @@ struct MenuView: View {
                 set: { presented in if !presented { detailItem = nil } }
             )) {
                 if let item = detailItem {
-                    ItemDetailView(item: item)
+                    ItemDetailView(item: item, pairings: ItemPairings.resolve(for: item, in: allLoadedItems))
                 }
             }
         }
@@ -77,6 +77,13 @@ struct MenuView: View {
         .padding(.horizontal, 24)
         .padding(.top, 12)
         .padding(.bottom, 8)
+    }
+
+    /// Every item across all loaded categories — the pool ItemPairings
+    /// matches pair-with suggestions against (spec §5.5).
+    private var allLoadedItems: [MenuItem] {
+        guard let menu = viewModel.filteredMenu else { return [] }
+        return menu.categories.flatMap(\.items)
     }
 
     /// Location name string for the topbar. Falls back to "Pulse Coffee"
