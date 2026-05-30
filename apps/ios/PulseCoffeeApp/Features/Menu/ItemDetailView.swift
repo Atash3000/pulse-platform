@@ -50,6 +50,9 @@ struct ItemDetailView: View {
             }
         }
         .onAppear { tabBarVisibility.isHidden = true }   // focused mode (spec §5.7)
+        // Appear/disappear is symmetric for NavigationStack push/pop; tabs can't be
+        // switched while detail is up because the bar is hidden. Any stray system-overlay
+        // disappear self-corrects on the next navigation push.
         .onDisappear { tabBarVisibility.isHidden = false }
     }
 
@@ -59,9 +62,7 @@ struct ItemDetailView: View {
         VStack(spacing: 10) {
             DrinkArt(token: item.artToken, size: 200)   // ~2× the v1 size
                 .padding(.top, 4)
-            if item.badgeType != nil {
-                ItemBadge(badgeType: item.badgeType)
-            }
+            ItemBadge(badgeType: item.badgeType)
             Text(item.name)
                 .font(.system(size: 30, weight: .regular, design: .serif))
                 .multilineTextAlignment(.center)

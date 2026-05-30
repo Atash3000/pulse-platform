@@ -251,4 +251,5 @@ struct MenuView: View {
     MenuView()
         .environmentObject(AppState())
         .environmentObject(CartManager())
+        .environmentObject(FavoritesStore())
 }

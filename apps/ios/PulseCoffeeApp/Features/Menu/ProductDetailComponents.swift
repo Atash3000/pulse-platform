@@ -68,7 +68,8 @@ struct ReadyPill: View {
 struct ItemBadge: View {
     let badgeType: String?
 
-    private var label: String? {
+    /// Maps the badge type string to its display label. Internal for testability (GR#17 fail-safe).
+    var label: String? {
         switch badgeType {
         case "signature": return "Signature"
         case "staff_pick": return "Staff Pick"

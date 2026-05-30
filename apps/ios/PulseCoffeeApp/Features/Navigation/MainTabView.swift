@@ -186,4 +186,5 @@ private struct PulseLayeredTabIcon: View {
     MainTabView()
         .environmentObject(AppState())
         .environmentObject(CartManager())
+        .environmentObject(FavoritesStore())
 }
