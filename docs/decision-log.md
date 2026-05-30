@@ -2738,3 +2738,27 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 
 **Trade-offs:** On a rolling deploy where pods A (old) and B (new) coexist briefly, requests routed to A populate `v1` and requests routed to B populate `v2` — both correct in isolation, no cross-contamination, but the cache hit rate is split during the window. Acceptable: the window is one deploy long, and the project's current Render setup is single-pod anyway. The version segment also needs to be kept in sync with operator-facing runbook docs (`docs/troubleshooting.md`, `docs/architecture.md`, `docs/glossary.md`) — flagged here so the next bump (v3, eventually) updates all four sites at once.
 
+---
+
+## 2026-05-29 — [api] Product Detail v2 modifier catalog + stale-option handling
+
+**Decision:** The Product Detail v2 seed rewrite makes four non-obvious choices:
+1. **No `is_default` column.** iOS resolves a required single-select group's default to the **cheapest option** (lowest `price_cents`, tie-break lowest `sort_order`), not the first by `sort_order`. So Milk renders `Oat` first (brief's display order) yet defaults to `Whole` (0¢) — a premium milk is never the default, and the detail screen opens at the same price the menu list shows.
+2. **Sweetness is `required` and matcha-only.** `Unsweetened`/`Regular` removed (matcha has intrinsic sweetness); `Full sweet`/`Half sweet` only, both 0¢, `Full sweet` default (`sort_order` 0). Required guarantees a fail-safe default (GR#17). Coffee drinks get no Sweetness group — they get syrups under Extras instead.
+3. **`EXTRAS_ESPRESSO` → `EXTRAS_COFFEE`.** Coffee keeps `Add espresso shot` (removing a live option is a regression) and gains `Vanilla`/`Caramel` (+50¢) and `Brown sugar` (+25¢). Group order is now Size → Milk → Sweetness → Extras (`sort_order` 0/1/2/3).
+4. **`badge_type` ships as plumbing only.** Nullable column, all items seeded `null`, exposed in `PublicMenuItem`, rendered monochrome on iOS only when present. No fake badges, no social-proof numbers.
+
+**Context:** The brief ("Product Detail Screen v2") asked for a 5-milk lineup with Oat shown first, matcha-only sweetness, coffee syrups, and an optional badge — while the v1 seed had 8 milks (free Whole default), all-drinks sweetness, and an espresso-shot-only Extras group.
+
+**Alternatives considered:**
+- *Add an `is_default` boolean to `Modifier`.* Rejected — the cheapest-option rule on iOS achieves the same result with zero schema change (GR#15). Revisit only if a paid option ever needs to be the default.
+- *Make the seed auto-delete options dropped from the catalog.* Rejected — see trade-offs; it would break the seed's documented "never overwrite operator state" guarantee.
+- *A DB `CHECK` constraint on `badge_type`.* Rejected — matches the existing text-enum columns (`temperature`, `display_style`) that validate in app code + decode fail-safe.
+
+**Reasoning:** Smallest change that satisfies the brief. All variability (which drink gets which groups) stays in `groupsForItem()`, so iOS is a generic renderer with near-zero per-drink conditionals.
+
+**Trade-offs — STALE MODIFIER DATA (the "redundant backend" hazard):** `seed:menu` is idempotent by **upsert**, not by **replace** — it never deletes groups/modifiers that exist in the DB but are absent from the new catalog (this protects operator-set sold-out flags; see the seed file header). So on a DB previously seeded with the v1 catalog, the dropped milks (`2%`, `Skim`, `Half & Half`, `Soy`) and sweetness options (`Regular`, `Unsweetened`) **linger as active rows and still render**. Handling:
+- **Dev:** clean re-seed — `docker compose down -v` → `migration:run` → `seed:dev` → `seed:menu`. (Documented in the seed file header and the v2 backend plan.)
+- **Prod-like / non-wipeable:** deactivate the obsolete modifiers manually (`active=false`), do not hard-delete (order history references them by snapshot, but the modifier rows should be retained for referential safety).
+- **Future, if this recurs:** a `cleanup-obsolete-modifiers.ts` script (mirroring `cleanup-duplicate-categories.ts`) that deactivates modifiers/groups not in the current catalog. **Deliberately not built now** — premature for a ~50-row dev catalog (§2.2 / GR#15).
+
