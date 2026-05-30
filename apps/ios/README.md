@@ -31,6 +31,8 @@ apps/ios/
 │   ├── ContentView.swift                root auth gate: Login ↔ MainTabView
 │   ├── PulseCoffeeApp.entitlements     push capability
 │   ├── Core/                            AppState, APIClient, Keychain, CartManager…
+│   │   ├── FavoritesStore.swift         local fail-safe favorites (UserDefaults), backend sync deferred
+│   │   └── TabBarVisibility.swift       focused-mode flag hiding the custom PulseTabBar (no system TabView → .toolbar(.hidden,for:.tabBar) is a no-op)
 │   ├── Features/
 │   │   ├── Auth/                        Sign-in + register
 │   │   ├── Navigation/                  MainTabView (bottom tab bar) — see folder README

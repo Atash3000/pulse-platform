@@ -74,6 +74,13 @@ targets:
       - path: PulseCoffeeApp
         excludes:
           - "Preview Content/**"
+          # In-repo per-feature README.md docs are not app resources.
+          # Without this, XcodeGen adds every README.md to Copy Bundle
+          # Resources; Features/Menu/README.md and Features/Navigation/README.md
+          # both flatten to App.app/README.md → "Multiple commands produce …"
+          # build failure. Excluding markdown keeps docs next to the code
+          # they document without shipping them in the bundle.
+          - "**/*.md"
       - path: PulseCoffeeApp/Preview Content
         buildPhase: resources
     dependencies:

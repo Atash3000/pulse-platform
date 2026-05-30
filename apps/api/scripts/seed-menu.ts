@@ -50,9 +50,9 @@
  * Three categories: Matcha (spotlight), Classic Coffee (list), Food
  * (list). Each item carries its temperature, featured flag, and an
  * opaque art_token the iOS app maps to a drawn abstract symbol.
- * Modifier groups (Size / Milk / Extras / Sweetness) are seeded per
+ * Modifier groups (Size / Milk / Sweetness / Extras) are seeded per
  * item — see Task 5 in
- * docs/superpowers/plans/2026-05-27-pulse-menu-v4-backend.md.
+ * docs/superpowers/plans/2026-05-29-product-detail-v2-backend.md.
  */
 
 import 'reflect-metadata';
@@ -106,9 +106,10 @@ interface SeedCategory {
 //
 // Sort order = the order the GROUPS render on the detail screen.
 // Within a group, modifiers render by their per-modifier sort_order.
-// For a required single-select group, iOS pre-selects the lowest
-// sort_order option as the default — keep the "Whole" / "12 oz" /
-// "Regular" options at sort_order 0 so the default is sensible.
+// For a required single-select group, iOS resolves the default to the
+// cheapest option (lowest price_cents, tie-break sort_order) — NOT
+// sort_order 0. So Milk renders Oat first (sort_order 0) yet defaults
+// to Whole (0¢). Size "12 oz" is both first and free, so it coincides.
 
 type GroupName = 'Size' | 'Milk' | 'Extras' | 'Sweetness';
 
@@ -140,41 +141,50 @@ const MILK: GroupSpec = {
   multi_select: false,
   sort_order: 1,
   modifiers: [
-    { name: 'Whole',       price_cents: 0,  sort_order: 0 },
-    { name: '2%',          price_cents: 0,  sort_order: 1 },
-    { name: 'Skim',        price_cents: 0,  sort_order: 2 },
-    { name: 'Half & Half', price_cents: 0,  sort_order: 3 },
-    { name: 'Oat',         price_cents: 75, sort_order: 4 },
-    { name: 'Almond',      price_cents: 75, sort_order: 5 },
-    { name: 'Coconut',     price_cents: 75, sort_order: 6 },
-    { name: 'Soy',         price_cents: 75, sort_order: 7 },
+    // Display order per brief: Oat first. Default resolves to the
+    // cheapest option (Whole, 0¢) on iOS, NOT the first by sort_order,
+    // so a premium milk is never the default (brief anti-requirement).
+    { name: 'Oat',       price_cents: 75,  sort_order: 0 },
+    { name: 'Whole',     price_cents: 0,   sort_order: 1 },
+    { name: 'Almond',    price_cents: 75,  sort_order: 2 },
+    { name: 'Coconut',   price_cents: 75,  sort_order: 3 },
+    { name: 'Pistachio', price_cents: 150, sort_order: 4 },
   ],
 };
 
 const SWEETNESS: GroupSpec = {
-  required: false,
+  // Matcha drinks only (see groupsForItem). Required so the screen
+  // always carries a definite, fail-safe sweetness (GR#17). Both
+  // options are 0¢; Full sweet is the default (sort_order 0). The old
+  // 'Unsweetened' / 'Regular' options are removed — matcha has
+  // intrinsic sweetness from the purée/syrup.
+  required: true,
   multi_select: false,
-  sort_order: 3,
+  sort_order: 2,
   modifiers: [
-    { name: 'Regular',     price_cents: 0, sort_order: 0 },
-    { name: 'Half',        price_cents: 0, sort_order: 1 },
-    { name: 'Unsweetened', price_cents: 0, sort_order: 2 },
+    { name: 'Full sweet', price_cents: 0, sort_order: 0 },
+    { name: 'Half sweet', price_cents: 0, sort_order: 1 },
   ],
 };
 
-const EXTRAS_ESPRESSO: GroupSpec = {
+const EXTRAS_COFFEE: GroupSpec = {
+  // Coffee drinks: keep the espresso shot (removing an existing option
+  // is a regression) and add syrups. Coffee has no Sweetness group.
   required: false,
   multi_select: true,
-  sort_order: 2,
+  sort_order: 3,
   modifiers: [
     { name: 'Add espresso shot', price_cents: 100, sort_order: 0 },
+    { name: 'Vanilla syrup',     price_cents: 50,  sort_order: 1 },
+    { name: 'Caramel syrup',     price_cents: 50,  sort_order: 2 },
+    { name: 'Brown sugar',       price_cents: 25,  sort_order: 3 },
   ],
 };
 
 const EXTRAS_MATCHA: GroupSpec = {
   required: false,
   multi_select: true,
-  sort_order: 2,
+  sort_order: 3,
   modifiers: [
     { name: 'Add matcha shot', price_cents: 100, sort_order: 0 },
   ],
@@ -184,8 +194,12 @@ const EXTRAS_MATCHA: GroupSpec = {
  * Resolves the modifier groups that apply to a given seed item.
  * - Size:      standard drinks only (excludes fixed-size Flat White, Cortado, Espresso).
  * - Milk:      milk drinks only (excludes Americano, Cold Brew, Espresso).
- * - Extras:    matcha drinks get the matcha-shot toggle, all other drinks get espresso-shot.
- * - Sweetness: all drinks.
+ * - Sweetness: matcha drinks only (Full sweet / Half sweet). Coffee drinks
+ *   have no Sweetness group — use syrups under Extras instead.
+ * - Extras:    matcha drinks get the matcha-shot toggle; coffee drinks get
+ *   the espresso shot + vanilla/caramel/brown-sugar syrups.
+ *
+ * Group order: Size(0) → Milk(1) → Sweetness(2) → Extras(3).
  *
  * Food items get NO modifier groups (no required choices → smart-add
  * via "+" works inline; see iOS spec §5.1).
@@ -197,11 +211,12 @@ function groupsForItem(seedCategoryName: string, seed: SeedItem): Array<{ name: 
   const BLACK = new Set(['Americano', 'Cold Brew', 'Espresso']);
   const isMatcha = seedCategoryName === 'Matcha';
 
+  // Brief group order: Size -> Milk -> Sweetness -> Extras.
   const groups: Array<{ name: GroupName; spec: GroupSpec }> = [];
   if (!FIXED_SIZE.has(seed.name)) groups.push({ name: 'Size', spec: SIZE_STANDARD });
   if (!BLACK.has(seed.name))      groups.push({ name: 'Milk', spec: MILK });
-  groups.push({ name: 'Extras',    spec: isMatcha ? EXTRAS_MATCHA : EXTRAS_ESPRESSO });
-  groups.push({ name: 'Sweetness', spec: SWEETNESS });
+  if (isMatcha)                   groups.push({ name: 'Sweetness', spec: SWEETNESS });
+  groups.push({ name: 'Extras', spec: isMatcha ? EXTRAS_MATCHA : EXTRAS_COFFEE });
   return groups;
 }
 
@@ -285,10 +300,10 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
     sort_order: 0,
     display_style: 'spotlight',
     items: [
-      { name: 'Strawberry Matcha', description: 'Matcha, oat milk, strawberry purée.', base_price_cents: 645, temperature: 'iced', featured: true,  art_token: 'strawberry-matcha' },
-      { name: 'Raspberry Matcha',  description: 'Matcha, oat milk, raspberry.',         base_price_cents: 645, temperature: 'iced', featured: false, art_token: 'raspberry-matcha' },
-      { name: 'Brown Sugar Matcha',description: 'Matcha, oat milk, brown sugar.',       base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'brown-sugar-matcha' },
-      { name: 'Ginger Matcha',     description: 'Matcha, oat milk, ginger.',            base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'ginger-matcha' },
+      { name: 'Strawberry Matcha', description: 'Ceremonial matcha, oat milk & strawberry purée', base_price_cents: 645, temperature: 'iced', featured: true,  art_token: 'strawberry-matcha' },
+      { name: 'Raspberry Matcha',  description: 'Ceremonial matcha, oat milk & raspberry',         base_price_cents: 645, temperature: 'iced', featured: false, art_token: 'raspberry-matcha' },
+      { name: 'Brown Sugar Matcha',description: 'Ceremonial matcha, oat milk & brown sugar',       base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'brown-sugar-matcha' },
+      { name: 'Ginger Matcha',     description: 'Ceremonial matcha, oat milk & fresh ginger',      base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'ginger-matcha' },
     ],
   },
   {
@@ -296,13 +311,13 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
     sort_order: 1,
     display_style: 'list',
     items: [
-      { name: 'Cappuccino', description: 'Double shot, steamed milk, foam crown.',    base_price_cents: 525, temperature: 'both', featured: false, art_token: 'cappuccino' },
-      { name: 'Latte',      description: 'Espresso, steamed milk, light foam.',       base_price_cents: 550, temperature: 'both', featured: false, art_token: 'latte' },
-      { name: 'Americano',  description: 'Two shots espresso, hot water.',            base_price_cents: 450, temperature: 'both', featured: false, art_token: 'americano' },
-      { name: 'Flat White', description: 'Double shot, microfoam. 8 oz.',             base_price_cents: 525, temperature: 'hot',  featured: false, art_token: 'flat-white' },
-      { name: 'Cortado',    description: 'Equal parts espresso and steamed milk. 8 oz.', base_price_cents: 475, temperature: 'hot',  featured: false, art_token: 'cortado' },
-      { name: 'Cold Brew',  description: '18-hour slow brew, smooth.',                base_price_cents: 550, temperature: 'iced', featured: false, art_token: 'cold-brew' },
-      { name: 'Espresso',   description: 'Double shot of our house blend. 4 oz.',     base_price_cents: 350, temperature: 'hot',  featured: false, art_token: 'espresso' },
+      { name: 'Cappuccino', description: 'Double espresso, steamed milk & velvet foam',  base_price_cents: 525, temperature: 'both', featured: false, art_token: 'cappuccino' },
+      { name: 'Latte',      description: 'Espresso, steamed milk & light foam',          base_price_cents: 550, temperature: 'both', featured: false, art_token: 'latte' },
+      { name: 'Americano',  description: 'Double espresso & hot water',                  base_price_cents: 450, temperature: 'both', featured: false, art_token: 'americano' },
+      { name: 'Flat White', description: 'Double ristretto & silky microfoam',           base_price_cents: 525, temperature: 'hot',  featured: false, art_token: 'flat-white' },
+      { name: 'Cortado',    description: 'Equal parts espresso & steamed milk',          base_price_cents: 475, temperature: 'hot',  featured: false, art_token: 'cortado' },
+      { name: 'Cold Brew',  description: '18-hour cold brew, single origin',             base_price_cents: 550, temperature: 'iced', featured: false, art_token: 'cold-brew' },
+      { name: 'Espresso',   description: 'House blend, double shot',                     base_price_cents: 350, temperature: 'hot',  featured: false, art_token: 'espresso' },
     ],
   },
   {
@@ -310,10 +325,10 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
     sort_order: 2,
     display_style: 'list',
     items: [
-      { name: 'Butter Croissant',  description: 'Flaky, French butter, warm.',           base_price_cents: 450, temperature: 'both', featured: false, art_token: 'croissant' },
-      { name: 'Mini Khachapuri',   description: 'Georgian cheese bread.',                base_price_cents: 800, temperature: 'both', featured: false, art_token: 'khachapuri' },
-      { name: 'Blueberry Muffin',  description: 'Fresh-baked, gluten-free option.',      base_price_cents: 375, temperature: 'both', featured: false, art_token: 'muffin' },
-      { name: 'Chocolate Cookie',  description: 'Dark chocolate, sea salt.',             base_price_cents: 325, temperature: 'both', featured: false, art_token: 'cookie' },
+      { name: 'Butter Croissant',  description: 'Flaky French butter, baked fresh',    base_price_cents: 450, temperature: 'both', featured: false, art_token: 'croissant' },
+      { name: 'Mini Khachapuri',   description: 'Georgian cheese bread, served warm',  base_price_cents: 800, temperature: 'both', featured: false, art_token: 'khachapuri' },
+      { name: 'Blueberry Muffin',  description: 'Fresh blueberries, gluten-free',      base_price_cents: 375, temperature: 'both', featured: false, art_token: 'muffin' },
+      { name: 'Chocolate Cookie',  description: 'Dark chocolate & sea salt',           base_price_cents: 325, temperature: 'both', featured: false, art_token: 'cookie' },
     ],
   },
 ];
