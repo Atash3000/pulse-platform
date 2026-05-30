@@ -98,8 +98,12 @@ struct ItemCustomization {
     /// True when every required group has at least one selection.
     var isSatisfied: Bool { firstUnsatisfiedGroupName == nil }
 
-    /// Flattened selected modifier IDs for `CartManager.add(...)`.
+    /// Flattened selected modifier IDs for `CartManager.add(...)` /
+    /// `updateLine(...)`. Sorted within each group so the array is canonical
+    /// — array-equality dedup in CartManager must compare stably (otherwise
+    /// editing a line with 2+ selected extras can spuriously create a
+    /// duplicate line instead of merging).
     var selectedModifierIds: [String] {
-        item.modifierGroups.flatMap { Array(selections[$0.id] ?? []) }
+        item.modifierGroups.flatMap { Array(selections[$0.id] ?? []).sorted() }
     }
 }

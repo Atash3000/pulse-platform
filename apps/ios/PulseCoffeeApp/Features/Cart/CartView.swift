@@ -34,6 +34,8 @@ struct CartView: View {
                         .accessibilityLabel("Close cart")
                 }
             }
+            // Two navigationDestination(isPresented:) registrations below are
+            // mutually exclusive by UX — only one push is active at a time.
             .navigationDestination(isPresented: $showCheckout) {
                 CheckoutView(cart: cart, appState: appState, locationId: locationId)
             }
