@@ -16,6 +16,7 @@ enum CartEstimate {
         return perUnit * line.quantity
     }
 
+    /// Sum of `lineEstimateCents` across all lines. Display only — never sent to the server.
     static func subtotalEstimateCents(_ lines: [CartManager.Line]) -> Int {
         lines.reduce(0) { $0 + lineEstimateCents($1) }
     }
