@@ -12,17 +12,19 @@ export const MENU_TTL_SECONDS = 600;
 // their own 10-min TTL. v2 bump landed with the menu-presentation-fields
 // rollout (display_style / temperature / featured / art_token) so that the
 // 10-min cache window after deploy doesn't serve pre-schema JSON.
-const FULL_KEY = (locationId: string) => `menu:v2:full:${locationId}`;
-const ITEM_KEY = (itemId: string) => `menu:v2:item:${itemId}`;
-const ITEMS_BY_LOC_KEY = (locationId: string) => `menu:v2:items:loc:${locationId}`;
+// v3 bump landed with the product-detail-v2 work (PublicMenuItem gains
+// badge_type) for the same reason.
+const FULL_KEY = (locationId: string) => `menu:v3:full:${locationId}`;
+const ITEM_KEY = (itemId: string) => `menu:v3:item:${itemId}`;
+const ITEMS_BY_LOC_KEY = (locationId: string) => `menu:v3:items:loc:${locationId}`;
 
 /**
  * Two-layer Redis cache for the public menu.
  *
- *   L1 — full menu blob:   menu:v2:full:{locationId}
- *   L2 — single item blob: menu:v2:item:{itemId}
+ *   L1 — full menu blob:   menu:v3:full:{locationId}
+ *   L2 — single item blob: menu:v3:item:{itemId}
  *
- * A SET at `menu:v2:items:loc:{locationId}` tracks which item-keys belong to
+ * A SET at `menu:v3:items:loc:{locationId}` tracks which item-keys belong to
  * which location, so invalidateMenu(locationId) can drop both layers cleanly
  * without resorting to SCAN. (SCAN is O(N over the whole keyspace) and would
  * stutter under load.)
