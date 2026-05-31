@@ -2792,3 +2792,14 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 
 **Trade-offs:** "Your Usual" is replaced by a static "Pulse recommends" line until order history exists; the ready-time is hardcoded `~4 min`; fixed-size oz labels are hardcoded on iOS. All three are recorded as seams in `docs/todo-endpoints.md`.
 
+---
+
+## 2026-05-30 — [api] Milk catalog reordered to Whole/Oat/Almond/2%/Skim/H&H (reverses v2)
+
+**Decision:** The milk modifier set is now Whole (0¢), Oat (75¢), Almond (75¢), 2% (0¢), Skim (0¢), Half & Half (0¢), in that curated `sort_order`. Coconut and Pistachio removed; 2%/Skim/Half & Half re-added.
+
+**Context:** Manager request for the milk display order on the cart/detail screens. This reverses the 2026-05-29 v2 milk decision (which removed 2%/Skim/H&H/Soy and added Coconut/Pistachio).
+
+**Reasoning:** Curated `sort_order` is the exact display order — iOS renders modifiers by `sort_order` with no runtime sort. Dairy options are 0¢; alt-milks (Oat/Almond) +75¢. Default stays the free Whole via the iOS cheapest-option rule.
+
+**Trade-offs:** `seed:menu` upserts and does NOT delete dropped options, so a dev DB seeded before this change keeps Coconut/Pistachio as active rows until a clean re-seed. The broader manager-manageable-modifiers design (shared catalog + admin API) and the temperature/ice options are specced separately in `docs/superpowers/specs/2026-05-30-drink-options-design.md` (§4–§5) and not built here.
