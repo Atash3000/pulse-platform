@@ -2803,3 +2803,15 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** Curated `sort_order` is the exact display order — iOS renders modifiers by `sort_order` with no runtime sort. Dairy options are 0¢; alt-milks (Oat/Almond) +75¢. Default stays the free Whole via the iOS cheapest-option rule.
 
 **Trade-offs:** `seed:menu` upserts and does NOT delete dropped options, so a dev DB seeded before this change keeps Coconut/Pistachio as active rows until a clean re-seed. The broader manager-manageable-modifiers design (shared catalog + admin API) and the temperature/ice options are specced separately in `docs/superpowers/specs/2026-05-30-drink-options-design.md` (§4–§5) and not built here.
+
+---
+
+## 2026-05-30 — [ios] Cart screen — display estimate outside CartManager; edit merges by config
+
+**Decision:** The cart's price estimate lives in a pure `CartEstimate` helper, NOT on `CartManager`. Editing a cart line (`CartManager.updateLine`) preserves the line's quantity and, if the new modifier set collides with another existing line, merges quantities into it (consistent with `add`'s dedupe).
+
+**Context:** Building the v4 cart screen. `CartManager` deliberately exposes no subtotal (Golden Rule #8). The cart needs a display estimate and an edit-drink flow.
+
+**Reasoning:** Keeping the estimate out of `CartManager` preserves the "cart holds no money math" rule — the estimate is display-only (same interpretation as the product-detail screen, already logged), and `CheckoutView` remains authoritative. Merge-on-edit avoids two identical lines after an edit.
+
+**Trade-offs:** Editing into a colliding config silently merges (the edited line's id disappears). Acceptable — the result is the cart the user intends. "Your usual" / reorder / loyalty-after-order remain deferred (no order-history backend).

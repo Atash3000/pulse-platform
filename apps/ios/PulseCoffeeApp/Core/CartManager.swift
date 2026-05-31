@@ -92,6 +92,23 @@ final class CartManager: ObservableObject {
         lines.removeAll { $0.id == lineId }
     }
 
+    /// Replaces a line's modifier set (for the edit-drink flow), preserving
+    /// its quantity. If the new config collides with another existing line
+    /// (same item + modifiers), merges quantities into that line and drops
+    /// this one — consistent with `add`'s dedupe.
+    func updateLine(lineId: Line.ID, modifierIds: [String]) {
+        guard let index = lines.firstIndex(where: { $0.id == lineId }) else { return }
+        let old = lines[index]
+        lines.remove(at: index)
+        if let mergeIndex = lines.firstIndex(where: {
+            $0.item.id == old.item.id && $0.modifierIds == modifierIds
+        }) {
+            lines[mergeIndex].quantity += old.quantity
+        } else {
+            lines.insert(Line(item: old.item, quantity: old.quantity, modifierIds: modifierIds), at: index)
+        }
+    }
+
     /// Clears the cart. Called after a successful checkout completes.
     func clear() {
         lines.removeAll()

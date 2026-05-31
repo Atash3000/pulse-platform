@@ -34,9 +34,9 @@ struct MenuView: View {
             }
             .sheet(isPresented: $showCart) {
                 if case .loaded(let location, _) = viewModel.state {
-                    CartView(locationId: location.id)
+                    CartView(locationId: location.id, foodItems: allLoadedItems)
                 } else {
-                    CartView(locationId: "")
+                    CartView(locationId: "", foodItems: [])
                 }
             }
             // `navigationDestination(item:)` is iOS 17+, but the app

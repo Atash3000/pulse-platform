@@ -19,6 +19,10 @@ struct ItemDetailView: View {
     let item: MenuItem
     /// Resolved pair-with food items (passed by MenuView; spec §5.5).
     let pairings: [MenuItem]
+    /// When set, the screen edits an existing cart line instead of adding a
+    /// new one: customization is prefilled and the CTA updates the line.
+    struct EditContext: Equatable { let lineId: UUID; let modifierIds: [String] }
+    let editing: EditContext?
 
     @State private var customization: ItemCustomization
     @State private var didAdd = false
@@ -33,10 +37,15 @@ struct ItemDetailView: View {
     @ScaledMetric(relativeTo: .title3) private var priceSize: CGFloat = 18
     @ScaledMetric(relativeTo: .footnote) private var descriptionSize: CGFloat = 13
 
-    init(item: MenuItem, pairings: [MenuItem] = []) {
+    init(item: MenuItem, pairings: [MenuItem] = [], editing: EditContext? = nil) {
         self.item = item
         self.pairings = pairings
-        _customization = State(initialValue: ItemCustomization(item: item))
+        self.editing = editing
+        if let editing {
+            _customization = State(initialValue: ItemCustomization(item: item, preselectedModifierIds: editing.modifierIds))
+        } else {
+            _customization = State(initialValue: ItemCustomization(item: item))
+        }
     }
 
     var body: some View {
@@ -244,7 +253,7 @@ struct ItemDetailView: View {
                 }
                 Button(action: addToOrder) {
                     HStack {
-                        Text(didAdd ? "Added" : "Add to Order")
+                        Text(ctaLabel)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)     // survive large Dynamic Type
                         Spacer()
@@ -267,11 +276,18 @@ struct ItemDetailView: View {
         }
     }
 
+    private var ctaLabel: String {
+        if editing != nil { return didAdd ? "Updated" : "Update order" }
+        return didAdd ? "Added" : "Add to Order"
+    }
+
     private func addToOrder() {
-        cart.add(item: item, quantity: 1, modifierIds: customization.selectedModifierIds)
+        if let editing {
+            cart.updateLine(lineId: editing.lineId, modifierIds: customization.selectedModifierIds)
+        } else {
+            cart.add(item: item, quantity: 1, modifierIds: customization.selectedModifierIds)
+        }
         didAdd = true
-        // Pin to the main actor: `dismiss()` and view state must run on main
-        // (explicit, not relying on Task's inherited isolation).
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 600_000_000)
             dismiss()

@@ -201,4 +201,66 @@ final class CartManagerTests: XCTestCase {
         XCTAssertEqual(cart.lines.count, 2)
         XCTAssertEqual(cart.totalItemCount, 3)
     }
+
+    // MARK: - updateLine
+
+    func test_updateLine_changesModifiers_preservingQuantity() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 3, modifierIds: ["oat"])
+        let id = cart.lines[0].id
+        cart.updateLine(lineId: id, modifierIds: ["whole"])
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+        XCTAssertEqual(cart.lines[0].quantity, 3)
+    }
+
+    func test_updateLine_mergesIntoCollidingLine() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 1, modifierIds: ["whole"])   // line A
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])     // line B
+        let bId = cart.lines[1].id
+        cart.updateLine(lineId: bId, modifierIds: ["whole"])        // B now matches A → merge
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].quantity, 3)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+    }
+
+    func test_updateLine_unknownId_isNoOp() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 1, modifierIds: [])
+        cart.updateLine(lineId: UUID(), modifierIds: ["x"])
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, [])
+    }
+
+    func test_updateLine_sameModifiers_keepsSingleLine_preservingConfigAndQuantity() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])
+        let originalId = cart.lines[0].id
+        cart.updateLine(lineId: originalId, modifierIds: ["oat"])  // edit to the same config
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["oat"])
+        XCTAssertEqual(cart.lines[0].quantity, 2)
+    }
+
+    func test_updateLine_mergesIntoForwardLine_whenEditedLinePrecedesTarget() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])    // index 0 — edited
+        cart.add(item: item, quantity: 1, modifierIds: ["whole"])  // index 1 — collision target
+        let editedId = cart.lines[0].id
+        cart.updateLine(lineId: editedId, modifierIds: ["whole"])  // mergeIndex(1) > index(0)
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+        XCTAssertEqual(cart.lines[0].quantity, 3)
+    }
 }
