@@ -141,14 +141,15 @@ const MILK: GroupSpec = {
   multi_select: false,
   sort_order: 1,
   modifiers: [
-    // Display order per brief: Oat first. Default resolves to the
-    // cheapest option (Whole, 0¢) on iOS, NOT the first by sort_order,
-    // so a premium milk is never the default (brief anti-requirement).
-    { name: 'Oat',       price_cents: 75,  sort_order: 0 },
-    { name: 'Whole',     price_cents: 0,   sort_order: 1 },
-    { name: 'Almond',    price_cents: 75,  sort_order: 2 },
-    { name: 'Coconut',   price_cents: 75,  sort_order: 3 },
-    { name: 'Pistachio', price_cents: 150, sort_order: 4 },
+    // Curated display order — sort_order IS the order iOS renders (no runtime
+    // sort). Default resolves to the cheapest option (Whole, 0¢) via the iOS
+    // cheapest-option rule. Dairy = 0¢; alt-milks (Oat/Almond) = +75¢.
+    { name: 'Whole',       price_cents: 0,  sort_order: 0 },
+    { name: 'Oat',         price_cents: 75, sort_order: 1 },
+    { name: 'Almond',      price_cents: 75, sort_order: 2 },
+    { name: '2%',          price_cents: 0,  sort_order: 3 },
+    { name: 'Skim',        price_cents: 0,  sort_order: 4 },
+    { name: 'Half & Half', price_cents: 0,  sort_order: 5 },
   ],
 };
 
