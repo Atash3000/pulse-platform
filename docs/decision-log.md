@@ -2829,3 +2829,15 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** `CartManager.add` already took a quantity; the only gaps were the UI, the total display, and a quantity on the edit path. The optional `quantity` keeps the existing `updateLine` callers/tests unchanged (back-compat). Total stays display-only (GR#8); `CheckoutView`/backend remain authoritative. The stepper is exposed to VoiceOver as a single adjustable element and each button meets the 44pt tap-target minimum.
 
 **Trade-offs:** The max (12) is a hardcoded iOS constant — a per-item backend limit is a deferred seam (`docs/todo-endpoints.md`), no endpoint today. The cart's own per-line quantity control (`CartView`) has no matching 12-cap yet — a known UI inconsistency, also recorded in `docs/todo-endpoints.md`.
+
+## 2026-06-02 — [ios] Menu category nav replaces the All/Hot/Iced temperature toggle
+
+**Decision:** The Menu screen's All/Hot/Iced temperature toggle is replaced by a sticky, data-driven category nav (one tab per category: Matcha / Coffee / Food). Tapping a tab smooth-scrolls to that section; scrolling auto-highlights the section in view (scroll-spy). The per-item `temperature` field is KEPT. The seed category `Classic Coffee` was renamed to `Coffee`.
+
+**Context:** The temperature toggle filtered the whole menu by item temperature; the founder wanted the top bar to navigate categories instead.
+
+**Alternatives considered:** One-category-at-a-time tabs (swap content per tab) — rejected in favor of keeping the proven stacked-scroll layout with a jump/scroll-spy nav. Hardcoding 3 tabs in iOS — rejected for a data-driven bar that follows the API's categories.
+
+**Reasoning:** The toggle was 100% frontend (no backend filter), so this is an iOS change plus a one-line seed rename — no migration. The bar reads category names straight from the loaded menu, so it stays correct as categories change. `temperature` stays because it still drives the product-detail "Hot or Iced" line and the deferred temperature/ice options.
+
+**Trade-offs:** The iOS-16 scroll-spy (PreferenceKey offset tracking + a cancellable tap-suppression window) is the one fiddly piece; it's fail-safe per GR#17 — a misfire only mis-highlights a tab, never breaks the menu/cart path. Tab labels/order come from the seed; manager-editable categories remain deferred (drink-options Part C). Horizontal scrolling for >3 categories and Dynamic Type on the (fixed-size) pill labels are deferred a11y/UX follow-ups recorded in `docs/todo-endpoints.md`.

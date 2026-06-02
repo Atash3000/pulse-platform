@@ -21,3 +21,5 @@ When any of these is built, search the iOS codebase for the matching
 UI work deferred until a backend seam above lands. Not blocked on an API.
 
 - **Align the cart's per-line quantity control with the detail stepper's 12-cap.** `CartView`'s per-line quantity control has no 12-cap, unlike the product-detail stepper (`ItemDetailView`). Align them when the cap becomes backend-driven (see `menu_items.max_quantity` above).
+- **Category nav horizontal overflow.** `CategoryTabBar` splits the width evenly across categories (3 fit today). If categories ever exceed the width, make the bar horizontally scrollable. Frontend-only; no endpoint.
+- **Dynamic Type on the menu.** `CategoryTabBar` pill labels now scale (footnote text style) capped at `accessibility1` with `minimumScaleFactor`, so the fixed even-split layout doesn't overflow. The remaining menu fonts (header at 26pt, section headers, list rows) are still fixed-size from the design system. A full scalable-type pass across the menu — paired with the horizontal-overflow work so the tab bar can reflow past the `accessibility1` cap — is deferred. Frontend-only; no endpoint.
