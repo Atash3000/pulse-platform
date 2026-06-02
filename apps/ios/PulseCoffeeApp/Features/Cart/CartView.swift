@@ -46,7 +46,7 @@ struct CartView: View {
             )) {
                 if let line = editLine {
                     ItemDetailView(item: line.item,
-                                   editing: .init(lineId: line.id, modifierIds: line.modifierIds))
+                                   editing: .init(lineId: line.id, modifierIds: line.modifierIds, quantity: line.quantity))
                 }
             }
         }
