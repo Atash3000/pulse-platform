@@ -28,8 +28,8 @@ struct CategoryTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
-                segment(for: category, position: index + 1, total: categories.count)
+            ForEach(categories) { category in
+                segment(for: category)
             }
         }
         .padding(3)
@@ -37,9 +37,14 @@ struct CategoryTabBar: View {
         .padding(.horizontal, 24)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Menu categories")
+        // The labels scale with Dynamic Type (footnote text style). Cap growth
+        // at accessibility1 so the fixed even-split 3-segment layout doesn't
+        // overflow — full reflow (horizontal scroll) is a deferred follow-up
+        // (docs/todo-endpoints.md). minimumScaleFactor absorbs the rest.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
-    private func segment(for category: MenuCategory, position: Int, total: Int) -> some View {
+    private func segment(for category: MenuCategory) -> some View {
         let isActive = selection == category.id
         return Button {
             withAnimation(switchAnimation) { selection = category.id }
@@ -53,19 +58,18 @@ struct CategoryTabBar: View {
                         .accessibilityHidden(true)
                 }
                 Text(category.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.footnote.weight(.semibold))   // ≈13pt, scales with Dynamic Type
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             .foregroundStyle(isActive
                              ? AppTheme.Colors.tabBarBackground
                              : AppTheme.Colors.tabLabelInactive)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: 44)   // ≥44pt tap target (WCAG 2.5.5)
             .background(segmentBackground(isActive: isActive))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(category.name)
-        .accessibilityHint("Category \(position) of \(total)")
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 

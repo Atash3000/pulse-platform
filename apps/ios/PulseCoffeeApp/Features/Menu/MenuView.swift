@@ -229,6 +229,17 @@ struct MenuView: View {
                 if let current = selectedCategoryId, ids.contains(current) { return }
                 selectedCategoryId = ids.first
             }
+            // Announce the active section to VoiceOver when the scroll-spy
+            // (not a tap) changes it — a sighted user reads this from the
+            // sliding pill; VoiceOver users otherwise get a silent state flip.
+            // Gated on !spySuppressed so tap-driven scrolls don't double-speak.
+            .onChange(of: selectedCategoryId) { newId in
+                guard !spySuppressed,
+                      let id = newId,
+                      let name = categories.first(where: { $0.id == id })?.name else { return }
+                // iOS 16: AccessibilityNotification.Announcement is iOS 17+.
+                UIAccessibility.post(notification: .announcement, argument: "\(name) section")
+            }
         } else {
             emptyMenu
         }
