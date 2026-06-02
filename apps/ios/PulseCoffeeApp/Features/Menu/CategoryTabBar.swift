@@ -28,16 +28,18 @@ struct CategoryTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(categories) { category in
-                segment(for: category)
+            ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
+                segment(for: category, position: index + 1, total: categories.count)
             }
         }
         .padding(3)
         .background(trackBackground)
         .padding(.horizontal, 24)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Menu categories")
     }
 
-    private func segment(for category: MenuCategory) -> some View {
+    private func segment(for category: MenuCategory, position: Int, total: Int) -> some View {
         let isActive = selection == category.id
         return Button {
             withAnimation(switchAnimation) { selection = category.id }
@@ -48,6 +50,7 @@ struct CategoryTabBar: View {
                     Circle()
                         .fill(AppTheme.Colors.tabBarBackground)
                         .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
                 }
                 Text(category.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -62,6 +65,7 @@ struct CategoryTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(category.name)
+        .accessibilityHint("Category \(position) of \(total)")
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 

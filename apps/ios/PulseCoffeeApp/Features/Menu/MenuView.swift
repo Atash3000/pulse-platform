@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// v4 Menu screen — ScrollView composition (custom topbar + header +
-/// temperature toggle + sections). Sections render as SpotlightSection
+/// category nav + sections). Sections render as SpotlightSection
 /// or a vertical list of MenuListRow depending on the category's
 /// `display_style`. Smart-add is wired here: items with no required
 /// modifier groups are added directly to the cart; everything else
@@ -20,6 +20,10 @@ struct MenuView: View {
     /// Set briefly when a tab tap drives a programmatic scroll, so the
     /// scroll-spy doesn't fight the animation and snap the highlight back.
     @State private var spySuppressed = false
+    /// The in-flight scroll-spy suppression timer, cancelled on each new tap
+    /// so a rapid double-tap doesn't release the guard early (mid-animation).
+    @State private var suppressTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let scrollSpace = "menuScroll"
     /// A section becomes active once its top reaches the scroll's top edge
@@ -208,20 +212,32 @@ struct MenuView: View {
             .onAppear {
                 if selectedCategoryId == nil { selectedCategoryId = categories.first?.id }
             }
+            .onChange(of: categories.map(\.id)) { ids in
+                if let current = selectedCategoryId, ids.contains(current) { return }
+                selectedCategoryId = ids.first
+            }
         } else {
             emptyMenu
         }
     }
 
-    /// Tab-tap → smooth-scroll to the section, suppressing the scroll-spy
-    /// briefly so it doesn't snap the highlight back mid-animation.
+    /// Tab-tap → scroll to the section, suppressing the scroll-spy briefly so
+    /// it doesn't snap the highlight back mid-animation. Honors Reduce Motion
+    /// (instant jump + a short suppression window). The suppression timer is
+    /// cancellable so a rapid re-tap doesn't release the guard early.
     private func jump(to id: MenuCategory.ID, using proxy: ScrollViewProxy) {
+        suppressTask?.cancel()
         spySuppressed = true
-        withAnimation(.easeInOut(duration: 0.35)) {
+        if reduceMotion {
             proxy.scrollTo(id, anchor: .top)
+        } else {
+            withAnimation(.easeInOut(duration: 0.35)) {
+                proxy.scrollTo(id, anchor: .top)
+            }
         }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 450_000_000)
+        suppressTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: reduceMotion ? 50_000_000 : 450_000_000)
+            guard !Task.isCancelled else { return }
             spySuppressed = false
         }
     }
@@ -322,7 +338,10 @@ struct MenuView: View {
 }
 
 /// Collects each menu section's top offset (in the menu scroll's
-/// coordinate space), keyed by category id, for the scroll-spy.
+/// coordinate space), keyed by category id, for the scroll-spy. A missing
+/// key means that section isn't realized yet (LazyVStack) — `reduce` keeps
+/// the latest reported offset per key (last-write-wins); do not flip it to
+/// keep the old value, which would freeze each section's first offset.
 private struct SectionTopPreferenceKey: PreferenceKey {
     static var defaultValue: [MenuCategory.ID: CGFloat] { [:] }
     static func reduce(value: inout [MenuCategory.ID: CGFloat],
