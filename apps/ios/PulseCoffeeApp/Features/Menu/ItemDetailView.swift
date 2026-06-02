@@ -42,7 +42,10 @@ struct ItemDetailView: View {
         self.item = item
         self.pairings = pairings
         self.editing = editing
-        _quantity = State(initialValue: editing?.quantity ?? 1)
+        // Clamp the seed to the stepper's 1…12 range: a cart line can hold >12
+        // (the cart's per-line control is uncapped today — see todo-endpoints.md),
+        // and opening above 12 would make the first "−" tap silently jump to 12.
+        _quantity = State(initialValue: min(12, max(1, editing?.quantity ?? 1)))
         if let editing {
             _customization = State(initialValue: ItemCustomization(item: item, preselectedModifierIds: editing.modifierIds))
         } else {
@@ -103,9 +106,11 @@ struct ItemDetailView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(DetailPalette.ink)
 
-            // Price (18pt semibold) + estimate label (GR#8 acceptance).
+            // Price (18pt semibold) + estimate label (GR#8 acceptance). Shows the
+            // qty-aware total so the "Estimated total" label stays accurate and
+            // matches the CTA at every quantity (per-unit at qty 1).
             VStack(spacing: 2) {
-                Text(customization.displayPrice)
+                Text(totalPrice)
                     .font(.system(size: priceSize, weight: .semibold))
                     .foregroundStyle(DetailPalette.ink)
                 Text("Estimated total")
@@ -255,6 +260,7 @@ struct ItemDetailView: View {
                 }
                 HStack(spacing: 12) {
                     quantityStepper
+                        .disabled(didAdd)
                     Button(action: addToOrder) {
                         HStack {
                             Text(ctaLabel)

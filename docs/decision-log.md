@@ -2820,7 +2820,7 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 
 ## 2026-06-02 — [ios] Product-detail quantity stepper (1–12); updateLine gains optional quantity
 
-**Decision:** The product-detail sticky CTA carries a 1–12 quantity stepper (default 1; pre-filled to the line's quantity in edit mode). The CTA shows the display-only total (`displayPriceCents × quantity`). `CartManager.updateLine` gains `quantity: Int? = nil` — `nil` preserves the line's quantity (existing callers), a value replaces it.
+**Decision:** The product-detail sticky CTA carries a 1–12 quantity stepper (default 1; pre-filled to the line's quantity in edit mode). The CTA shows the display-only total (`displayPriceCents × quantity`). The hero price shows the same qty-aware estimated total, keeping the GR#8 'Estimated total' label accurate and consistent with the CTA. `CartManager.updateLine` gains `quantity: Int? = nil` — `nil` preserves the line's quantity (existing callers), a value replaces it.
 
 **Context:** Customers needed to add several of a drink at once; the add CTA was hardcoded to quantity 1.
 
