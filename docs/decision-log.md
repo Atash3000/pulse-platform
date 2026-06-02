@@ -2815,3 +2815,17 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** Keeping the estimate out of `CartManager` preserves the "cart holds no money math" rule — the estimate is display-only (same interpretation as the product-detail screen, already logged), and `CheckoutView` remains authoritative. Merge-on-edit avoids two identical lines after an edit.
 
 **Trade-offs:** Editing into a colliding config silently merges (the edited line's id disappears). Acceptable — the result is the cart the user intends. "Your usual" / reorder / loyalty-after-order remain deferred (no order-history backend).
+
+---
+
+## 2026-06-02 — [ios] Product-detail quantity stepper (1–12); updateLine gains optional quantity
+
+**Decision:** The product-detail sticky CTA carries a 1–12 quantity stepper (default 1; pre-filled to the line's quantity in edit mode). The CTA shows the display-only total (`displayPriceCents × quantity`). `CartManager.updateLine` gains `quantity: Int? = nil` — `nil` preserves the line's quantity (existing callers), a value replaces it.
+
+**Context:** Customers needed to add several of a drink at once; the add CTA was hardcoded to quantity 1.
+
+**Alternatives considered:** A separate quantity screen/sheet; a free-text quantity field. Both add friction and input-validation surface versus an inline ± stepper.
+
+**Reasoning:** `CartManager.add` already took a quantity; the only gaps were the UI, the total display, and a quantity on the edit path. The optional `quantity` keeps the existing `updateLine` callers/tests unchanged (back-compat). Total stays display-only (GR#8); `CheckoutView`/backend remain authoritative. The stepper is exposed to VoiceOver as a single adjustable element and each button meets the 44pt tap-target minimum.
+
+**Trade-offs:** The max (12) is a hardcoded iOS constant — a per-item backend limit is a deferred seam (`docs/todo-endpoints.md`), no endpoint today. The cart's own per-line quantity control (`CartView`) has no matching 12-cap yet — a known UI inconsistency, also recorded in `docs/todo-endpoints.md`.

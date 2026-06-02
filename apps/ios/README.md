@@ -46,6 +46,8 @@ apps/ios/
 └── PulseCoffeeAppTests/                 XCTest bundle
 ```
 
+- The product-detail CTA carries a 1–12 quantity stepper (default 1); the total it shows is a display-only estimate — the backend prices the order at checkout (Golden Rule #8).
+
 SPM dependencies declared in `project.yml`:
 
 | Package | Product | First used in |
