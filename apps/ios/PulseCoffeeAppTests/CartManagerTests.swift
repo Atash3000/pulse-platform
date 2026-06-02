@@ -263,4 +263,28 @@ final class CartManagerTests: XCTestCase {
         XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
         XCTAssertEqual(cart.lines[0].quantity, 3)
     }
+
+    func test_updateLine_explicitQuantity_replacesQuantity() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])
+        let id = cart.lines[0].id
+        cart.updateLine(lineId: id, modifierIds: ["whole"], quantity: 5)
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].modifierIds, ["whole"])
+        XCTAssertEqual(cart.lines[0].quantity, 5)
+    }
+
+    func test_updateLine_explicitQuantity_mergeAddsNewQuantity() {
+        let cart = CartManager()
+        let item = MenuItem(id: "i", name: "Latte", description: nil, basePriceCents: 550, imageURL: nil,
+            available: true, quantityLeft: nil, modifierGroups: [])
+        cart.add(item: item, quantity: 1, modifierIds: ["whole"])  // A
+        cart.add(item: item, quantity: 2, modifierIds: ["oat"])    // B
+        let bId = cart.lines[1].id
+        cart.updateLine(lineId: bId, modifierIds: ["whole"], quantity: 3)  // B → matches A, merge with NEW qty
+        XCTAssertEqual(cart.lines.count, 1)
+        XCTAssertEqual(cart.lines[0].quantity, 1 + 3)
+    }
 }

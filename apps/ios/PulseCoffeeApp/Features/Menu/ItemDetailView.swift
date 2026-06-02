@@ -21,11 +21,12 @@ struct ItemDetailView: View {
     let pairings: [MenuItem]
     /// When set, the screen edits an existing cart line instead of adding a
     /// new one: customization is prefilled and the CTA updates the line.
-    struct EditContext: Equatable { let lineId: UUID; let modifierIds: [String] }
+    struct EditContext: Equatable { let lineId: UUID; let modifierIds: [String]; let quantity: Int }
     let editing: EditContext?
 
     @State private var customization: ItemCustomization
     @State private var didAdd = false
+    @State private var quantity: Int
     /// A pair-with item that needs modifier choices — pushed as its own
     /// detail rather than instant-added (see the smart-add guard in §5.5).
     @State private var pairDetail: MenuItem?
@@ -41,6 +42,10 @@ struct ItemDetailView: View {
         self.item = item
         self.pairings = pairings
         self.editing = editing
+        // Clamp the seed to the stepper's 1…12 range: a cart line can hold >12
+        // (the cart's per-line control is uncapped today — see todo-endpoints.md),
+        // and opening above 12 would make the first "−" tap silently jump to 12.
+        _quantity = State(initialValue: min(12, max(1, editing?.quantity ?? 1)))
         if let editing {
             _customization = State(initialValue: ItemCustomization(item: item, preselectedModifierIds: editing.modifierIds))
         } else {
@@ -101,9 +106,11 @@ struct ItemDetailView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(DetailPalette.ink)
 
-            // Price (18pt semibold) + estimate label (GR#8 acceptance).
+            // Price (18pt semibold) + estimate label (GR#8 acceptance). Shows the
+            // qty-aware total so the "Estimated total" label stays accurate and
+            // matches the CTA at every quantity (per-unit at qty 1).
             VStack(spacing: 2) {
-                Text(customization.displayPrice)
+                Text(totalPrice)
                     .font(.system(size: priceSize, weight: .semibold))
                     .foregroundStyle(DetailPalette.ink)
                 Text("Estimated total")
@@ -251,29 +258,81 @@ struct ItemDetailView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
-                Button(action: addToOrder) {
-                    HStack {
-                        Text(ctaLabel)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)     // survive large Dynamic Type
-                        Spacer()
-                        Text(customization.displayPrice).opacity(0.85)
+                HStack(spacing: 12) {
+                    quantityStepper
+                        .disabled(didAdd)
+                    Button(action: addToOrder) {
+                        HStack {
+                            Text(ctaLabel)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)     // survive large Dynamic Type
+                            Spacer()
+                            Text(totalPrice).opacity(0.85)
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DetailPalette.warmCream)
+                        .padding(.vertical, 16)
+                        .padding(.horizontal, 20)
+                        .frame(maxWidth: .infinity)
+                        .background(DetailPalette.ink, in: RoundedRectangle(cornerRadius: 14))
                     }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(DetailPalette.warmCream)
-                    .padding(.vertical, 16)
-                    .padding(.horizontal, 20)
-                    .frame(maxWidth: .infinity)
-                    .background(DetailPalette.ink, in: RoundedRectangle(cornerRadius: 14))
+                    .disabled(!customization.isSatisfied || !item.available || didAdd)
+                    .opacity((!customization.isSatisfied || !item.available) ? 0.5 : 1)
                 }
-                .disabled(!customization.isSatisfied || !item.available || didAdd)
-                .opacity((!customization.isSatisfied || !item.available) ? 0.5 : 1)
             }
             .padding(.horizontal, 24)
             .padding(.top, 4)
             .padding(.bottom, 8)   // maintains safeAreaBottom + 8pt via the inset
             .background(DetailPalette.warmCream)
         }
+    }
+
+    /// Display-only total = per-unit estimate × quantity (Golden Rule #8).
+    private var totalPriceCents: Int { customization.displayPriceCents * quantity }
+    private var totalPrice: String { String(format: "$%.2f", Double(totalPriceCents) / 100.0) }
+
+    private func setQuantity(_ n: Int) {
+        let clamped = min(12, max(1, n))
+        guard clamped != quantity else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        quantity = clamped
+    }
+
+    private var quantityStepper: some View {
+        HStack(spacing: 8) {
+            stepButton(systemName: "minus", enabled: quantity > 1) { setQuantity(quantity - 1) }
+            Text("\(quantity)")
+                .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                .frame(minWidth: 20)
+                .foregroundStyle(DetailPalette.ink)
+            stepButton(systemName: "plus", enabled: quantity < 12) { setQuantity(quantity + 1) }
+        }
+        .padding(.horizontal, 6)
+        .background(Capsule().fill(DetailPalette.warmCream))
+        .overlay(Capsule().stroke(DetailPalette.ink.opacity(0.14)))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Quantity")
+        .accessibilityValue("\(quantity)")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: setQuantity(quantity + 1)
+            case .decrement: setQuantity(quantity - 1)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// One stepper button with a guaranteed 44×44 tap target (HIG minimum).
+    private func stepButton(systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .foregroundStyle(enabled ? DetailPalette.ink : DetailPalette.inkFaint)
     }
 
     private var ctaLabel: String {
@@ -283,9 +342,9 @@ struct ItemDetailView: View {
 
     private func addToOrder() {
         if let editing {
-            cart.updateLine(lineId: editing.lineId, modifierIds: customization.selectedModifierIds)
+            cart.updateLine(lineId: editing.lineId, modifierIds: customization.selectedModifierIds, quantity: quantity)
         } else {
-            cart.add(item: item, quantity: 1, modifierIds: customization.selectedModifierIds)
+            cart.add(item: item, quantity: quantity, modifierIds: customization.selectedModifierIds)
         }
         didAdd = true
         Task { @MainActor in

@@ -81,11 +81,6 @@ struct ItemCustomization {
         return total
     }
 
-    /// e.g. "$6.45". Display only — never used for pricing logic.
-    var displayPrice: String {
-        String(format: "$%.2f", Double(displayPriceCents) / 100.0)
-    }
-
     /// Name of the first required group (by sortOrder) with no selection,
     /// for the CTA's disabled hint. `nil` ⇒ all required groups satisfied.
     var firstUnsatisfiedGroupName: String? {
