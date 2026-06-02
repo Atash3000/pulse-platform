@@ -92,6 +92,23 @@ final class MenuViewModel: ObservableObject {
         }
     }
 
+    /// Scroll-spy section picker (pure; `nonisolated` for synchronous test
+    /// calls). Given each section's top offset in the scroll's coordinate
+    /// space (decreasing as the user scrolls down), in visual order, plus
+    /// the y-threshold of the scroll's top edge, returns the id of the
+    /// section currently under the top edge: the LAST section whose top has
+    /// crossed the threshold (`top <= threshold`). Falls back to the first
+    /// section before any have crossed; `nil` only for an empty list.
+    /// Behavior pinned by `MenuViewModelTests`.
+    nonisolated static func activeCategoryId(
+        sectionTops: [(id: MenuCategory.ID, top: CGFloat)],
+        threshold: CGFloat
+    ) -> MenuCategory.ID? {
+        guard let first = sectionTops.first else { return nil }
+        let crossed = sectionTops.last { $0.top <= threshold }
+        return crossed?.id ?? first.id
+    }
+
     /// Pure filter. Keeps the original category and item order; drops
     /// items that don't match the temperature; drops categories that
     /// end up empty. Behavior pinned by `MenuViewModelTests`.
