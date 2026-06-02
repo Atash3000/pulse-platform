@@ -23,6 +23,9 @@ struct MenuView: View {
     /// The in-flight scroll-spy suppression timer, cancelled on each new tap
     /// so a rapid double-tap doesn't release the guard early (mid-animation).
     @State private var suppressTask: Task<Void, Never>?
+    /// Height of the menu scroll viewport, used to size the bottom inset so
+    /// the last section can scroll all the way to the top.
+    @State private var scrollViewportHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let scrollSpace = "menuScroll"
@@ -177,14 +180,14 @@ struct MenuView: View {
                         selection: $selectedCategoryId,
                         onTap: { id in jump(to: id, using: proxy) }
                     )
-                    .padding(.top, 4)
-                    .padding(.bottom, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 20)
 
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             header
                                 .padding(.horizontal, 24)
-                                .padding(.top, 8)
+                                .padding(.top, 16)
                                 .padding(.bottom, 18)
 
                             ForEach(categories) { category in
@@ -193,10 +196,20 @@ struct MenuView: View {
                                     .background(sectionTopReporter(for: category.id))
                             }
 
-                            Color.clear.frame(height: 24)
+                            // Bottom inset sized to the viewport so the LAST
+                            // section can scroll to the top (otherwise tapping
+                            // e.g. "Food" can't pull it past the screen bottom).
+                            Color.clear.frame(height: max(24, scrollViewportHeight - 80))
                         }
                     }
                     .coordinateSpace(name: Self.scrollSpace)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: ViewportHeightKey.self,
+                                                   value: geo.size.height)
+                        }
+                    )
+                    .onPreferenceChange(ViewportHeightKey.self) { scrollViewportHeight = $0 }
                     .onPreferenceChange(SectionTopPreferenceKey.self) { tops in
                         guard !spySuppressed else { return }
                         let ordered: [(id: MenuCategory.ID, top: CGFloat)] =
@@ -347,5 +360,14 @@ private struct SectionTopPreferenceKey: PreferenceKey {
     static func reduce(value: inout [MenuCategory.ID: CGFloat],
                        nextValue: () -> [MenuCategory.ID: CGFloat]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// Reports the menu scroll viewport's height so the bottom inset can be
+/// sized to let the last section scroll to the top.
+private struct ViewportHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
