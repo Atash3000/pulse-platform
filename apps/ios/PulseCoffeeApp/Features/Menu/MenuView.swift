@@ -16,6 +16,16 @@ struct MenuView: View {
     @StateObject private var viewModel = MenuViewModel()
     @State private var showCart = false
     @State private var detailItem: MenuItem?
+    @State private var selectedCategoryId: MenuCategory.ID?
+    /// Set briefly when a tab tap drives a programmatic scroll, so the
+    /// scroll-spy doesn't fight the animation and snap the highlight back.
+    @State private var spySuppressed = false
+
+    private static let scrollSpace = "menuScroll"
+    /// A section becomes active once its top reaches the scroll's top edge
+    /// (y == 0 in the "menuScroll" space). Dial in a small positive lead
+    /// here if a snappier switch is wanted.
+    private static let spyThreshold: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -82,8 +92,15 @@ struct MenuView: View {
     /// Every item across all loaded categories — the pool ItemPairings
     /// matches pair-with suggestions against (spec §5.5).
     private var allLoadedItems: [MenuItem] {
-        guard let menu = viewModel.filteredMenu else { return [] }
+        guard let menu = loadedMenu else { return [] }
         return menu.categories.flatMap(\.items)
+    }
+
+    /// The loaded menu (no filtering — the category nav navigates, it
+    /// doesn't filter). `nil` until the menu loads.
+    private var loadedMenu: Menu? {
+        if case .loaded(_, let menu) = viewModel.state { return menu }
+        return nil
     }
 
     /// Location name string for the topbar. Falls back to "Pulse Coffee"
@@ -147,27 +164,77 @@ struct MenuView: View {
 
     @ViewBuilder
     private var loadedView: some View {
-        if let menu = viewModel.filteredMenu, !menu.categories.isEmpty {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
-                        .padding(.bottom, 18)
+        if let menu = loadedMenu, !menu.categories.isEmpty {
+            let categories = menu.categories.sorted { $0.sortOrder < $1.sortOrder }
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    CategoryTabBar(
+                        categories: categories,
+                        selection: $selectedCategoryId,
+                        onTap: { id in jump(to: id, using: proxy) }
+                    )
+                    .padding(.top, 4)
+                    .padding(.bottom, 14)
 
-                    TemperatureToggle(selection: $viewModel.selectedTemperature)
-                        .padding(.bottom, 22)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            header
+                                .padding(.horizontal, 24)
+                                .padding(.top, 8)
+                                .padding(.bottom, 18)
 
-                    ForEach(menu.categories.sorted(by: { $0.sortOrder < $1.sortOrder })) { category in
-                        section(for: category)
+                            ForEach(categories) { category in
+                                section(for: category)
+                                    .id(category.id)
+                                    .background(sectionTopReporter(for: category.id))
+                            }
+
+                            Color.clear.frame(height: 24)
+                        }
                     }
-
-                    Color.clear.frame(height: 24)
+                    .coordinateSpace(name: Self.scrollSpace)
+                    .onPreferenceChange(SectionTopPreferenceKey.self) { tops in
+                        guard !spySuppressed else { return }
+                        let ordered: [(id: MenuCategory.ID, top: CGFloat)] =
+                            categories.compactMap { c in tops[c.id].map { (id: c.id, top: $0) } }
+                        if let active = MenuViewModel.activeCategoryId(
+                            sectionTops: ordered, threshold: Self.spyThreshold) {
+                            selectedCategoryId = active
+                        }
+                    }
                 }
             }
             .background(AppTheme.Colors.tabBarBackground.opacity(0.6).ignoresSafeArea())
+            .onAppear {
+                if selectedCategoryId == nil { selectedCategoryId = categories.first?.id }
+            }
         } else {
             emptyMenu
+        }
+    }
+
+    /// Tab-tap → smooth-scroll to the section, suppressing the scroll-spy
+    /// briefly so it doesn't snap the highlight back mid-animation.
+    private func jump(to id: MenuCategory.ID, using proxy: ScrollViewProxy) {
+        spySuppressed = true
+        withAnimation(.easeInOut(duration: 0.35)) {
+            proxy.scrollTo(id, anchor: .top)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            spySuppressed = false
+        }
+    }
+
+    /// Reports a section's top offset (in the "menuScroll" space) so the
+    /// scroll-spy can pick the active section. Drawn in a `.background` so
+    /// it never affects layout.
+    private func sectionTopReporter(for id: MenuCategory.ID) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(
+                key: SectionTopPreferenceKey.self,
+                value: [id: geo.frame(in: .named(Self.scrollSpace)).minY]
+            )
         }
     }
 
@@ -176,7 +243,7 @@ struct MenuView: View {
             Text("Menu")
                 .font(.system(size: 26, weight: .bold))
                 .tracking(-0.5)
-            Text("Matcha line · Classic coffee · Food")
+            Text("Matcha line · Coffee · Food")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
         }
@@ -226,9 +293,9 @@ struct MenuView: View {
             Image(systemName: "cup.and.saucer")
                 .font(.largeTitle)
                 .foregroundStyle(AppTheme.Colors.iconSecondary)
-            Text("Nothing matches this filter")
+            Text("The menu is empty")
                 .font(.headline)
-            Text("Try the All tab to see everything available.")
+            Text("Check back soon — items are on their way.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -252,4 +319,14 @@ struct MenuView: View {
         .environmentObject(AppState())
         .environmentObject(CartManager())
         .environmentObject(FavoritesStore())
+}
+
+/// Collects each menu section's top offset (in the menu scroll's
+/// coordinate space), keyed by category id, for the scroll-spy.
+private struct SectionTopPreferenceKey: PreferenceKey {
+    static var defaultValue: [MenuCategory.ID: CGFloat] { [:] }
+    static func reduce(value: inout [MenuCategory.ID: CGFloat],
+                       nextValue: () -> [MenuCategory.ID: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
 }
