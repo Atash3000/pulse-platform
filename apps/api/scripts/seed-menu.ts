@@ -2,7 +2,7 @@
  * seed-menu.ts
  *
  * Idempotent menu seed for the dev-seeded location. Creates three
- * categories (Matcha, Classic Coffee, Food) and their items; safe to
+ * categories (Matcha, Coffee, Food) and their items; safe to
  * run multiple times.
  *
  * Run with: npm run seed:menu
@@ -33,7 +33,7 @@
  * seed created, plus its Macchiato / Hot Chocolate / Drip Coffee /
  * Mocha / Vanilla Latte rows). A dev DB seeded by the old script will
  * therefore show four categories after re-seed (old Coffee + Matcha +
- * Classic Coffee + Food). To get a clean v4 menu, wipe the Postgres
+ * Coffee + Food). To get a clean v4 menu, wipe the Postgres
  * volume and re-seed from scratch:
  *
  *   docker compose down -v
@@ -47,7 +47,7 @@
  *
  * Catalog shape
  * --------------
- * Three categories: Matcha (spotlight), Classic Coffee (list), Food
+ * Three categories: Matcha (spotlight), Coffee (list), Food
  * (list). Each item carries its temperature, featured flag, and an
  * opaque art_token the iOS app maps to a drawn abstract symbol.
  * Modifier groups (Size / Milk / Sweetness / Extras) are seeded per
@@ -308,7 +308,7 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
     ],
   },
   {
-    name: 'Classic Coffee',
+    name: 'Coffee',
     sort_order: 1,
     display_style: 'list',
     items: [
