@@ -1,16 +1,15 @@
 import SwiftUI
 
-/// Spotlight section for `display_style == spotlight` categories. One
-/// hero card on top + a horizontal scroll of compact cards for the
-/// rest. Hero pick is section-local (`SpotlightSection.hero(in:)`) so
-/// the screen does not depend on backend `ORDER BY` clauses for visual
-/// correctness: backend orders matcha items by `name ASC` per
-/// `apps/api/src/modules/menu/menu.service.ts:184`, which puts
-/// Strawberry Matcha (the seeded `featured: true` drink) last
-/// alphabetically. The hero is the first `featured == true` item;
-/// when none are featured, falls back to the first item in the
-/// category (Golden Rule #17). The scroll row excludes the hero by ID
-/// so the same drink never appears twice.
+/// Spotlight section for `display_style == spotlight` categories (all v4
+/// menu categories). Layout: one hero card on top, then up to 3 sub-hero
+/// cards in a horizontal scroll, then the remaining items in a vertical
+/// list (`MenuListRow`). Hero pick is section-local
+/// (`SpotlightSection.hero(in:)`): the first `featured == true` item, else
+/// the first item (Golden Rule #17). Sub-heros / vertical items are the
+/// next-3 / after-3 non-hero items in the backend's order
+/// (`sort_order ASC, name ASC`), so curation lives in the seed, not iOS
+/// (Golden Rule #18). Every row excludes the hero by ID so the same item
+/// never appears twice.
 struct SpotlightSection: View {
     let category: MenuCategory
     let onOpenDetail: (MenuItem) -> Void

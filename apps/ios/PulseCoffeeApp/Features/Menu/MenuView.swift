@@ -163,8 +163,7 @@ struct MenuView: View {
             VStack(spacing: 0) {
                 CategoryTabBar(
                     categories: categories,
-                    selection: $selectedCategoryId,
-                    onTap: { _ in }   // selection drives the visible section; no scroll
+                    selection: $selectedCategoryId
                 )
                 .padding(.top, 10)
                 .padding(.bottom, 16)

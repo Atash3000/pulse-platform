@@ -139,3 +139,19 @@ Rules **1–15** are the canonical set from Spec Part 13. Rules **16+** are proj
 **Rule:** Nice-to-have read surfaces (badges, recommendations, celebration state, AI suggestions) must degrade to a neutral default on any error — never propagate a failure onto the order/checkout/payment path, and never turn a slow or broken dependency into a 500 for the caller. If the data can't be determined, return the empty/neutral answer and log it.
 
 **Why:** This is the same DNA as Rule #2 (checkout is sacred) and Rule #6 (Clover failure is not order failure), applied to read surfaces. A birthday badge that throws should make the badge disappear, not break the barista's order ticket. Keeping these features structurally off the critical path — and catching their own errors — means a non-essential nicety can never cause a customer-visible or operations-visible outage. The gesture is never worth the incident.
+
+---
+
+### 18. Display order is backend-owned
+
+**Rule:** The order in which items, sections, and modifiers appear is owned by the backend (`menu_items.sort_order`, `menu_categories.sort_order`, modifier `sort_order`), returned already in that order, and rendered as-is by clients. Clients **never re-sort for merchandising** — they render the array they are given. Curation (which drink is the hero, which are sub-heros, what lands in the vertical list) is a pure function of that order; it lives in data, seed-set today and admin-set later.
+
+**Why:** We hit this directly building the spotlight menu: items came back `name ASC`, so iOS could not show curated sub-heros without either a brittle client-side sort or a hardcoded guess. Putting ordering in the data (a) keeps one source of truth, (b) lets a non-engineer reorder the menu without an app release, and (c) makes the hero / sub-hero / vertical split deterministic from the given order. A client that re-sorts becomes a second, divergent ordering authority that silently drifts from the backend. First applied by `menu_items.sort_order` (decision-log, 2026-06-03) + `SpotlightSection` (hero by `featured`, sub-heros/vertical by backend order).
+
+---
+
+### 19. Opaque art tokens, registered and fail-safe
+
+**Rule:** A menu item's visual is an opaque `art_token` string the backend stays ignorant of; the client maps it to a drawn symbol through a registry. Every token that ships in the seed **must** have a registered renderer, enforced by a build-failing test; an unknown or `nil` token degrades to a neutral fallback glyph — never a crash, never a blank.
+
+**Why:** This decouples backend data from client rendering (the backend neither knows nor cares what a `ginger-matcha` looks like) while a test (`DrinkArtTests.test_registry_includesAllSeededV4Tokens`) makes "added a drink to the seed but forgot the art" loud at code-review time instead of a silent "?" in production. The fallback keeps a new or mistyped token off the critical path — Rule #17 applied to art. First applied by `DrinkArtRegistry` + its coverage test.

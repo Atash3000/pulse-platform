@@ -152,6 +152,8 @@ Rules 1–15 are the canonical set from Spec Part 13. Rules 16+ are project-adde
 15. Ship boring and reliable first
 16. Staff see derived state, never customer PII (DOB/age/year never leave the server to a staff client)
 17. Non-critical surfaces fail safe (badges/recommendations/celebration state degrade to a neutral default, never break the order/checkout path)
+18. Display order is backend-owned (`sort_order` on items/categories/modifiers; clients render the given order, never re-sort for merchandising)
+19. Opaque art tokens, registered + fail-safe (`art_token` is an opaque string; every seeded token has a test-enforced client renderer; unknown/nil tokens degrade to a neutral glyph)
     If a change would violate any of these, Claude refuses and explains why. If the manager insists, Claude documents the override in the decision-log so future readers know it was deliberate.
 
 ---

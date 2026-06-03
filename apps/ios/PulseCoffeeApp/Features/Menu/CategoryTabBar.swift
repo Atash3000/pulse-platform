@@ -1,21 +1,15 @@
 import SwiftUI
 
-/// Sticky category nav for the v4 Menu screen — one pill per menu
-/// category, data-driven from the loaded categories (sort order).
-/// Replaces the old All/Hot/Iced `TemperatureToggle`; reuses its
-/// matched-geometry sliding-pill styling so the visual language is
-/// unchanged. (3 categories split the width evenly, like the old toggle;
-/// horizontal scrolling on overflow is deferred — see todo-endpoints.md.)
-///
-/// Two signals, split to avoid a scroll↔spy feedback loop (design §4.1):
-/// - `selection` is the highlight; written by BOTH a tap and the
-///   scroll-spy in `MenuView`.
-/// - `onTap` fires ONLY on an explicit tap; `MenuView` uses it to scroll
-///   to the section. The spy never calls `onTap`.
+/// Category selector for the v4 Menu screen — one pill per menu category,
+/// data-driven from the loaded categories (sort order). Tapping a pill sets
+/// `selection`; the menu shows one category at a time (`MenuView` renders
+/// only the selected category's section). Reuses the old All/Hot/Iced
+/// `TemperatureToggle`'s matched-geometry sliding-pill styling so the visual
+/// language is unchanged. (3 categories split the width evenly; horizontal
+/// scrolling on overflow is deferred — see todo-endpoints.md.)
 struct CategoryTabBar: View {
     let categories: [MenuCategory]
     @Binding var selection: MenuCategory.ID?
-    let onTap: (MenuCategory.ID) -> Void
 
     @Namespace private var pill
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -48,7 +42,6 @@ struct CategoryTabBar: View {
         let isActive = selection == category.id
         return Button {
             withAnimation(switchAnimation) { selection = category.id }
-            onTap(category.id)
         } label: {
             HStack(spacing: 6) {
                 if isActive {
