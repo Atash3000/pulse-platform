@@ -16,23 +16,13 @@ struct MenuView: View {
     @StateObject private var viewModel = MenuViewModel()
     @State private var showCart = false
     @State private var detailItem: MenuItem?
+    /// The category whose section is shown. The tab bar selects it; exactly
+    /// one category is visible at a time (tapping Coffee hides Matcha/Food).
     @State private var selectedCategoryId: MenuCategory.ID?
-    /// Set briefly when a tab tap drives a programmatic scroll, so the
-    /// scroll-spy doesn't fight the animation and snap the highlight back.
-    @State private var spySuppressed = false
-    /// The in-flight scroll-spy suppression timer, cancelled on each new tap
-    /// so a rapid double-tap doesn't release the guard early (mid-animation).
-    @State private var suppressTask: Task<Void, Never>?
-    /// Height of the menu scroll viewport, used to size the bottom inset so
-    /// the last section can scroll all the way to the top.
-    @State private var scrollViewportHeight: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let scrollSpace = "menuScroll"
-    /// A section becomes active once its top reaches the scroll's top edge
-    /// (y == 0 in the "menuScroll" space). Dial in a small positive lead
-    /// here if a snappier switch is wanted.
-    private static let spyThreshold: CGFloat = 0
+    /// Tracks whether the first selection (initial auto-select on appear) has
+    /// happened. Used to suppress the VoiceOver section announcement on load —
+    /// only user-driven tab changes should announce.
+    @State private var hasAppearedSelection = false
 
     var body: some View {
         NavigationStack {
@@ -173,51 +163,30 @@ struct MenuView: View {
     private var loadedView: some View {
         if let menu = loadedMenu, !menu.categories.isEmpty {
             let categories = menu.categories.sorted { $0.sortOrder < $1.sortOrder }
-            ScrollViewReader { proxy in
-                VStack(spacing: 0) {
-                    CategoryTabBar(
-                        categories: categories,
-                        selection: $selectedCategoryId,
-                        onTap: { id in jump(to: id, using: proxy) }
-                    )
-                    .padding(.top, 10)
-                    .padding(.bottom, 20)
+            let selected = categories.first(where: { $0.id == selectedCategoryId }) ?? categories.first
+            VStack(spacing: 0) {
+                CategoryTabBar(
+                    categories: categories,
+                    selection: $selectedCategoryId
+                )
+                .padding(.top, 10)
+                .padding(.bottom, 16)
 
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            header
-                                .padding(.horizontal, 24)
-                                .padding(.top, 16)
-                                .padding(.bottom, 18)
-
-                            ForEach(categories) { category in
-                                section(for: category)
-                                    .id(category.id)
-                                    .background(sectionTopReporter(for: category.id))
-                            }
-
-                            // Bottom inset sized to the viewport so the LAST
-                            // section can scroll to the top (otherwise tapping
-                            // e.g. "Food" can't pull it past the screen bottom).
-                            Color.clear.frame(height: max(24, scrollViewportHeight - 80))
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        header
+                            .padding(.horizontal, 24)
+                            .padding(.top, 8)
+                            .padding(.bottom, 18)
+                        if let category = selected {
+                            section(for: category)
                         }
-                    }
-                    .coordinateSpace(name: Self.scrollSpace)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(key: ViewportHeightKey.self,
-                                                   value: geo.size.height)
-                        }
-                    )
-                    .onPreferenceChange(ViewportHeightKey.self) { scrollViewportHeight = $0 }
-                    .onPreferenceChange(SectionTopPreferenceKey.self) { tops in
-                        guard !spySuppressed else { return }
-                        let ordered: [(id: MenuCategory.ID, top: CGFloat)] =
-                            categories.compactMap { c in tops[c.id].map { (id: c.id, top: $0) } }
-                        if let active = MenuViewModel.activeCategoryId(
-                            sectionTops: ordered, threshold: Self.spyThreshold) {
-                            selectedCategoryId = active
-                        }
+                        // Brand wordmark fills the quiet space below the last
+                        // item; the bottom padding also clears the tab bar (added
+                        // via safeAreaInset on the tab container) so nothing hides.
+                        BrandFooter()
+                            .padding(.top, 28)
+                            .padding(.bottom, AppTheme.Metrics.tabBarHeight + 20)
                     }
                 }
             }
@@ -229,52 +198,16 @@ struct MenuView: View {
                 if let current = selectedCategoryId, ids.contains(current) { return }
                 selectedCategoryId = ids.first
             }
-            // Announce the active section to VoiceOver when the scroll-spy
-            // (not a tap) changes it — a sighted user reads this from the
-            // sliding pill; VoiceOver users otherwise get a silent state flip.
-            // Gated on !spySuppressed so tap-driven scrolls don't double-speak.
+            // One category shows at a time; announce the selected section to
+            // VoiceOver when the tab changes it.
             .onChange(of: selectedCategoryId) { newId in
-                guard !spySuppressed,
-                      let id = newId,
+                guard hasAppearedSelection else { hasAppearedSelection = true; return }
+                guard let id = newId,
                       let name = categories.first(where: { $0.id == id })?.name else { return }
-                // iOS 16: AccessibilityNotification.Announcement is iOS 17+.
                 UIAccessibility.post(notification: .announcement, argument: "\(name) section")
             }
         } else {
             emptyMenu
-        }
-    }
-
-    /// Tab-tap → scroll to the section, suppressing the scroll-spy briefly so
-    /// it doesn't snap the highlight back mid-animation. Honors Reduce Motion
-    /// (instant jump + a short suppression window). The suppression timer is
-    /// cancellable so a rapid re-tap doesn't release the guard early.
-    private func jump(to id: MenuCategory.ID, using proxy: ScrollViewProxy) {
-        suppressTask?.cancel()
-        spySuppressed = true
-        if reduceMotion {
-            proxy.scrollTo(id, anchor: .top)
-        } else {
-            withAnimation(.easeInOut(duration: 0.35)) {
-                proxy.scrollTo(id, anchor: .top)
-            }
-        }
-        suppressTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: reduceMotion ? 50_000_000 : 450_000_000)
-            guard !Task.isCancelled else { return }
-            spySuppressed = false
-        }
-    }
-
-    /// Reports a section's top offset (in the "menuScroll" space) so the
-    /// scroll-spy can pick the active section. Drawn in a `.background` so
-    /// it never affects layout.
-    private func sectionTopReporter(for id: MenuCategory.ID) -> some View {
-        GeometryReader { geo in
-            Color.clear.preference(
-                key: SectionTopPreferenceKey.self,
-                value: [id: geo.frame(in: .named(Self.scrollSpace)).minY]
-            )
         }
     }
 
@@ -310,6 +243,9 @@ struct MenuView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(category.name), \(category.items.count) items")
+                .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 6)
 
@@ -359,26 +295,4 @@ struct MenuView: View {
         .environmentObject(AppState())
         .environmentObject(CartManager())
         .environmentObject(FavoritesStore())
-}
-
-/// Collects each menu section's top offset (in the menu scroll's
-/// coordinate space), keyed by category id, for the scroll-spy. A missing
-/// key means that section isn't realized yet (LazyVStack) — `reduce` keeps
-/// the latest reported offset per key (last-write-wins); do not flip it to
-/// keep the old value, which would freeze each section's first offset.
-private struct SectionTopPreferenceKey: PreferenceKey {
-    static var defaultValue: [MenuCategory.ID: CGFloat] { [:] }
-    static func reduce(value: inout [MenuCategory.ID: CGFloat],
-                       nextValue: () -> [MenuCategory.ID: CGFloat]) {
-        value.merge(nextValue()) { _, new in new }
-    }
-}
-
-/// Reports the menu scroll viewport's height so the bottom inset can be
-/// sized to let the last section scroll to the top.
-private struct ViewportHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }

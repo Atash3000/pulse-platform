@@ -37,8 +37,11 @@ final class DrinkArtTests: XCTestCase {
         // test makes the missing entry loud at code-review time.
         let seeded: [String] = [
             "strawberry-matcha", "raspberry-matcha", "brown-sugar-matcha", "ginger-matcha",
+            "iced-classic-matcha", "vanilla-matcha", "blueberry-matcha",
             "cappuccino", "latte", "americano", "flat-white", "cortado", "cold-brew", "espresso",
+            "iced-coconut-latte", "iced-salted-caramel-latte", "iced-brown-sugar-oat-latte", "iced-vanilla-latte",
             "croissant", "khachapuri", "muffin", "cookie",
+            "pain-au-chocolat", "cinnamon-roll", "everything-bagel",
         ]
         for token in seeded {
             XCTAssertFalse(DrinkArtRegistry.spec(for: token).isFallback,

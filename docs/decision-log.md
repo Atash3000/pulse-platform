@@ -2841,3 +2841,51 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** The toggle was 100% frontend (no backend filter), so this is an iOS change plus a one-line seed rename — no migration. The bar reads category names straight from the loaded menu, so it stays correct as categories change. `temperature` stays because it still drives the product-detail "Hot or Iced" line and the deferred temperature/ice options.
 
 **Trade-offs:** The iOS-16 scroll-spy (PreferenceKey offset tracking + a cancellable tap-suppression window) is the one fiddly piece; it's fail-safe per GR#17 — a misfire only mis-highlights a tab, never breaks the menu/cart path. Tab labels/order come from the seed; manager-editable categories remain deferred (drink-options Part C). Horizontal scrolling for >3 categories and Dynamic Type on the (fixed-size) pill labels are deferred a11y/UX follow-ups recorded in `docs/todo-endpoints.md`.
+
+---
+
+## 2026-06-03 — [api] menu_items.sort_order — backend-owned item ordering
+
+**Decision:** Added `menu_items.sort_order` (int, NOT NULL DEFAULT 0). The menu service returns items `ORDER BY sort_order ASC, name ASC`. Not exposed in the public DTO — clients render the given array order.
+
+**Context:** Items came back `name ASC`, so the spotlight menu could not show curated sub-heros (the fancy drinks first) without a brittle client-side sort or a hardcoded guess.
+
+**Reasoning:** Ordering belongs in the data — one source of truth, reorderable by a non-engineer without an app release, and it makes the hero/sub-hero/vertical split a pure function of the given order. Elevated to **Golden Rule #18** (display order is backend-owned).
+
+**Trade-offs:** Default 0 means un-curated items fall through to `name`. A future client needing the raw value would add it to the DTO then. Needs a clean dev re-seed for curated values to land.
+
+---
+
+## 2026-06-03 — [menu] Spotlight layout for all sections + one category at a time
+
+**Decision:** Every menu category is now `display_style: spotlight` and renders **hero + up to 3 sub-hero cards + the remaining items as a vertical list** (`MenuListRow`). The category bar is a **selector**: tapping a tab shows only that category's section (Matcha hides Coffee/Food, etc.). Coffee gained 4 signature iced lattes (hero = Iced Coconut Latte) + the regulars in the vertical list; Matcha and Food were deepened to 7 items each (fruit/fancy as sub-heros, classic/vanilla/etc. in the vertical list); Food hero = Mini Khachapuri.
+
+**Context:** Heroes drive fast decisions + upsell, and the founder wanted each section to read on its own — not all three stacked.
+
+**Reasoning:** `SpotlightSection` was already category-agnostic; the layout is two pure split helpers (`subHeroItems`/`verticalItems`, capped at 3) + reusing `MenuListRow`. Showing one category at a time **reverses the 2026-06-02 menu-category-nav scroll-spy decision** (all sections stacked with a scroll-spy nav) — that machinery (`activeCategoryId`, `SectionTopPreferenceKey`, jump/suppress) was removed as dead code. Hero = `featured`; sub-hero/vertical tiering = `sort_order` (Golden Rule #18); art per Golden Rule #19.
+
+**Trade-offs:** The scroll-spy + its accessibility work (shipped in #31) is gone — a deliberate product reversal. The hero-*decision* mechanism (admin-select / sales-automation) stays deferred; `featured` + `sort_order` are the manual levers (`docs/todo-endpoints.md`). Clean dev re-seed required.
+
+---
+
+## 2026-06-03 — [ios] BrandFooter reusable wordmark
+
+**Decision:** Added `Core/BrandFooter.swift` — a reusable Pulse serif wordmark (+ optional tagline) shown in the quiet space at the foot of the menu scroll; its bottom padding also clears the tab bar so the last item is never hidden.
+
+**Context:** The bottom inset (sized to clear the 72pt tab bar) left empty space the founder wanted branded.
+
+**Reasoning:** A small, parameterised, `accessibilityHidden` view that any screen can drop in (`BrandFooter()` / `BrandFooter(tagline:)`). Uses the app's existing serif treatment (SwiftUI has no built-in script font; a bundled custom font is a noted future option).
+
+**Trade-offs:** Serif italic, not a hand-lettered logo — consistent with the rest of the app; a custom typeface is deferred.
+
+---
+
+## 2026-06-03 — [docs] Golden Rules #18 and #19 elevated
+
+**Decision:** Elevated two project rules to the canonical Golden Rules set (`docs/golden-rules.md` + CLAUDE.md §3): **#18 Display order is backend-owned**; **#19 Opaque art tokens, registered + fail-safe**.
+
+**Context:** Both emerged from the spotlight-menu work (the `name ASC` ordering trap; the `DrinkArtRegistry` + coverage-test pattern) and generalise beyond it.
+
+**Reasoning:** #18 prevents client/backend ordering divergence; #19 decouples backend data from client rendering while a build-failing test stops silent "?" art. Both are reusable platform principles, so they belong with the standing rules.
+
+**Trade-offs:** None — codifies existing practice.

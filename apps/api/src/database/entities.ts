@@ -390,6 +390,9 @@ export class MenuItem {
   @Column({ type: 'boolean', default: false })
   featured!: boolean;
 
+  @Column({ type: 'int', default: 0 })
+  sort_order!: number;
+
   /**
    * Opaque key the iOS app maps to a drawn abstract drink symbol
    * (e.g. 'strawberry-matcha', 'cappuccino', 'croissant'). Nullable;

@@ -31,12 +31,13 @@ apps/ios/
 │   ├── ContentView.swift                root auth gate: Login ↔ MainTabView
 │   ├── PulseCoffeeApp.entitlements     push capability
 │   ├── Core/                            AppState, APIClient, Keychain, CartManager…
+│   │   ├── BrandFooter.swift            reusable Pulse wordmark (sits in the menu footer)
 │   │   ├── FavoritesStore.swift         local fail-safe favorites (UserDefaults), backend sync deferred
 │   │   └── TabBarVisibility.swift       focused-mode flag hiding the custom PulseTabBar (no system TabView → .toolbar(.hidden,for:.tabBar) is a no-op)
 │   ├── Features/
 │   │   ├── Auth/                        Sign-in + register
 │   │   ├── Navigation/                  MainTabView (bottom tab bar) — see folder README
-│   │   ├── Menu/                        Menu list + item detail
+│   │   ├── Menu/                        Spotlight menu (category selector, one category at a time) + item detail
 │   │   ├── Cart/                        Cart sheet
 │   │   └── Checkout/                    Stripe PaymentSheet wiring
 │   ├── Models/                          Codables for backend DTOs
@@ -92,7 +93,7 @@ The bundled `seed:dev` script creates one location but no menu items. To order a
 | 2 | SPM deps (Stripe, Sentry, PostHog) + AppConfig + Sentry/PostHog init | ✅ Landed |
 | 3 | APIClient, Keychain, Codable models, ATS exception | ✅ Landed |
 | Housekeeping | Package.resolved, PostHog rename, make clean-derived | ✅ Landed |
-| MVP-2 | Menu screen (location + menu fetch, sectioned list) | ✅ Landed |
+| MVP-2 | Menu screen (location + menu fetch, spotlight section per selected category) | ✅ Landed |
 | Commit A | Auth feature — AppState, TokenRefresher, Login/Register UI, 401 retry | ✅ Landed |
 | FE DEV-2 | `MainTabView` bottom tab navigator (Home / Menu / Orders / Account), blue selected tint, SF Symbols icons | (this commit) |
 | MVP-3 | Cart + Apple Pay checkout + idempotency | (planned) |

@@ -162,3 +162,15 @@ No money/auth/checkout touched. iOS reads array order; backend owns ordering.
 
 - **Hero & ordering admin tooling** — `featured` (hero) and `sort_order` (sub-hero/vertical tiering) are seed-set today. A manager dashboard or a sales-driven automation to set them is future work (relates to drink-options Part C). The data levers now exist; **no endpoint added here.**
 - **`list` display style** stays available for any future plain-list category.
+
+---
+
+## 11. As-built notes (2026-06-03)
+
+The implementation diverged from §1–§10 in three founder-driven ways; recorded here so the spec matches reality:
+
+- **One category at a time (replaces the design's stacked sections).** The original design kept all sections scrolling with the category nav. As built, the category bar is a **selector**: tapping a tab shows only that category's section. The scroll-spy nav from the earlier menu-category-nav work was removed as part of this.
+- **Deeper Matcha & Food menus.** Beyond Coffee, Matcha and Food were each deepened to 7 items so they also have a vertical list: Matcha keeps the fruit drinks as sub-heros and adds Iced Classic / Vanilla / Blueberry to the vertical list; Food adds Pain au Chocolat / Cinnamon Roll (sub-heros) + Everything Bagel (vertical), with 3 new `DrinkArt` food tiles.
+- **BrandFooter + tab-bar inset.** The menu scroll's bottom inset is sized to clear the 72pt `PulseTabBar` (the last item was hidden under it), and that space holds a reusable `Core/BrandFooter.swift` Pulse wordmark.
+
+Decision-log: see the 2026-06-03 entries ([api] sort_order, [menu] spotlight-for-all + one-category, [ios] BrandFooter, [docs] Golden Rules #18/#19).

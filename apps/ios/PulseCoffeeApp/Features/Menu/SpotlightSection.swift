@@ -1,16 +1,15 @@
 import SwiftUI
 
-/// Spotlight section for `display_style == spotlight` categories. One
-/// hero card on top + a horizontal scroll of compact cards for the
-/// rest. Hero pick is section-local (`SpotlightSection.hero(in:)`) so
-/// the screen does not depend on backend `ORDER BY` clauses for visual
-/// correctness: backend orders matcha items by `name ASC` per
-/// `apps/api/src/modules/menu/menu.service.ts:184`, which puts
-/// Strawberry Matcha (the seeded `featured: true` drink) last
-/// alphabetically. The hero is the first `featured == true` item;
-/// when none are featured, falls back to the first item in the
-/// category (Golden Rule #17). The scroll row excludes the hero by ID
-/// so the same drink never appears twice.
+/// Spotlight section for `display_style == spotlight` categories (all v4
+/// menu categories). Layout: one hero card on top, then up to 3 sub-hero
+/// cards in a horizontal scroll, then the remaining items in a vertical
+/// list (`MenuListRow`). Hero pick is section-local
+/// (`SpotlightSection.hero(in:)`): the first `featured == true` item, else
+/// the first item (Golden Rule #17). Sub-heros / vertical items are the
+/// next-3 / after-3 non-hero items in the backend's order
+/// (`sort_order ASC, name ASC`), so curation lives in the seed, not iOS
+/// (Golden Rule #18). Every row excludes the hero by ID so the same item
+/// never appears twice.
 struct SpotlightSection: View {
     let category: MenuCategory
     let onOpenDetail: (MenuItem) -> Void
@@ -21,13 +20,26 @@ struct SpotlightSection: View {
             sectionHeader
             if let hero = Self.hero(in: category.items) {
                 heroCard(for: hero)
-                let rest = Self.nonHeroItems(in: category.items, hero: hero)
-                if !rest.isEmpty {
-                    scrollRow(items: rest)
-                }
+                let subs = Self.subHeroItems(in: category.items, hero: hero)
+                if !subs.isEmpty { scrollRow(items: subs) }
+                let rest = Self.verticalItems(in: category.items, hero: hero)
+                if !rest.isEmpty { verticalList(rest) }
             }
         }
         .padding(.bottom, 22)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    /// One combined VoiceOver label for a spotlight card: featured flag, name,
+    /// price, then the description. Read as a single element; "Add to cart" is
+    /// exposed as a separate accessibility action.
+    private func spotlightCardLabel(for item: MenuItem) -> String {
+        var parts: [String] = []
+        if item.featured { parts.append("Hero item") }   // mirrors the visual "★ HERO" eyebrow
+        parts.append(item.name)
+        parts.append(item.displayPrice)
+        if let desc = item.description, !desc.isEmpty { parts.append(desc) }
+        return parts.joined(separator: ", ")
     }
 
     private var sectionHeader: some View {
@@ -36,10 +48,13 @@ struct SpotlightSection: View {
                 .italic()
                 .font(.system(size: 22, weight: .regular, design: .serif))
             Spacer()
-            Text("\(category.items.count) drinks")
+            Text("\(category.items.count) items")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(headerTitle), \(category.items.count) items")
+        .accessibilityAddTraits(.isHeader)
         .padding(.horizontal, 24)
     }
 
@@ -71,6 +86,10 @@ struct SpotlightSection: View {
                 .clipShape(RoundedRectangle(cornerRadius: 22))
 
                 VStack(alignment: .leading, spacing: 6) {
+                    // Eyebrow is decorative — the card's combined label conveys
+                    // the hero/featured state (see spotlightCardLabel), so a
+                    // per-Text accessibilityLabel here would be dead under
+                    // `.accessibilityElement(children: .combine)`.
                     Text(item.featured ? "★ HERO" : "FEATURED")
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1.4)
@@ -79,11 +98,13 @@ struct SpotlightSection: View {
                         .font(.system(size: 22, weight: .regular, design: .serif))
                         .italic()
                         .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                     if let desc = item.description, !desc.isEmpty {
                         Text(desc)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
+                            .minimumScaleFactor(0.8)
                     }
                     Spacer()
                     HStack {
@@ -99,6 +120,8 @@ struct SpotlightSection: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
                         .background(Capsule().fill(AppTheme.Colors.tabLabelActive))
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("Add \(item.name) to cart")
                     }
                 }
                 .padding(16)
@@ -107,6 +130,10 @@ struct SpotlightSection: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(spotlightCardLabel(for: item))
+        .accessibilityHint("Opens details")
+        .accessibilityAction(named: "Add to cart") { onAdd(item) }
         .background(
             RoundedRectangle(cornerRadius: 22).fill(AppTheme.Colors.tabBarBackground)
         )
@@ -115,6 +142,22 @@ struct SpotlightSection: View {
                 .stroke(AppTheme.Colors.divider.opacity(0.10), lineWidth: 1)
         )
         .padding(.horizontal, 16)
+    }
+
+    /// Overflow items beyond the 3 sub-hero cards, rendered as the same
+    /// compact rows the plain `list` categories use.
+    private func verticalList(_ items: [MenuItem]) -> some View {
+        VStack(spacing: 6) {
+            ForEach(items) { item in
+                MenuListRow(
+                    item: item,
+                    onOpenDetail: { onOpenDetail(item) },
+                    onAdd: { onAdd(item) }
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
     }
 
     private func scrollRow(items: [MenuItem]) -> some View {
@@ -151,6 +194,7 @@ struct SpotlightSection: View {
                 Text(item.name)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
+                    .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack {
@@ -163,14 +207,21 @@ struct SpotlightSection: View {
                             .foregroundStyle(AppTheme.Colors.tabBarBackground)
                             .frame(width: 24, height: 24)
                             .background(Circle().fill(AppTheme.Colors.tabLabelActive))
+                            .frame(width: 44, height: 44)      // invisible hit padding (visual stays 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Add \(item.name) to cart")
                 }
             }
             .padding(12)
             .frame(width: 150)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(spotlightCardLabel(for: item))
+        .accessibilityHint("Opens details")
+        .accessibilityAction(named: "Add to cart") { onAdd(item) }
         .background(
             RoundedRectangle(cornerRadius: 18).fill(AppTheme.Colors.tabBarBackground)
         )
@@ -195,5 +246,21 @@ extension SpotlightSection {
     /// backend-supplied order without appearing twice on screen.
     static func nonHeroItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
         items.filter { $0.id != hero.id }
+    }
+
+    /// Max items shown as horizontal sub-hero cards before the rest spill
+    /// into the vertical list.
+    static let subHeroLimit = 3
+
+    /// The first `subHeroLimit` non-hero items (horizontal cards). Order is
+    /// the backend-supplied order (`sort_order, name`).
+    static func subHeroItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
+        Array(nonHeroItems(in: items, hero: hero).prefix(subHeroLimit))
+    }
+
+    /// Non-hero items beyond the sub-hero cap — rendered as a vertical list
+    /// (`MenuListRow`). Empty when there are ≤ `subHeroLimit` of them.
+    static func verticalItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
+        Array(nonHeroItems(in: items, hero: hero).dropFirst(subHeroLimit))
     }
 }

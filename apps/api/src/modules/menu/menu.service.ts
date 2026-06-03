@@ -186,7 +186,8 @@ export class MenuService {
       .createQueryBuilder('i')
       .where('i.category_id IN (:...categoryIds)', { categoryIds })
       .andWhere('i.active = true')
-      .orderBy('i.name', 'ASC')
+      .orderBy('i.sort_order', 'ASC')
+      .addOrderBy('i.name', 'ASC')
       .getMany();
 
     const itemIds = items.map((i) => i.id);
