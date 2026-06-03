@@ -74,4 +74,32 @@ final class SpotlightSectionTests: XCTestCase {
         let hero = try XCTUnwrap(SpotlightSection.hero(in: items))
         XCTAssertEqual(SpotlightSection.nonHeroItems(in: items, hero: hero), [])
     }
+
+    func test_subHeroItems_capsAtThree_inOrder() throws {
+        let items = [item("h", featured: true), item("a"), item("b"), item("c"), item("d"), item("e")]
+        let hero = try XCTUnwrap(SpotlightSection.hero(in: items))
+        XCTAssertEqual(SpotlightSection.subHeroItems(in: items, hero: hero).map(\.id), ["a", "b", "c"])
+    }
+
+    func test_verticalItems_isRemainderAfterThree() throws {
+        let items = [item("h", featured: true), item("a"), item("b"), item("c"), item("d"), item("e")]
+        let hero = try XCTUnwrap(SpotlightSection.hero(in: items))
+        XCTAssertEqual(SpotlightSection.verticalItems(in: items, hero: hero).map(\.id), ["d", "e"])
+    }
+
+    func test_subHeros_returnAll_andVerticalEmpty_whenThreeOrFewerNonHero() throws {
+        let items = [item("h", featured: true), item("a"), item("b"), item("c")]
+        let hero = try XCTUnwrap(SpotlightSection.hero(in: items))
+        XCTAssertEqual(SpotlightSection.subHeroItems(in: items, hero: hero).map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(SpotlightSection.verticalItems(in: items, hero: hero), [])
+    }
+
+    func test_split_excludesHero() throws {
+        let items = [item("a"), item("b"), item("h", featured: true), item("c"), item("d")]
+        let hero = try XCTUnwrap(SpotlightSection.hero(in: items))
+        let combined = SpotlightSection.subHeroItems(in: items, hero: hero)
+            + SpotlightSection.verticalItems(in: items, hero: hero)
+        XCTAssertFalse(combined.map(\.id).contains("h"), "Neither row may contain the hero")
+        XCTAssertEqual(combined.map(\.id), ["a", "b", "c", "d"])
+    }
 }

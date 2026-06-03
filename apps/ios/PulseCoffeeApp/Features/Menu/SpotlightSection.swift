@@ -21,10 +21,10 @@ struct SpotlightSection: View {
             sectionHeader
             if let hero = Self.hero(in: category.items) {
                 heroCard(for: hero)
-                let rest = Self.nonHeroItems(in: category.items, hero: hero)
-                if !rest.isEmpty {
-                    scrollRow(items: rest)
-                }
+                let subs = Self.subHeroItems(in: category.items, hero: hero)
+                if !subs.isEmpty { scrollRow(items: subs) }
+                let rest = Self.verticalItems(in: category.items, hero: hero)
+                if !rest.isEmpty { verticalList(rest) }
             }
         }
         .padding(.bottom, 22)
@@ -36,7 +36,7 @@ struct SpotlightSection: View {
                 .italic()
                 .font(.system(size: 22, weight: .regular, design: .serif))
             Spacer()
-            Text("\(category.items.count) drinks")
+            Text("\(category.items.count) items")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
         }
@@ -117,6 +117,22 @@ struct SpotlightSection: View {
         .padding(.horizontal, 16)
     }
 
+    /// Overflow items beyond the 3 sub-hero cards, rendered as the same
+    /// compact rows the plain `list` categories use.
+    private func verticalList(_ items: [MenuItem]) -> some View {
+        VStack(spacing: 6) {
+            ForEach(items) { item in
+                MenuListRow(
+                    item: item,
+                    onOpenDetail: { onOpenDetail(item) },
+                    onAdd: { onAdd(item) }
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+
     private func scrollRow(items: [MenuItem]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
@@ -195,5 +211,21 @@ extension SpotlightSection {
     /// backend-supplied order without appearing twice on screen.
     static func nonHeroItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
         items.filter { $0.id != hero.id }
+    }
+
+    /// Max items shown as horizontal sub-hero cards before the rest spill
+    /// into the vertical list.
+    static let subHeroLimit = 3
+
+    /// The first `subHeroLimit` non-hero items (horizontal cards). Order is
+    /// the backend-supplied order (`sort_order, name`).
+    static func subHeroItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
+        Array(nonHeroItems(in: items, hero: hero).prefix(subHeroLimit))
+    }
+
+    /// Non-hero items beyond the sub-hero cap — rendered as a vertical list
+    /// (`MenuListRow`). Empty when there are ≤ `subHeroLimit` of them.
+    static func verticalItems(in items: [MenuItem], hero: MenuItem) -> [MenuItem] {
+        Array(nonHeroItems(in: items, hero: hero).dropFirst(subHeroLimit))
     }
 }
