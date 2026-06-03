@@ -178,10 +178,12 @@ struct MenuView: View {
                         if let category = selected {
                             section(for: category)
                         }
-                        // Clear the bottom tab bar so the last item isn't hidden
-                        // under it (the bar is added via safeAreaInset on the
-                        // tab container; this matches its height + a margin).
-                        Color.clear.frame(height: AppTheme.Metrics.tabBarHeight + 24)
+                        // Brand wordmark fills the quiet space below the last
+                        // item; the bottom padding also clears the tab bar (added
+                        // via safeAreaInset on the tab container) so nothing hides.
+                        BrandFooter()
+                            .padding(.top, 28)
+                            .padding(.bottom, AppTheme.Metrics.tabBarHeight + 20)
                     }
                 }
             }
