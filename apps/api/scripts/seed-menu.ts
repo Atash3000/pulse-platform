@@ -75,9 +75,11 @@ const LOCATION_NAME = 'Pulse Coffee — Main St';
 
 type ArtToken =
   | 'strawberry-matcha' | 'raspberry-matcha' | 'brown-sugar-matcha' | 'ginger-matcha'
+  | 'iced-classic-matcha' | 'vanilla-matcha' | 'blueberry-matcha'
   | 'cappuccino' | 'latte' | 'americano' | 'flat-white' | 'cortado' | 'cold-brew' | 'espresso'
   | 'iced-coconut-latte' | 'iced-salted-caramel-latte' | 'iced-brown-sugar-oat-latte' | 'iced-vanilla-latte'
-  | 'croissant' | 'khachapuri' | 'muffin' | 'cookie';
+  | 'croissant' | 'khachapuri' | 'muffin' | 'cookie'
+  | 'pain-au-chocolat' | 'cinnamon-roll' | 'everything-bagel';
 
 interface SeedItem {
   name: string;
@@ -303,10 +305,13 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
     sort_order: 0,
     display_style: 'spotlight',
     items: [
-      { name: 'Strawberry Matcha', description: 'Ceremonial matcha, oat milk & strawberry purée', base_price_cents: 645, temperature: 'iced', featured: true,  art_token: 'strawberry-matcha' },
-      { name: 'Raspberry Matcha',  description: 'Ceremonial matcha, oat milk & raspberry',         base_price_cents: 645, temperature: 'iced', featured: false, art_token: 'raspberry-matcha' },
-      { name: 'Brown Sugar Matcha',description: 'Ceremonial matcha, oat milk & brown sugar',       base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'brown-sugar-matcha' },
-      { name: 'Ginger Matcha',     description: 'Ceremonial matcha, oat milk & fresh ginger',      base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'ginger-matcha' },
+      { name: 'Strawberry Matcha',  description: 'Ceremonial matcha, oat milk & strawberry purée', base_price_cents: 645, temperature: 'iced', featured: true,  art_token: 'strawberry-matcha',   sort_order: 0 },
+      { name: 'Raspberry Matcha',   description: 'Ceremonial matcha, oat milk & raspberry',         base_price_cents: 645, temperature: 'iced', featured: false, art_token: 'raspberry-matcha',    sort_order: 1 },
+      { name: 'Brown Sugar Matcha', description: 'Ceremonial matcha, oat milk & brown sugar',       base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'brown-sugar-matcha',  sort_order: 2 },
+      { name: 'Ginger Matcha',      description: 'Ceremonial matcha, oat milk & fresh ginger',      base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'ginger-matcha',       sort_order: 3 },
+      { name: 'Iced Classic Matcha',description: 'Ceremonial matcha & oat milk over ice',           base_price_cents: 575, temperature: 'iced', featured: false, art_token: 'iced-classic-matcha', sort_order: 4 },
+      { name: 'Vanilla Matcha',     description: 'Ceremonial matcha, oat milk & Madagascar vanilla',base_price_cents: 625, temperature: 'iced', featured: false, art_token: 'vanilla-matcha',      sort_order: 5 },
+      { name: 'Blueberry Matcha',   description: 'Ceremonial matcha, oat milk & blueberry',         base_price_cents: 645, temperature: 'iced', featured: false, art_token: 'blueberry-matcha',    sort_order: 6 },
     ],
   },
   {
@@ -332,10 +337,13 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
     sort_order: 2,
     display_style: 'spotlight',
     items: [
-      { name: 'Mini Khachapuri',   description: 'Georgian cheese bread, served warm', base_price_cents: 800, temperature: 'both', featured: true,  art_token: 'khachapuri' },
-      { name: 'Butter Croissant',  description: 'Flaky French butter, baked fresh',   base_price_cents: 450, temperature: 'both', featured: false, art_token: 'croissant' },
-      { name: 'Blueberry Muffin',  description: 'Fresh blueberries, gluten-free',     base_price_cents: 375, temperature: 'both', featured: false, art_token: 'muffin' },
-      { name: 'Chocolate Cookie',  description: 'Dark chocolate & sea salt',          base_price_cents: 325, temperature: 'both', featured: false, art_token: 'cookie' },
+      { name: 'Mini Khachapuri',  description: 'Georgian cheese bread, served warm',    base_price_cents: 800, temperature: 'both', featured: true,  art_token: 'khachapuri',       sort_order: 0 },
+      { name: 'Butter Croissant', description: 'Flaky French butter, baked fresh',       base_price_cents: 450, temperature: 'both', featured: false, art_token: 'croissant',        sort_order: 1 },
+      { name: 'Pain au Chocolat', description: 'Butter pastry & dark chocolate batons',  base_price_cents: 500, temperature: 'both', featured: false, art_token: 'pain-au-chocolat',  sort_order: 2 },
+      { name: 'Cinnamon Roll',    description: 'Soft swirl, cinnamon & cream-cheese glaze',base_price_cents: 525, temperature: 'both', featured: false, art_token: 'cinnamon-roll',    sort_order: 3 },
+      { name: 'Blueberry Muffin', description: 'Fresh blueberries, gluten-free',         base_price_cents: 375, temperature: 'both', featured: false, art_token: 'muffin',           sort_order: 4 },
+      { name: 'Chocolate Cookie', description: 'Dark chocolate & sea salt',              base_price_cents: 325, temperature: 'both', featured: false, art_token: 'cookie',           sort_order: 5 },
+      { name: 'Everything Bagel', description: 'Toasted, with scallion cream cheese',    base_price_cents: 425, temperature: 'both', featured: false, art_token: 'everything-bagel',  sort_order: 6 },
     ],
   },
 ];

@@ -65,6 +65,9 @@ enum DrinkArtRegistry {
         "raspberry-matcha":   .matcha(top: matchaGreen, mid: oatMid,   bot: Color(hex: 0xA82D4E)),
         "brown-sugar-matcha": .matcha(top: matchaGreen, mid: creamMid, bot: Color(hex: 0x5C3A1F)),
         "ginger-matcha":      .matcha(top: matchaGreen, mid: creamMid, bot: Color(hex: 0xD4912F)),
+        "iced-classic-matcha": .matcha(top: matchaGreen, mid: creamMid, bot: Color(hex: 0x4F7030)),
+        "vanilla-matcha":      .matcha(top: matchaGreen, mid: creamMid, bot: Color(hex: 0xE8D9A8)),
+        "blueberry-matcha":    .matcha(top: matchaGreen, mid: oatMid,   bot: Color(hex: 0x4A5BA8)),
 
         // Classics — gradient stops in source order, top→bottom (HTML 211–216).
         // The HTML uses 2–4 stops; SwiftUI's `LinearGradient(colors:)` distributes
@@ -91,6 +94,9 @@ enum DrinkArtRegistry {
         "khachapuri": .food(top: 0xFAE8C8, bot: 0xB8854A, glyph: "🫓"),
         "muffin":     .food(top: 0xF0E0D0, bot: 0x8B5A2B, glyph: "🧁"),
         "cookie":     .food(top: 0xE8D4A8, bot: 0x6B3A1E, glyph: "🍪"),
+        "pain-au-chocolat": .food(top: 0xE8D4B0, bot: 0x5C3A1F, glyph: "🥐"),
+        "cinnamon-roll":    .food(top: 0xF0DCC0, bot: 0xA9692F, glyph: "🌀"),
+        "everything-bagel": .food(top: 0xEAD9B0, bot: 0x8B6A3A, glyph: "🥯"),
     ]
 
     /// Returns the registered spec for a token, or a neutral classic-cup
