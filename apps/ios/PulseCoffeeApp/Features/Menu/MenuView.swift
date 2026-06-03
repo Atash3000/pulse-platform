@@ -19,6 +19,10 @@ struct MenuView: View {
     /// The category whose section is shown. The tab bar selects it; exactly
     /// one category is visible at a time (tapping Coffee hides Matcha/Food).
     @State private var selectedCategoryId: MenuCategory.ID?
+    /// Tracks whether the first selection (initial auto-select on appear) has
+    /// happened. Used to suppress the VoiceOver section announcement on load —
+    /// only user-driven tab changes should announce.
+    @State private var hasAppearedSelection = false
 
     var body: some View {
         NavigationStack {
@@ -197,6 +201,7 @@ struct MenuView: View {
             // One category shows at a time; announce the selected section to
             // VoiceOver when the tab changes it.
             .onChange(of: selectedCategoryId) { newId in
+                guard hasAppearedSelection else { hasAppearedSelection = true; return }
                 guard let id = newId,
                       let name = categories.first(where: { $0.id == id })?.name else { return }
                 UIAccessibility.post(notification: .announcement, argument: "\(name) section")
@@ -238,6 +243,9 @@ struct MenuView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(category.name), \(category.items.count) items")
+                .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 6)
 

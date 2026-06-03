@@ -27,6 +27,19 @@ struct SpotlightSection: View {
             }
         }
         .padding(.bottom, 22)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    /// One combined VoiceOver label for a spotlight card: featured flag, name,
+    /// price, then the description. Read as a single element; "Add to cart" is
+    /// exposed as a separate accessibility action.
+    private func spotlightCardLabel(for item: MenuItem) -> String {
+        var parts: [String] = []
+        if item.featured { parts.append("Featured") }
+        parts.append(item.name)
+        parts.append(item.displayPrice)
+        if let desc = item.description, !desc.isEmpty { parts.append(desc) }
+        return parts.joined(separator: ", ")
     }
 
     private var sectionHeader: some View {
@@ -39,6 +52,9 @@ struct SpotlightSection: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(headerTitle), \(category.items.count) items")
+        .accessibilityAddTraits(.isHeader)
         .padding(.horizontal, 24)
     }
 
@@ -74,15 +90,18 @@ struct SpotlightSection: View {
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1.4)
                         .foregroundStyle(AppTheme.Colors.accentWarm)
+                        .accessibilityLabel(item.featured ? "Hero item" : "Featured")
                     Text(item.name)
                         .font(.system(size: 22, weight: .regular, design: .serif))
                         .italic()
                         .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                     if let desc = item.description, !desc.isEmpty {
                         Text(desc)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
+                            .minimumScaleFactor(0.8)
                     }
                     Spacer()
                     HStack {
@@ -98,6 +117,8 @@ struct SpotlightSection: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
                         .background(Capsule().fill(AppTheme.Colors.tabLabelActive))
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("Add \(item.name) to cart")
                     }
                 }
                 .padding(16)
@@ -106,6 +127,10 @@ struct SpotlightSection: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(spotlightCardLabel(for: item))
+        .accessibilityHint("Opens details")
+        .accessibilityAction(named: "Add to cart") { onAdd(item) }
         .background(
             RoundedRectangle(cornerRadius: 22).fill(AppTheme.Colors.tabBarBackground)
         )
@@ -166,6 +191,7 @@ struct SpotlightSection: View {
                 Text(item.name)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
+                    .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack {
@@ -178,14 +204,21 @@ struct SpotlightSection: View {
                             .foregroundStyle(AppTheme.Colors.tabBarBackground)
                             .frame(width: 24, height: 24)
                             .background(Circle().fill(AppTheme.Colors.tabLabelActive))
+                            .frame(width: 44, height: 44)      // invisible hit padding (visual stays 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Add \(item.name) to cart")
                 }
             }
             .padding(12)
             .frame(width: 150)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(spotlightCardLabel(for: item))
+        .accessibilityHint("Opens details")
+        .accessibilityAction(named: "Add to cart") { onAdd(item) }
         .background(
             RoundedRectangle(cornerRadius: 18).fill(AppTheme.Colors.tabBarBackground)
         )
