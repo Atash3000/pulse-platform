@@ -76,6 +76,7 @@ const LOCATION_NAME = 'Pulse Coffee — Main St';
 type ArtToken =
   | 'strawberry-matcha' | 'raspberry-matcha' | 'brown-sugar-matcha' | 'ginger-matcha'
   | 'cappuccino' | 'latte' | 'americano' | 'flat-white' | 'cortado' | 'cold-brew' | 'espresso'
+  | 'iced-coconut-latte' | 'iced-salted-caramel-latte' | 'iced-brown-sugar-oat-latte' | 'iced-vanilla-latte'
   | 'croissant' | 'khachapuri' | 'muffin' | 'cookie';
 
 interface SeedItem {
@@ -85,6 +86,7 @@ interface SeedItem {
   temperature: 'hot' | 'iced' | 'both';
   featured: boolean;
   art_token: ArtToken;
+  sort_order?: number;
 }
 
 interface SeedCategory {
@@ -310,26 +312,30 @@ const CATEGORIES: ReadonlyArray<SeedCategory> = [
   {
     name: 'Coffee',
     sort_order: 1,
-    display_style: 'list',
+    display_style: 'spotlight',
     items: [
-      { name: 'Cappuccino', description: 'Double espresso, steamed milk & velvet foam',  base_price_cents: 525, temperature: 'both', featured: false, art_token: 'cappuccino' },
-      { name: 'Latte',      description: 'Espresso, steamed milk & light foam',          base_price_cents: 550, temperature: 'both', featured: false, art_token: 'latte' },
-      { name: 'Americano',  description: 'Double espresso & hot water',                  base_price_cents: 450, temperature: 'both', featured: false, art_token: 'americano' },
-      { name: 'Flat White', description: 'Double ristretto & silky microfoam',           base_price_cents: 525, temperature: 'hot',  featured: false, art_token: 'flat-white' },
-      { name: 'Cortado',    description: 'Equal parts espresso & steamed milk',          base_price_cents: 475, temperature: 'hot',  featured: false, art_token: 'cortado' },
-      { name: 'Cold Brew',  description: '18-hour cold brew, single origin',             base_price_cents: 550, temperature: 'iced', featured: false, art_token: 'cold-brew' },
-      { name: 'Espresso',   description: 'House blend, double shot',                     base_price_cents: 350, temperature: 'hot',  featured: false, art_token: 'espresso' },
+      { name: 'Iced Coconut Latte',         description: 'Espresso, coconut milk & a sweet cream float', base_price_cents: 650, temperature: 'iced', featured: true,  art_token: 'iced-coconut-latte',          sort_order: 0 },
+      { name: 'Iced Salted Caramel Latte',  description: 'Espresso, salted caramel & cold milk',         base_price_cents: 675, temperature: 'iced', featured: false, art_token: 'iced-salted-caramel-latte',   sort_order: 1 },
+      { name: 'Iced Brown Sugar Oat Latte', description: 'Espresso, brown sugar & oat milk',             base_price_cents: 650, temperature: 'iced', featured: false, art_token: 'iced-brown-sugar-oat-latte',  sort_order: 2 },
+      { name: 'Iced Vanilla Latte',         description: 'Espresso, Madagascar vanilla & cold milk',     base_price_cents: 625, temperature: 'iced', featured: false, art_token: 'iced-vanilla-latte',          sort_order: 3 },
+      { name: 'Latte',      description: 'Espresso, steamed milk & light foam',         base_price_cents: 550, temperature: 'both', featured: false, art_token: 'latte',      sort_order: 4 },
+      { name: 'Cappuccino', description: 'Double espresso, steamed milk & velvet foam', base_price_cents: 525, temperature: 'both', featured: false, art_token: 'cappuccino', sort_order: 5 },
+      { name: 'Cold Brew',  description: '18-hour cold brew, single origin',            base_price_cents: 550, temperature: 'iced', featured: false, art_token: 'cold-brew',  sort_order: 6 },
+      { name: 'Flat White', description: 'Double ristretto & silky microfoam',          base_price_cents: 525, temperature: 'hot',  featured: false, art_token: 'flat-white', sort_order: 7 },
+      { name: 'Cortado',    description: 'Equal parts espresso & steamed milk',         base_price_cents: 475, temperature: 'hot',  featured: false, art_token: 'cortado',    sort_order: 8 },
+      { name: 'Americano',  description: 'Double espresso & hot water',                 base_price_cents: 450, temperature: 'both', featured: false, art_token: 'americano',  sort_order: 9 },
+      { name: 'Espresso',   description: 'House blend, double shot',                    base_price_cents: 350, temperature: 'hot',  featured: false, art_token: 'espresso',   sort_order: 10 },
     ],
   },
   {
     name: 'Food',
     sort_order: 2,
-    display_style: 'list',
+    display_style: 'spotlight',
     items: [
-      { name: 'Butter Croissant',  description: 'Flaky French butter, baked fresh',    base_price_cents: 450, temperature: 'both', featured: false, art_token: 'croissant' },
-      { name: 'Mini Khachapuri',   description: 'Georgian cheese bread, served warm',  base_price_cents: 800, temperature: 'both', featured: false, art_token: 'khachapuri' },
-      { name: 'Blueberry Muffin',  description: 'Fresh blueberries, gluten-free',      base_price_cents: 375, temperature: 'both', featured: false, art_token: 'muffin' },
-      { name: 'Chocolate Cookie',  description: 'Dark chocolate & sea salt',           base_price_cents: 325, temperature: 'both', featured: false, art_token: 'cookie' },
+      { name: 'Mini Khachapuri',   description: 'Georgian cheese bread, served warm', base_price_cents: 800, temperature: 'both', featured: true,  art_token: 'khachapuri' },
+      { name: 'Butter Croissant',  description: 'Flaky French butter, baked fresh',   base_price_cents: 450, temperature: 'both', featured: false, art_token: 'croissant' },
+      { name: 'Blueberry Muffin',  description: 'Fresh blueberries, gluten-free',     base_price_cents: 375, temperature: 'both', featured: false, art_token: 'muffin' },
+      { name: 'Chocolate Cookie',  description: 'Dark chocolate & sea salt',          base_price_cents: 325, temperature: 'both', featured: false, art_token: 'cookie' },
     ],
   },
 ];
@@ -414,6 +420,7 @@ async function run(): Promise<void> {
           item.temperature = seed.temperature as Temperature;
           item.featured = seed.featured;
           item.art_token = seed.art_token;
+          item.sort_order = seed.sort_order ?? 0;
           item.active = true;
           item = await itemRepo.save(item);
           totals.items_updated += 1;
@@ -427,6 +434,7 @@ async function run(): Promise<void> {
               temperature: seed.temperature as Temperature,
               featured: seed.featured,
               art_token: seed.art_token,
+              sort_order: seed.sort_order ?? 0,
               active: true,
             }),
           );
