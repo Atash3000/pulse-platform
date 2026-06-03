@@ -35,7 +35,7 @@ struct SpotlightSection: View {
     /// exposed as a separate accessibility action.
     private func spotlightCardLabel(for item: MenuItem) -> String {
         var parts: [String] = []
-        if item.featured { parts.append("Featured") }
+        if item.featured { parts.append("Hero item") }   // mirrors the visual "★ HERO" eyebrow
         parts.append(item.name)
         parts.append(item.displayPrice)
         if let desc = item.description, !desc.isEmpty { parts.append(desc) }
@@ -86,11 +86,14 @@ struct SpotlightSection: View {
                 .clipShape(RoundedRectangle(cornerRadius: 22))
 
                 VStack(alignment: .leading, spacing: 6) {
+                    // Eyebrow is decorative — the card's combined label conveys
+                    // the hero/featured state (see spotlightCardLabel), so a
+                    // per-Text accessibilityLabel here would be dead under
+                    // `.accessibilityElement(children: .combine)`.
                     Text(item.featured ? "★ HERO" : "FEATURED")
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1.4)
                         .foregroundStyle(AppTheme.Colors.accentWarm)
-                        .accessibilityLabel(item.featured ? "Hero item" : "Featured")
                     Text(item.name)
                         .font(.system(size: 22, weight: .regular, design: .serif))
                         .italic()
