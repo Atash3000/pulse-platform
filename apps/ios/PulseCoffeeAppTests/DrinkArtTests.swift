@@ -38,6 +38,7 @@ final class DrinkArtTests: XCTestCase {
         let seeded: [String] = [
             "strawberry-matcha", "raspberry-matcha", "brown-sugar-matcha", "ginger-matcha",
             "cappuccino", "latte", "americano", "flat-white", "cortado", "cold-brew", "espresso",
+            "iced-coconut-latte", "iced-salted-caramel-latte", "iced-brown-sugar-oat-latte", "iced-vanilla-latte",
             "croissant", "khachapuri", "muffin", "cookie",
         ]
         for token in seeded {

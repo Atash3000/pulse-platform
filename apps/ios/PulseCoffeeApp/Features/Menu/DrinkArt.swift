@@ -80,6 +80,12 @@ enum DrinkArtRegistry {
         // stops keep the visual simple at 8oz.
         "cortado":    .classic(stops: [0xFDF6E8, 0x9C6A3B, 0x5A3818]),
 
+        // Signature iced lattes — milk-cream top → espresso bottom.
+        "iced-coconut-latte":          .classic(stops: [0xFBF3E6, 0xE9D9BE, 0xB98E5E, 0x7A4F2C]),
+        "iced-salted-caramel-latte":   .classic(stops: [0xF3DEC0, 0xD9A867, 0xA9692F, 0x6B3A1E]),
+        "iced-brown-sugar-oat-latte":  .classic(stops: [0xF5E6CE, 0xCFA877, 0x9A6B3A, 0x5C3A1F]),
+        "iced-vanilla-latte":          .classic(stops: [0xFDF6E8, 0xEBD9B3, 0xC2945A, 0x8B5A2B]),
+
         // Food — 135° diagonal gradients (HTML lines 1122–1125).
         "croissant":  .food(top: 0xF5E6D3, bot: 0xD4A574, glyph: "🥐"),
         "khachapuri": .food(top: 0xFAE8C8, bot: 0xB8854A, glyph: "🫓"),
