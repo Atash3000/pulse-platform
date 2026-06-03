@@ -57,7 +57,7 @@ actor APIClient {
     private let refresher: TokenRefresher
 
     init(
-        session: URLSession = .shared,
+        session: URLSession = .pulse,
         baseURL: URL = AppConfig.apiBaseURL,
         tokenProvider: @Sendable @escaping () throws -> String? = { try Keychain.loadAccessToken() },
         refresher: TokenRefresher = .shared

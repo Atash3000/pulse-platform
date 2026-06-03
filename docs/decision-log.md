@@ -2889,3 +2889,17 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** #18 prevents client/backend ordering divergence; #19 decouples backend data from client rendering while a build-failing test stops silent "?" art. Both are reusable platform principles, so they belong with the standing rules.
 
 **Trade-offs:** None — codifies existing practice.
+
+---
+
+## 2026-06-03 — [ios] — Shared URLSession timeouts (15s request / 30s resource)
+
+**Decision:** All backend traffic uses a shared `URLSession.pulse` built from `URLSessionConfiguration.pulse` with `timeoutIntervalForRequest = 15`, `timeoutIntervalForResource = 30`, `waitsForConnectivity = false`. Injected as the default `session:` for `APIClient` and `TokenRefresher`.
+
+**Context:** `URLSession.shared` leaves `timeoutIntervalForResource` at its 7-day default and `timeoutIntervalForRequest` at 60s. On flaky shop Wi-Fi a stalled checkout request hangs with the button locked; the customer force-quits and re-taps, producing a duplicate-looking checkout (backend idempotency still prevents a double charge, but the UX is broken).
+
+**Alternatives considered:** (1) Keep `URLSession.shared`. (2) Set timeouts per-request on each `URLRequest`. (3) A shared configured session (chosen).
+
+**Reasoning:** A single shared config is DRY and guarantees every call site gets the same fail-fast behavior without per-request boilerplate. 15s request / 30s resource fail fast while tolerating slow-but-progressing transfers (request timeout resets per packet). `waitsForConnectivity = false` keeps the request from parking indefinitely offline. Test-injected sessions remain fully overridable (only the default parameter changed).
+
+**Trade-offs:** A genuinely slow but valid response > 30s is cut off — acceptable for this app's small JSON payloads.
