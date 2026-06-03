@@ -44,7 +44,7 @@ const item = (overrides: Partial<MenuItem> = {}): MenuItem =>
 // Convenience: a query-builder mock that returns a fixed list for getMany().
 function qb(result: unknown[]) {
   const builder: Record<string, unknown> = {};
-  ['where', 'andWhere', 'orderBy'].forEach((m) => {
+  ['where', 'andWhere', 'orderBy', 'addOrderBy'].forEach((m) => {
     builder[m] = jest.fn().mockReturnValue(builder);
   });
   builder.getMany = jest.fn().mockResolvedValue(result);
