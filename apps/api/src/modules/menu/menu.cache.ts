@@ -37,6 +37,22 @@ const ITEMS_BY_LOC_KEY = (locationId: string) => `menu:v3:items:loc:${locationId
 export class MenuCache {
   private readonly logger = new Logger(MenuCache.name);
 
+  // Rate-limit Redis-error warnings: at most one per window so a sustained
+  // outage doesn't flood logs, but a NEW outage after recovery still logs
+  // (not a permanent "warn once").
+  private lastRedisErrorLogAt = 0;
+  private static readonly REDIS_ERROR_LOG_WINDOW_MS = 30_000;
+
+  private logRedisError(op: string, err: unknown): void {
+    const now = Date.now();
+    if (now - this.lastRedisErrorLogAt >= MenuCache.REDIS_ERROR_LOG_WINDOW_MS) {
+      this.lastRedisErrorLogAt = now;
+      this.logger.warn(
+        `Redis ${op} failed; serving from DB (fail-open). ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
 
   // ---- Layer 1: full menu --------------------------------------------------
@@ -60,11 +76,15 @@ export class MenuCache {
    * set so we can find it again at invalidation time. Both ops in one pipeline.
    */
   async setItem<T>(locationId: string, itemId: string, payload: T): Promise<void> {
-    const pipeline = this.redis.pipeline();
-    pipeline.set(ITEM_KEY(itemId), JSON.stringify(payload), 'EX', MENU_TTL_SECONDS);
-    pipeline.sadd(ITEMS_BY_LOC_KEY(locationId), itemId);
-    pipeline.expire(ITEMS_BY_LOC_KEY(locationId), MENU_TTL_SECONDS);
-    await pipeline.exec();
+    try {
+      const pipeline = this.redis.pipeline();
+      pipeline.set(ITEM_KEY(itemId), JSON.stringify(payload), 'EX', MENU_TTL_SECONDS);
+      pipeline.sadd(ITEMS_BY_LOC_KEY(locationId), itemId);
+      pipeline.expire(ITEMS_BY_LOC_KEY(locationId), MENU_TTL_SECONDS);
+      await pipeline.exec();
+    } catch (err) {
+      this.logRedisError(`PIPELINE setItem ${itemId}`, err);
+    }
   }
 
   // ---- Invalidation -------------------------------------------------------
@@ -78,6 +98,10 @@ export class MenuCache {
    *   - CloverMenuImportService after a successful import sync
    */
   async invalidateMenu(locationId: string): Promise<void> {
+    // Deliberately NOT fail-open (unlike the read/write paths): invalidation is
+    // an admin write-side op (sold-out toggle, Clover import, staff edit). A
+    // swallowed failure here would leave the cache serving stale availability —
+    // a visible error is safer than silently showing a sold-out item as in-stock.
     const trackingKey = ITEMS_BY_LOC_KEY(locationId);
     const itemIds = await this.redis.smembers(trackingKey);
 
@@ -97,20 +121,36 @@ export class MenuCache {
   // ---- helpers -----------------------------------------------------------
 
   private async readJson<T>(key: string): Promise<T | null> {
-    const raw = await this.redis.get(key);
+    let raw: string | null;
+    try {
+      raw = await this.redis.get(key);
+    } catch (err) {
+      // Redis unreachable / timed out / failing over. Treat as a miss so the
+      // caller falls back to Postgres — never 500 the menu (Golden Rules #1, #17).
+      this.logRedisError(`GET ${key}`, err);
+      return null;
+    }
     if (!raw) return null;
     try {
       return JSON.parse(raw) as T;
     } catch {
-      // Corrupted entry — drop and treat as miss. Should never happen, but
-      // we don't want one bad payload to wedge the cache layer.
+      // Corrupted *value* (distinct from a failed *call* above). Drop and miss.
       this.logger.warn(`Corrupted cache entry at ${key}; dropping`);
-      await this.redis.del(key);
+      try {
+        await this.redis.del(key);
+      } catch (err) {
+        this.logRedisError(`DEL ${key}`, err);
+      }
       return null;
     }
   }
 
   private async writeJson(key: string, payload: unknown, ttl: number): Promise<void> {
-    await this.redis.set(key, JSON.stringify(payload), 'EX', ttl);
+    try {
+      await this.redis.set(key, JSON.stringify(payload), 'EX', ttl);
+    } catch (err) {
+      // A failed cache population must never break the request that triggered it.
+      this.logRedisError(`SET ${key}`, err);
+    }
   }
 }
