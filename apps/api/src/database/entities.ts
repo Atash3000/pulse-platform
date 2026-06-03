@@ -331,6 +331,7 @@ export class StaffUser {
 // 3.2 MENU & INVENTORY TABLES
 // =============================================================================
 
+@Index('IDX_menu_categories_location', ['location_id'])
 @Entity({ name: 'menu_categories' })
 export class MenuCategory {
   @PrimaryGeneratedColumn('uuid')
@@ -356,6 +357,7 @@ export class MenuCategory {
   active!: boolean;
 }
 
+@Index('IDX_menu_items_category', ['category_id'])
 @Entity({ name: 'menu_items' })
 export class MenuItem {
   @PrimaryGeneratedColumn('uuid')
@@ -427,6 +429,7 @@ export class MenuItem {
   modifier_groups!: Relation<ModifierGroup[]>;
 }
 
+@Index('IDX_modifier_groups_item', ['item_id'])
 @Entity({ name: 'modifier_groups' })
 export class ModifierGroup {
   @PrimaryGeneratedColumn('uuid')
@@ -455,6 +458,7 @@ export class ModifierGroup {
   modifiers!: Relation<Modifier[]>;
 }
 
+@Index('IDX_modifiers_group', ['group_id'])
 @Entity({ name: 'modifiers' })
 export class Modifier {
   @PrimaryGeneratedColumn('uuid')
@@ -561,6 +565,11 @@ export class PricingRule {
 @Index('IDX_orders_location_id', ['location_id'])
 @Index('IDX_orders_order_status', ['order_status'])
 @Index('IDX_orders_created_at', ['created_at'])
+// Composite indexes for live-queue (loc+status+created) and customer-history
+// (customer+created) queries. Additive — single-column indexes above are kept.
+@Index('IDX_orders_loc_status_created', ['location_id', 'order_status', 'created_at'])
+@Index('IDX_orders_customer_created', ['customer_id', 'created_at'])
+@Index('IDX_orders_status_created', ['order_status', 'created_at'])
 export class Order {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

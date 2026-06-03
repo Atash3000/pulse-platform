@@ -2903,3 +2903,17 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** A single shared config is DRY and guarantees every call site gets the same fail-fast behavior without per-request boilerplate. 15s request / 30s resource fail fast while tolerating slow-but-progressing transfers (request timeout resets per packet). `waitsForConnectivity = false` keeps the request from parking indefinitely offline. Test-injected sessions remain fully overridable (only the default parameter changed).
 
 **Trade-offs:** A genuinely slow but valid response > 30s is cut off — acceptable for this app's small JSON payloads.
+
+---
+
+## 2026-06-03 — [api/database] — Restore + add hot-path indexes
+
+**Decision:** New migration `AddReliabilityHotPathIndexes` adds `orders(location_id, order_status, created_at)`, `orders(customer_id, created_at)`, `orders(order_status, created_at)`, and FK indexes on `menu_categories(location_id)`, `menu_items(category_id)`, `modifier_groups(item_id)`, `modifiers(group_id)`. Additive — existing single-column `IDX_orders_*` indexes kept.
+
+**Context:** Migration `AddExplicitIndexes1778273529985` silently dropped the composite indexes `(location_id, order_status)` and `(customer_id, created_at)` (visible in its own `down()`) with no decision-log entry, replacing them with single-column indexes. Those composites serve the admin live queue and customer history; Postgres also does not auto-index foreign keys, so the menu-build queries were sequential scans.
+
+**Alternatives considered:** (1) Restore only the two dropped composites. (2) Re-add as the original 2-column shapes. (3) Drop the now-redundant single-column indexes in the same migration.
+
+**Reasoning:** Framed as hot-path query safety, not just regression repair. `(location_id, order_status, created_at)` covers the live-queue filter AND its `created_at ASC` sort (a strict upgrade over the dropped 2-column). Kept additive to avoid removing an index a query still relies on without a proven-redundant audit.
+
+**Trade-offs:** A few extra indexes add write cost — negligible at the ~500 orders/day target. A future audit may drop the redundant single-column `IDX_orders_*` indexes.
