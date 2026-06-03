@@ -178,7 +178,10 @@ struct MenuView: View {
                         if let category = selected {
                             section(for: category)
                         }
-                        Color.clear.frame(height: 24)
+                        // Clear the bottom tab bar so the last item isn't hidden
+                        // under it (the bar is added via safeAreaInset on the
+                        // tab container; this matches its height + a margin).
+                        Color.clear.frame(height: AppTheme.Metrics.tabBarHeight + 24)
                     }
                 }
             }
