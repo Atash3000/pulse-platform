@@ -45,8 +45,7 @@ struct SpotlightSection: View {
     private var sectionHeader: some View {
         HStack(alignment: .lastTextBaseline) {
             Text(headerTitle)
-                .italic()
-                .font(.system(size: 22, weight: .regular, design: .serif))
+                .font(PulseFont.serifM)
             Spacer()
             Text("\(category.items.count) items")
                 .font(.system(size: 12, weight: .medium))
@@ -93,10 +92,9 @@ struct SpotlightSection: View {
                     Text(item.featured ? "★ HERO" : "FEATURED")
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1.4)
-                        .foregroundStyle(AppTheme.Colors.accentWarm)
+                        .foregroundStyle(DetailPalette.matchaGreen)
                     Text(item.name)
-                        .font(.system(size: 22, weight: .regular, design: .serif))
-                        .italic()
+                        .font(PulseFont.serifM)
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
                     if let desc = item.description, !desc.isEmpty {

@@ -77,7 +77,7 @@ struct CartView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Your order")
-                .font(.system(size: 32, weight: .regular, design: .serif))
+                .font(PulseFont.serifXL)
                 .foregroundStyle(DetailPalette.ink)
             HStack(spacing: 6) {
                 Circle().fill(DetailPalette.matchaGreen).frame(width: 7, height: 7)
@@ -106,7 +106,7 @@ struct CartView: View {
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(DetailPalette.ink)
             }
             Text("Tax & final total calculated at checkout.")
-                .font(.system(size: 11)).foregroundStyle(DetailPalette.inkFaint)
+                .font(.system(size: 11)).foregroundStyle(DetailPalette.inkMuted)
         }
         .padding(.top, 4)
     }
@@ -136,7 +136,7 @@ struct CartView: View {
             Image(systemName: "cup.and.saucer")
                 .font(.system(size: 52)).foregroundStyle(DetailPalette.inkFaint)
             Text("Nothing here yet")
-                .font(.system(size: 26, weight: .regular, design: .serif)).foregroundStyle(DetailPalette.ink)
+                .font(PulseFont.serifL).foregroundStyle(DetailPalette.ink)
             Text("Add a drink and it'll be ready for pickup in minutes.")
                 .font(.system(size: 14)).foregroundStyle(DetailPalette.inkSoft)
                 .multilineTextAlignment(.center).frame(maxWidth: 260)
@@ -169,16 +169,16 @@ private struct CartLineView: View {
                 TemperatureBadge(temperature: CartLineSummary.temperature(for: line))
                 let mods = CartLineSummary.modifierSummary(for: line)
                 if !mods.isEmpty {
-                    Text(mods).font(.system(size: 12.5)).foregroundStyle(DetailPalette.inkSoft)
+                    Text(mods).font(.system(size: 13)).foregroundStyle(DetailPalette.inkSoft)
                 }
                 ForEach(CartLineSummary.extras(for: line), id: \.self) { extra in
                     Text("+ \(extra)").font(.system(size: 12)).foregroundStyle(DetailPalette.matchaGreen)
                 }
                 HStack(spacing: 14) {
                     Button("Edit drink", action: onEdit)
-                        .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DetailPalette.ink)
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(DetailPalette.ink)
                     Button("Remove") { cart.remove(lineId: line.id) }
-                        .font(.system(size: 12.5)).foregroundStyle(DetailPalette.inkFaint)
+                        .font(.system(size: 13)).foregroundStyle(DetailPalette.inkMuted)
                 }
                 .buttonStyle(.plain).padding(.top, 3)
             }
@@ -224,8 +224,8 @@ private struct TemperatureBadge: View {
     var body: some View {
         let (label, symbol, color): (String, String, Color) = {
             switch temperature {
-            case .hot:  return ("Hot", "flame", DetailPalette.accentWarm)
-            case .iced: return ("Iced", "snowflake", Color(red: 53/255, green: 107/255, blue: 136/255))
+            case .hot:  return ("Hot", "flame", DetailPalette.tempHot)
+            case .iced: return ("Iced", "snowflake", DetailPalette.tempIced)
             case .both: return ("Hot or Iced", "thermometer.medium", DetailPalette.inkSoft)
             }
         }()
@@ -249,7 +249,7 @@ private struct UpsellRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Perfect with \(item.name.lowercased())")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(DetailPalette.ink).lineLimit(1)
-                Text(item.displayPrice).font(.system(size: 11.5)).foregroundStyle(DetailPalette.inkSoft)
+                Text(item.displayPrice).font(.system(size: 12)).foregroundStyle(DetailPalette.inkSoft)
             }
             Spacer()
             Button(action: onAdd) {

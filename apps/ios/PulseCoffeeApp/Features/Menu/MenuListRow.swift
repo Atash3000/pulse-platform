@@ -85,11 +85,11 @@ struct MenuListRow: View {
         switch item.temperature {
         case .hot:
             return ("Hot",
-                    Color(red: 0.55, green: 0.29, blue: 0.12),
+                    DetailPalette.tempHot,
                     Color(red: 0.98, green: 0.89, blue: 0.83))
         case .iced:
             return ("Iced",
-                    Color(red: 0.16, green: 0.35, blue: 0.48),
+                    DetailPalette.tempIced,
                     Color(red: 0.85, green: 0.91, blue: 0.94))
         case .both:
             return ("Hot · Iced",

@@ -10,6 +10,14 @@
 	     are designed. -->
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
+	<!-- Brand serif (Fraunces, OFL — Resources/Fonts/OFL.txt). Bundled regular
+	     optical-72pt cut; used only for hero/section titles + the wordmark via
+	     PulseFont. The value is the FILENAME; Font.custom resolves the
+	     PostScript name "Fraunces72pt-Regular". -->
+	<key>UIAppFonts</key>
+	<array>
+		<string>Fraunces72pt-Regular.ttf</string>
+	</array>
 	<!--
 		Most CFBundle*/UI* values are resolved at build time from build
 		settings in `project.yml` (CFBundleIdentifier from

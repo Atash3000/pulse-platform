@@ -236,8 +236,7 @@ struct MenuView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .lastTextBaseline) {
                     Text(category.name)
-                        .italic()
-                        .font(.system(size: 22, weight: .regular, design: .serif))
+                        .font(PulseFont.serifM)
                     Spacer()
                     Text("\(category.items.count) items")
                         .font(.system(size: 12, weight: .medium))

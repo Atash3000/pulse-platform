@@ -5,10 +5,18 @@ import SwiftUI
 enum DetailPalette {
     static let ink = Color(red: 31 / 255, green: 26 / 255, blue: 20 / 255)          // --ink
     static let inkSoft = Color(red: 31 / 255, green: 26 / 255, blue: 20 / 255).opacity(0.6)
+    /// For small informational/secondary text that must still clear AA (~4.8:1
+    /// on warmCream). `inkFaint` (~1.8:1) is for decorative glyphs / disabled
+    /// controls only — never for content a user needs to read.
+    static let inkMuted = Color(red: 31 / 255, green: 26 / 255, blue: 20 / 255).opacity(0.68)
     static let inkFaint = Color(red: 31 / 255, green: 26 / 255, blue: 20 / 255).opacity(0.28)
     static let warmCream = Color(red: 251 / 255, green: 247 / 255, blue: 240 / 255) // page bg / on-ink text
     static let matchaGreen = Color(red: 107 / 255, green: 142 / 255, blue: 61 / 255) // #6b8e3d ready dot
-    static let accentWarm = AppTheme.Colors.accentWarm                               // saved heart
+    static let accentWarm = AppTheme.Colors.accentWarm                               // saved heart only (de-overloaded)
+    /// Single source for hot/iced cues across every screen (menu pill, cart
+    /// badge). Warm brown reads calmer than the urgency-orange accent.
+    static let tempHot = Color(red: 0.55, green: 0.29, blue: 0.12)   // warm brown
+    static let tempIced = Color(red: 0.16, green: 0.35, blue: 0.48)  // deep cool blue
 }
 
 /// Top-right favorite toggle (spec §5.2). 28pt tap target; empty heart
