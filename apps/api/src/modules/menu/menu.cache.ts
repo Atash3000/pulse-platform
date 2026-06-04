@@ -98,24 +98,31 @@ export class MenuCache {
    *   - CloverMenuImportService after a successful import sync
    */
   async invalidateMenu(locationId: string): Promise<void> {
-    // Deliberately NOT fail-open (unlike the read/write paths): invalidation is
-    // an admin write-side op (sold-out toggle, Clover import, staff edit). A
-    // swallowed failure here would leave the cache serving stale availability —
-    // a visible error is safer than silently showing a sold-out item as in-stock.
-    const trackingKey = ITEMS_BY_LOC_KEY(locationId);
-    const itemIds = await this.redis.smembers(trackingKey);
+    // Fail-OPEN, like the read/write paths. This runs AFTER the sold-out
+    // toggle's DB transaction has already committed (admin-items.service),
+    // so throwing here would 500 a committed write and make each retry
+    // re-insert a duplicate ITEM_OUT_OF_STOCK outbox event. Safe to swallow:
+    // during a Redis outage reads already bypass the dead cache to fresh DB
+    // data, and checkout re-validates inventory server-side, so a briefly-stale
+    // menu (bounded by the 10-min TTL) cannot sell a sold-out item.
+    try {
+      const trackingKey = ITEMS_BY_LOC_KEY(locationId);
+      const itemIds = await this.redis.smembers(trackingKey);
 
-    const pipeline = this.redis.pipeline();
-    pipeline.del(FULL_KEY(locationId));
-    for (const itemId of itemIds) {
-      pipeline.del(ITEM_KEY(itemId));
+      const pipeline = this.redis.pipeline();
+      pipeline.del(FULL_KEY(locationId));
+      for (const itemId of itemIds) {
+        pipeline.del(ITEM_KEY(itemId));
+      }
+      pipeline.del(trackingKey);
+      await pipeline.exec();
+
+      this.logger.log(
+        `Invalidated menu cache for location=${locationId} (full + ${itemIds.length} items)`,
+      );
+    } catch (err) {
+      this.logRedisError(`INVALIDATE ${locationId}`, err);
     }
-    pipeline.del(trackingKey);
-    await pipeline.exec();
-
-    this.logger.log(
-      `Invalidated menu cache for location=${locationId} (full + ${itemIds.length} items)`,
-    );
   }
 
   // ---- helpers -----------------------------------------------------------

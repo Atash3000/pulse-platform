@@ -56,6 +56,26 @@ describe('MenuCache — fail-open on Redis errors', () => {
   });
 });
 
+describe('MenuCache — invalidateMenu fail-open on Redis errors', () => {
+  it('invalidateMenu resolves (does not throw) when redis.smembers rejects', async () => {
+    const redis = fakeRedis({ smembers: jest.fn().mockRejectedValue(new Error('down')) });
+    const cache = new MenuCache(redis as never);
+    await expect(cache.invalidateMenu('loc-1')).resolves.toBeUndefined();
+  });
+
+  it('invalidateMenu resolves when the delete pipeline.exec rejects', async () => {
+    const redis = fakeRedis({
+      smembers: jest.fn().mockResolvedValue(['item-1']),
+      pipeline: jest.fn().mockReturnValue({
+        del: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockRejectedValue(new Error('down')),
+      }),
+    });
+    const cache = new MenuCache(redis as never);
+    await expect(cache.invalidateMenu('loc-1')).resolves.toBeUndefined();
+  });
+});
+
 describe('MenuCache — Redis-error logging is rate-limited (not warn-once-forever)', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => {
