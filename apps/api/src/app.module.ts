@@ -2,9 +2,10 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { CustomerAwareThrottlerGuard } from './common/throttle/customer-aware-throttler.guard';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { dataSourceOptions } from './database/data-source';
 import { AuthModule } from './modules/auth/auth.module';
@@ -57,7 +58,7 @@ import { WorkersModule } from './workers/workers.module';
     // LoyaltyModule, NotificationsModule, AdminModule, CloverModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: CustomerAwareThrottlerGuard },
   ],
 })
 export class AppModule implements NestModule {

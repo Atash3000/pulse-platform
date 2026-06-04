@@ -36,7 +36,7 @@ actor TokenRefresher {
 
     init(
         baseURL: URL = AppConfig.apiBaseURL,
-        session: URLSession = .shared,
+        session: URLSession = .pulse,
         refreshTokenProvider: @Sendable @escaping () throws -> String? = { try Keychain.loadRefreshToken() },
         accessTokenWriter: @Sendable @escaping (String) throws -> Void = { try Keychain.saveAccessToken($0) }
     ) {

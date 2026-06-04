@@ -2889,3 +2889,45 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** #18 prevents client/backend ordering divergence; #19 decouples backend data from client rendering while a build-failing test stops silent "?" art. Both are reusable platform principles, so they belong with the standing rules.
 
 **Trade-offs:** None — codifies existing practice.
+
+---
+
+## 2026-06-03 — [ios] — Shared URLSession timeouts (15s request / 30s resource)
+
+**Decision:** All backend traffic uses a shared `URLSession.pulse` built from `URLSessionConfiguration.pulse` with `timeoutIntervalForRequest = 15`, `timeoutIntervalForResource = 30`, `waitsForConnectivity = false`. Injected as the default `session:` for `APIClient` and `TokenRefresher`.
+
+**Context:** `URLSession.shared` leaves `timeoutIntervalForResource` at its 7-day default and `timeoutIntervalForRequest` at 60s. On flaky shop Wi-Fi a stalled checkout request hangs with the button locked; the customer force-quits and re-taps, producing a duplicate-looking checkout (backend idempotency still prevents a double charge, but the UX is broken).
+
+**Alternatives considered:** (1) Keep `URLSession.shared`. (2) Set timeouts per-request on each `URLRequest`. (3) A shared configured session (chosen).
+
+**Reasoning:** A single shared config is DRY and guarantees every call site gets the same fail-fast behavior without per-request boilerplate. 15s request / 30s resource fail fast while tolerating slow-but-progressing transfers (request timeout resets per packet). `waitsForConnectivity = false` keeps the request from parking indefinitely offline. Test-injected sessions remain fully overridable (only the default parameter changed).
+
+**Trade-offs:** A genuinely slow but valid response > 30s is cut off — acceptable for this app's small JSON payloads.
+
+---
+
+## 2026-06-03 — [api/database] — Restore + add hot-path indexes
+
+**Decision:** New migration `AddReliabilityHotPathIndexes` adds `orders(location_id, order_status, created_at)`, `orders(customer_id, created_at)`, `orders(order_status, created_at)`, and FK indexes on `menu_categories(location_id)`, `menu_items(category_id)`, `modifier_groups(item_id)`, `modifiers(group_id)`. Additive — existing single-column `IDX_orders_*` indexes kept.
+
+**Context:** Migration `AddExplicitIndexes1778273529985` silently dropped the composite indexes `(location_id, order_status)` and `(customer_id, created_at)` (visible in its own `down()`) with no decision-log entry, replacing them with single-column indexes. Those composites serve the admin live queue and customer history; Postgres also does not auto-index foreign keys, so the menu-build queries were sequential scans.
+
+**Alternatives considered:** (1) Restore only the two dropped composites. (2) Re-add as the original 2-column shapes. (3) Drop the now-redundant single-column indexes in the same migration.
+
+**Reasoning:** Framed as hot-path query safety, not just regression repair. `(location_id, order_status, created_at)` covers the live-queue filter AND its `created_at ASC` sort (a strict upgrade over the dropped 2-column). Kept additive to avoid removing an index a query still relies on without a proven-redundant audit.
+
+**Trade-offs:** A few extra indexes add write cost — negligible at the ~500 orders/day target. A future audit may drop the redundant single-column `IDX_orders_*` indexes.
+
+---
+
+## 2026-06-03 — [api/throttle] — Per-customer checkout throttle key + webhook SkipThrottle
+
+**Decision:** Checkout is rate-limited per authenticated customer using a composite `customer:{jwt.sub}|{ip}` bucket key (the global `CustomerAwareThrottlerGuard` decodes — does not verify — the JWT `sub` from the Authorization header). The Stripe webhook uses `@SkipThrottle()`.
+
+**Context:** The prior `3/min/IP` checkout limit let customers behind one shop-Wi-Fi/NAT IP block each other; the `100/min/IP` webhook cap shared one bucket across all Stripe source IPs and could 429 valid retry bursts. The global throttler runs before the route's AuthGuard, so `req.user` is unavailable at throttle time — hence decoding the header directly.
+
+**Alternatives considered:** (1) Key checkout purely by `sub` — rejected: an attacker can forge a victim's `sub` (UUIDs aren't secret) and poison that customer's bucket. (2) Raise the webhook cap to e.g. 1000/min instead of skipping — viable; deferred to the operator's edge/LB rate limit as the compensating control. (3) Redis-backed throttler storage for global limits — out of scope (single instance today).
+
+**Reasoning:** The throttle key is deliberately derived from an UNVERIFIED token — it is only a rate-limit bucket, never an authorization decision. The real checkout invariants are the AuthGuard (rejects forged tokens) and the server-side, customer-bound idempotency key (409 on cross-customer reuse). Binding the key to `{ip}` as well bounds any forged-sub abuse to the attacker's own IP bucket. The webhook signature (`constructWebhookEvent`) is its authentication; a number cap is the wrong tool and would reject legitimate Stripe retry storms. Replayed valid events are idempotent (dedup on `stripe_event_id`), so removing the cap does not weaken Golden Rule #3/#4.
+
+**Trade-offs:** A customer who changes IP mid-window gets a fresh bucket (acceptable — it's a courtesy limit). The webhook loses a generic flood backstop; HMAC verification is cheap (microseconds) and the edge/load-balancer is the intended volumetric control.

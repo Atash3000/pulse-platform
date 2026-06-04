@@ -18,6 +18,14 @@ const requireEnv = (name: string): string => {
   return v;
 };
 
+// Pool ceiling must be a positive integer. An empty-string or non-numeric env
+// var (Number('') === 0, Number('abc') === NaN) must NOT slip through — a pool
+// size of 0 breaks every query — so fall back to the safe default instead.
+const parsePoolMax = (raw: string | undefined): number => {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 20;
+};
+
 export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
   host: process.env.DATABASE_HOST ?? 'localhost',
@@ -33,6 +41,15 @@ export const dataSourceOptions: DataSourceOptions = {
   // synchronize — see Fix 1 in the build plan.
   synchronize: false,
   logging: process.env.DATABASE_LOGGING === 'true' ? ['error', 'warn', 'migration'] : ['error'],
+  // node-postgres pool. Default 10 is too small once checkout holds a
+  // connection across the in-transaction Stripe call. PRODUCTION must set
+  // DATABASE_POOL_MAX = floor((postgres_max_connections - reserved) / api_instances).
+  // 20 is a safe local/staging default, NOT a production value.
+  extra: {
+    max: parsePoolMax(process.env.DATABASE_POOL_MAX),
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
+  },
 };
 
 if (isProduction) {
