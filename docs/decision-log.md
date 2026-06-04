@@ -2917,3 +2917,17 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** Framed as hot-path query safety, not just regression repair. `(location_id, order_status, created_at)` covers the live-queue filter AND its `created_at ASC` sort (a strict upgrade over the dropped 2-column). Kept additive to avoid removing an index a query still relies on without a proven-redundant audit.
 
 **Trade-offs:** A few extra indexes add write cost — negligible at the ~500 orders/day target. A future audit may drop the redundant single-column `IDX_orders_*` indexes.
+
+---
+
+## 2026-06-03 — [api/throttle] — Per-customer checkout throttle key + webhook SkipThrottle
+
+**Decision:** Checkout is rate-limited per authenticated customer using a composite `customer:{jwt.sub}|{ip}` bucket key (the global `CustomerAwareThrottlerGuard` decodes — does not verify — the JWT `sub` from the Authorization header). The Stripe webhook uses `@SkipThrottle()`.
+
+**Context:** The prior `3/min/IP` checkout limit let customers behind one shop-Wi-Fi/NAT IP block each other; the `100/min/IP` webhook cap shared one bucket across all Stripe source IPs and could 429 valid retry bursts. The global throttler runs before the route's AuthGuard, so `req.user` is unavailable at throttle time — hence decoding the header directly.
+
+**Alternatives considered:** (1) Key checkout purely by `sub` — rejected: an attacker can forge a victim's `sub` (UUIDs aren't secret) and poison that customer's bucket. (2) Raise the webhook cap to e.g. 1000/min instead of skipping — viable; deferred to the operator's edge/LB rate limit as the compensating control. (3) Redis-backed throttler storage for global limits — out of scope (single instance today).
+
+**Reasoning:** The throttle key is deliberately derived from an UNVERIFIED token — it is only a rate-limit bucket, never an authorization decision. The real checkout invariants are the AuthGuard (rejects forged tokens) and the server-side, customer-bound idempotency key (409 on cross-customer reuse). Binding the key to `{ip}` as well bounds any forged-sub abuse to the attacker's own IP bucket. The webhook signature (`constructWebhookEvent`) is its authentication; a number cap is the wrong tool and would reject legitimate Stripe retry storms. Replayed valid events are idempotent (dedup on `stripe_event_id`), so removing the cap does not weaken Golden Rule #3/#4.
+
+**Trade-offs:** A customer who changes IP mid-window gets a fresh bucket (acceptable — it's a courtesy limit). The webhook loses a generic flood backstop; HMAC verification is cheap (microseconds) and the edge/load-balancer is the intended volumetric control.

@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import type Stripe from 'stripe';
 
@@ -37,12 +37,14 @@ export class PaymentsController {
    * /payments/webhook with a valid Stripe-Signature sets payment_status =
    * SUCCEEDED."
    *
-   * Spec Part 4.5 caps this at 100 req/min — Stripe may burst on retries.
+   * @SkipThrottle — the Stripe signature IS the authentication; all Stripe
+   * deliveries share a small pool of source IPs, so an IP-based rate cap
+   * would 429 valid retry bursts. We trust the signature, not the IP.
    * Signature failures still return 400 (the only 400 we ever return here).
    */
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 100, ttl: 60_000 } })
+  @SkipThrottle()
   async handleWebhook(
     @Req() req: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature: string | undefined,

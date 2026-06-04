@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import type { JwtPayload } from '../auth/jwt-payload';
+import { ThrottleByCustomer } from '../../common/throttle/throttle-by-customer.decorator';
 import { CheckoutService, CheckoutResponse } from './checkout.service';
 import { CheckoutRequestDto } from './dto/checkout-request.dto';
 
@@ -30,11 +31,12 @@ export class CheckoutController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
-  // Spec Part 4.5: 3 requests / minute / user. The throttler keys by IP by
-  // default, but we override the tracker via TTL key inside the limiter
-  // configuration if/when we add a per-user tracker. For Phase 1 the IP
-  // limit is acceptable — combined with per-user idempotency it's tight.
+  // Spec Part 4.5: 3 requests / minute / customer. @ThrottleByCustomer() makes
+  // the global CustomerAwareThrottlerGuard key this bucket by authenticated
+  // customer id (decoded from the Authorization header) instead of IP, so
+  // customers sharing a NAT or coffee-shop Wi-Fi don't block each other.
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ThrottleByCustomer()
   @ApiOperation({
     summary: 'Create order + Stripe PaymentIntent',
     description:
@@ -47,7 +49,7 @@ export class CheckoutController {
   @ApiResponse({ status: 400, description: 'Validation failed, location closed, item unavailable, or invalid tip percent.' })
   @ApiResponse({ status: 401, description: 'Missing or invalid customer JWT.' })
   @ApiResponse({ status: 409, description: 'Idempotency replay: in-flight payment, or key reused across customers.' })
-  @ApiResponse({ status: 429, description: 'Too many requests (>3/min from this IP).' })
+  @ApiResponse({ status: 429, description: 'Too many requests (>3/min for this customer).' })
   async create(
     @Req() req: AuthedRequest,
     @Body() dto: CheckoutRequestDto,
