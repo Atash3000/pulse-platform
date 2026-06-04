@@ -2931,3 +2931,17 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** The throttle key is deliberately derived from an UNVERIFIED token — it is only a rate-limit bucket, never an authorization decision. The real checkout invariants are the AuthGuard (rejects forged tokens) and the server-side, customer-bound idempotency key (409 on cross-customer reuse). Binding the key to `{ip}` as well bounds any forged-sub abuse to the attacker's own IP bucket. The webhook signature (`constructWebhookEvent`) is its authentication; a number cap is the wrong tool and would reject legitimate Stripe retry storms. Replayed valid events are idempotent (dedup on `stripe_event_id`), so removing the cap does not weaken Golden Rule #3/#4.
 
 **Trade-offs:** A customer who changes IP mid-window gets a fresh bucket (acceptable — it's a courtesy limit). The webhook loses a generic flood backstop; HMAC verification is cheap (microseconds) and the edge/load-balancer is the intended volumetric control.
+
+---
+
+## 2026-06-04 — [ios] — Design tokens: Fraunces serif + type/colour ramp
+
+**Decision:** Introduce a shared type/colour token layer for the menu/cart/detail surfaces. (1) Bundle **Fraunces** (OFL, 72pt static Regular cut) as the brand serif, used ONLY for hero drink names, screen/section titles, and the wordmark via `PulseFont` (`serifXL`/`serifL`/`serifM`, all Dynamic-Type-relative). System sans stays everywhere operational. (2) Drop the synthesized `.italic()` from all serif sites so the serif renders one consistent way (supersedes the BrandFooter "serif italic / custom typeface deferred" note above). (3) Add palette tokens to `DetailPalette`: `inkMuted` (~4.8:1) for small informational text, and `tempHot`/`tempIced` as the single source for hot/iced cues across screens. (4) The merchandising eyebrow ("HERO/FEATURED") moves from the urgency-orange `accentWarm` to `matchaGreen`; `accentWarm` is now used only for the saved heart. (5) Kill half-point font sizes (12.5/11.5) in the cart.
+
+**Context:** A design review against the brand brief found the serif rendered inconsistently (italic in menu, upright elsewhere), an arbitrary serif-size set, two different "iced blue"s, `accentWarm` overloaded across eyebrow/heart/hot, and `inkFaint` (~1.8:1) used for real cart content (tax line, Remove) — all fighting the "calm / premium / ownable / accessible" goals.
+
+**Alternatives considered:** Keep system SF Serif (rejected — generic, not ownable); bundle multiple Fraunces weights/optical cuts (rejected — every serif site is `.regular`; one file keeps the bundle lean per GR#15); use the Fraunces variable font (rejected — SwiftUI weight/instance selection is fiddly; a static cut renders deterministically).
+
+**Reasoning:** Tokenizing once and snapping call-sites is the lean fix for a consistency problem; a single distinctive serif used sparingly is the highest-leverage "feels expensive, not generic" lever. `inkMuted` clears AA for the two small labels that previously failed. Reserving `accentWarm` for warmth de-overloads the one colour that read as "urgency."
+
+**Trade-offs:** Adds a ~94 KB font + OFL.txt to the bundle (acceptable). Only the three reviewed screens were migrated; other surfaces (Welcome/Account/Checkout) still use ad-hoc `.system(...)` sizes — a follow-up. Fraunces renders at a fixed 72pt optical cut, slightly high-contrast below ~18pt, but every serif use here is ≥22pt.

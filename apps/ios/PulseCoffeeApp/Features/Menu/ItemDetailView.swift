@@ -34,7 +34,7 @@ struct ItemDetailView: View {
     // Dynamic Type: the primary hero text scales with the user's text-size
     // setting (the rest of the screen's micro-labels remain fixed, matching
     // the app-wide pattern — a full Dynamic Type pass is a separate task).
-    @ScaledMetric(relativeTo: .largeTitle) private var heroNameSize: CGFloat = 30
+    // The serif hero name scales via PulseFont.serifXL's own relativeTo.
     @ScaledMetric(relativeTo: .title3) private var priceSize: CGFloat = 18
     @ScaledMetric(relativeTo: .footnote) private var descriptionSize: CGFloat = 13
 
@@ -102,7 +102,7 @@ struct ItemDetailView: View {
                 .padding(.top, 4)
             ItemBadge(badgeType: item.badgeType)
             Text(item.name)
-                .font(.system(size: heroNameSize, weight: .regular, design: .serif))
+                .font(PulseFont.serifXL)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(DetailPalette.ink)
 

@@ -15,8 +15,7 @@ struct BrandFooter: View {
     var body: some View {
         VStack(spacing: 10) {
             Text("Pulse")
-                .font(.system(size: 40, weight: .regular, design: .serif))
-                .italic()
+                .font(PulseFont.serif(40, relativeTo: .largeTitle))
                 .foregroundStyle(AppTheme.Colors.tabLabelActive.opacity(0.8))
 
             if let tagline {
