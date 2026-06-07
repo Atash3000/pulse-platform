@@ -1,20 +1,19 @@
 import SwiftUI
 
-/// Bottom tab bar shown after sign-in (and now, for guests, as the
-/// cold-open shell with the Account tab pre-selected — see
-/// `ContentView`). Hosts the four top-level destinations declared in
-/// `MainTab`.
+/// Bottom tab bar shown to everyone — signed-in users and guests alike
+/// (see `ContentView`). Hosts the four top-level destinations declared in
+/// `MainTab`: Home, Menu, Orders, Rewards.
 ///
 /// `initialTab` controls which tab is selected on first appearance:
 /// - Signed-in users open to Menu (their job-to-be-done at launch).
-/// - Guests open to Account, which renders `WelcomeView` (the join
-///   surface).
+/// - Guests open to Home, where the `AccountAvatarButton` is the sign-in
+///   entry (it presents `WelcomeView` as a sheet).
 ///
 /// Auth changes are handled by `ContentView`, not here: a sign-in (or a
 /// logout) flips `AppState.authState`, `ContentView`'s `switch`
 /// re-instantiates `MainTabView` with the new `initialTab`, and the old
 /// tab tree is torn down. So a guest who signs in lands on **Menu** (the
-/// fresh tree's `initialTab`), not back on Account — and that teardown is
+/// fresh tree's `initialTab`), not back on Home — and that teardown is
 /// what clears the in-memory cart / view-model state on logout. `selection`
 /// is `@State` set once from `initialTab`; it is not re-synced on later
 /// auth changes because the whole view is rebuilt instead.
@@ -29,13 +28,12 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack {
-            // TODO: Before Home / Orders / Account start API fetches or polling,
+            // TODO: Before Home / Orders start API fetches or polling,
             // lazy-mount inactive tabs or gate their tasks on `selection`.
             tabContent(.home) { HomeView() }
             tabContent(.menu) { MenuView() }
             tabContent(.orders) { OrdersView() }
             tabContent(.rewards) { RewardsView() }
-            tabContent(.account) { AccountView() }
         }
         .animation(.easeInOut(duration: 0.15), value: selection)
         .environmentObject(tabBarVisibility)

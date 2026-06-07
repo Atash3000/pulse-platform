@@ -11,7 +11,7 @@ final class MainTabTests: XCTestCase {
 
     func test_allCases_areInExpectedOrderAndCount() {
         XCTAssertEqual(MainTab.allCases,
-                       [.home, .menu, .orders, .rewards, .account])
+                       [.home, .menu, .orders, .rewards])
     }
 
     func test_eachTab_hasNonEmptyTitleAndSymbols() {
@@ -40,7 +40,6 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.menu.tabBarSymbolName,    "list.bullet")
         XCTAssertEqual(MainTab.orders.tabBarSymbolName,  "bag")
         XCTAssertEqual(MainTab.rewards.tabBarSymbolName, "medal")
-        XCTAssertEqual(MainTab.account.tabBarSymbolName, "person.crop.circle")
     }
 
     func test_layeredAssetNames_brandTabsOverrideSFSymbol() {
@@ -52,7 +51,6 @@ final class MainTabTests: XCTestCase {
                        LayeredTabAsset(baseName: "PulseOrdersMark",
                                        accentName: "PulseOrdersAccent"))
         XCTAssertNil(MainTab.rewards.layeredAssetNames)
-        XCTAssertNil(MainTab.account.layeredAssetNames)
     }
 
     func test_customAssetName_singleLayerBrandTabsOverrideSFSymbol() {
@@ -60,7 +58,6 @@ final class MainTabTests: XCTestCase {
         XCTAssertNil(MainTab.menu.customAssetName)
         XCTAssertNil(MainTab.orders.customAssetName)
         XCTAssertNil(MainTab.rewards.customAssetName)
-        XCTAssertEqual(MainTab.account.customAssetName, "PulseAccountMark")
     }
 
     func test_customAssets_existInBundle() {
@@ -68,7 +65,6 @@ final class MainTabTests: XCTestCase {
         XCTAssertNotNil(UIImage(named: "PulseHomeLeafAccent"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersMark"))
         XCTAssertNotNil(UIImage(named: "PulseOrdersAccent"))
-        XCTAssertNotNil(UIImage(named: "PulseAccountMark"))
     }
 
     func test_navBarColors_areStable() {
@@ -126,7 +122,6 @@ final class MainTabTests: XCTestCase {
         XCTAssertEqual(MainTab.menu.rawValue,    "menu")
         XCTAssertEqual(MainTab.orders.rawValue,  "orders")
         XCTAssertEqual(MainTab.rewards.rawValue, "rewards")
-        XCTAssertEqual(MainTab.account.rawValue, "account")
     }
 
     @MainActor func test_tabBarVisibility_defaultsVisible_andTogglesHidden() {

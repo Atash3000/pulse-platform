@@ -1,6 +1,6 @@
 import Foundation
 
-/// The five top-level destinations of the signed-in app, modelled as a
+/// The four top-level destinations of the signed-in app, modelled as a
 /// typed enum so the tab bar, deep-links, and analytics events all share
 /// one identifier set instead of raw strings.
 ///
@@ -10,7 +10,6 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     case menu
     case orders
     case rewards
-    case account
 
     var id: String { rawValue }
 
@@ -21,7 +20,6 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .menu:    return "Menu"
         case .orders:  return "Orders"
         case .rewards: return "Rewards"
-        case .account: return "Account"
         }
     }
 
@@ -32,7 +30,6 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .menu:    return "list.bullet"
         case .orders:  return "bag"
         case .rewards: return "medal"
-        case .account: return "person.crop.circle"
         }
     }
 
@@ -60,7 +57,6 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
     /// Single-layer Asset Catalog icon for brand-specific tabs.
     var customAssetName: String? {
         switch self {
-        case .account: return "PulseAccountMark"
         default:    return nil
         }
     }
@@ -73,7 +69,6 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
         case .menu:    return "list.bullet.rectangle.fill"
         case .orders:  return "bag.fill"
         case .rewards: return "medal.fill"
-        case .account: return "person.crop.circle.fill"
         }
     }
 
