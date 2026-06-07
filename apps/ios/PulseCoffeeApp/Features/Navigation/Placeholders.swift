@@ -128,7 +128,7 @@ private struct PlaceholderContent: View {
     }
 }
 
-#Preview("Home")    { HomeView() }
+#Preview("Home")    { HomeView().environmentObject(AppState()) }   // Home hosts AccountAvatarButton, which needs AppState
 #Preview("Orders")  { OrdersView() }
 #Preview("Rewards") { RewardsView() }
 #Preview("Account — guest") {
