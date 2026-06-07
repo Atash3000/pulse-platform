@@ -12,6 +12,11 @@ struct HomeView: View {
             PlaceholderContent(tab: .home,
                                caption: "Featured drinks, promos, and nearby locations land here.")
                 .navigationTitle(MainTab.home.title)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        AccountAvatarButton()
+                    }
+                }
         }
     }
 }
