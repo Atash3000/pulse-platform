@@ -2931,3 +2931,17 @@ This **partially overrides** the 2026-05-14 entry "[iOS] Loyalty view ships plac
 **Reasoning:** The throttle key is deliberately derived from an UNVERIFIED token — it is only a rate-limit bucket, never an authorization decision. The real checkout invariants are the AuthGuard (rejects forged tokens) and the server-side, customer-bound idempotency key (409 on cross-customer reuse). Binding the key to `{ip}` as well bounds any forged-sub abuse to the attacker's own IP bucket. The webhook signature (`constructWebhookEvent`) is its authentication; a number cap is the wrong tool and would reject legitimate Stripe retry storms. Replayed valid events are idempotent (dedup on `stripe_event_id`), so removing the cap does not weaken Golden Rule #3/#4.
 
 **Trade-offs:** A customer who changes IP mid-window gets a fresh bucket (acceptable — it's a courtesy limit). The webhook loses a generic flood backstop; HMAC verification is cheap (microseconds) and the edge/load-balancer is the intended volumetric control.
+
+---
+
+## 2026-06-06 — [ios] Account moves from the bottom nav to a Home top-right avatar
+
+**Decision:** Remove `Account` from the bottom tab bar (→ 4 tabs: Home · Menu · Orders · Rewards). Surface account as a top-right avatar on the **Home** screen — first-name initial when signed in, a person glyph when guest — opening `AccountView` as a bottom sheet. Rewards stays a bottom tab.
+
+**Context:** The 5-tab bar was cluttered; the founder wanted a cleaner bottom nav. Account is low-frequency (profile / sign-out); Rewards is high-frequency (loyalty engagement).
+
+**Alternatives considered:** Move Rewards *inside* Account instead — rejected: loyalty is the engagement driver and belongs one tap away (Starbucks/Dunkin keep rewards in the bar); Account is the set-and-forget candidate for the avatar, which is also the platform convention. Keep both an Account tab *and* the avatar — rejected as redundant (two doors to one screen).
+
+**Reasoning:** `MainTab.allCases` drives the bar, so dropping `.account` is a one-case removal; the avatar is a small reusable view reading `AppState`. It doubles as the signed-in signal and the conventional account entry.
+
+**Trade-offs:** For now the avatar lives **only on Home**, so a signed-in user reaches Account/sign-out only from Home — accepted as the MVP step; surfacing it on more screens is the follow-up. Guest onboarding polish is deferred — the avatar is a non-pushy entry, never a registration wall. Supersedes the Account-as-a-tab parts of the 2026-05-28 bottom-nav v4 plan (and the account icon in the 2026-05-22 "SF Symbols for the tab bar" entry). Full spec: `docs/superpowers/specs/2026-06-06-account-avatar-home-design.md`.

@@ -2,6 +2,8 @@
 
 Bottom tab bar that's shown after a customer signs in. Patterned after Luckin Coffee's five-tab layout (Home / Menu / Orders / Rewards / Account).
 
+> **⚠️ Changing (spec 2026-06-06):** `Account` is being removed from the bottom bar (→ **4 tabs**: Home · Menu · Orders · Rewards) and moved to a **top-right avatar on the Home screen** — first-name initial when signed in, person glyph when guest — that opens `AccountView` as a bottom sheet. The 5-tab description below reflects the *current* code and will be updated when that lands. See `docs/superpowers/specs/2026-06-06-account-avatar-home-design.md` and the 2026-06-06 decision-log entry.
+
 ```
 ContentView                       ← root auth gate
 └── MainTabView                   ← this folder — shown when logged in
