@@ -24,8 +24,9 @@ This is deliberately a **small first step** — the avatar lives **only on Home 
 - New reusable **`AccountAvatarButton`** placed in the **Home screen's top-right**:
   - **Signed in:** a rounded, brand-colored circle with the first-name initial (e.g. **A**).
   - **Guest:** the same circle with a person glyph.
-  - **Tap → `AccountView` as a bottom sheet.**
-- Guest sheet shows a **non-pushy** "Sign in / Create account" entry — never blocks browsing, never force-redirects to registration.
+  - **Tap → `AccountView` as a bottom sheet.** `AccountView` already splits on `authState` — guest → `WelcomeView` (sign-in/join), signed-in → profile + sign-out — so it's reused verbatim as the sheet body.
+- **Guest cold-open routing change (`ContentView`):** today guests land on the **Account tab** (which renders `WelcomeView`). With the Account tab gone, **guests land on Home** instead — where the avatar (guest glyph) is the non-pushy sign-in entry; they browse freely, never walled. Logged-in users still land on **Menu** (unchanged — "order a coffee").
+- Guest sheet is **non-pushy** — never blocks browsing, never force-redirects to registration.
 - Docs updated so the nav change is recorded (Navigation README, decision-log).
 
 ### Out of scope (deferred — "rest we'll figure")
@@ -33,8 +34,9 @@ This is deliberately a **small first step** — the avatar lives **only on Home 
 - Full guest onboarding / sign-in-register flow polish.
 - Any change to `Rewards`, the cart, or the Menu top bar.
 
-### Accepted trade-off
-With the Account tab gone and the avatar only on Home, a signed-in user reaches **Account / sign-out only from Home** for now. Accepted as the MVP step; surfacing the avatar on more screens is the follow-up (§6).
+### Accepted trade-offs
+- With the Account tab gone and the avatar only on Home, a signed-in user reaches **Account / sign-out only from Home** for now. Accepted as the MVP step; surfacing the avatar on more screens is the follow-up (§6).
+- **Guests now land on Home, which is still a "coming soon" placeholder** — an emptier first screen than today's WelcomeView. Accepted: the avatar gives an immediate sign-in path, browsing (Menu) is one tap away, and Home content lands later. (The user chose this over landing guests on Menu.)
 
 ---
 
@@ -44,6 +46,7 @@ With the Account tab gone and the avatar only on Home, a signed-in user reaches 
 |---|---|---|
 | `MainTab` | `Features/Navigation/MainTab.swift` | Remove the `.account` case (title/icon/asset). `allCases` then drives a 4-tab bar. |
 | `MainTabView` | `Features/Navigation/MainTabView.swift` | Remove the `tabContent(.account) { AccountView() }` line. The `PulseTabBar` auto-renders 4 from `MainTab.allCases`. |
+| `ContentView` | `ContentView.swift` | Logged-out lands on `.home` (was `.account`); logged-in stays `.menu`. |
 | `AccountView` | `Features/Navigation/Placeholders.swift` | **Reused** as the sheet body (signed-in: profile placeholder + sign-out; add a guest variant). |
 | `AppState` | `Core/AppState.swift` | Source of signed-in state + customer first name (for the initial). |
 | `AccountAvatarButton` | `Features/Navigation/` (new) | The avatar + sheet trigger. |
@@ -70,7 +73,10 @@ With the Account tab gone and the avatar only on Home, a signed-in user reaches 
 - Guest: a calm "Sign in / Create account" entry (reuses the existing auth entry points) the user can dismiss to keep browsing. Keep it minimal; full guest flow is deferred.
 
 ### 4.4 `MainTab` / `MainTabView` (MODIFY)
-- Delete the `.account` case + its `title`/`icon`/asset mappings; delete the `tabContent(.account)` line. Nothing else references `.account` after that (verify with a grep at implementation). The `PulseAccountMark` asset becomes unused (leave it; removing assets is out of scope).
+- Delete the `.account` case + its `title`/`symbolName`/`tabBarSymbolName`/`customAssetName`/`selectedSymbolName` mappings; delete the `tabContent(.account) { AccountView() }` line in `MainTabView`. After that the only remaining `.account` references are `ContentView` (handled in §4.5) and tests (§5) — verify with a grep at implementation. The `PulseAccountMark` asset becomes unused (leave it; removing assets is out of scope).
+
+### 4.5 `ContentView` (MODIFY — guest routing)
+- Change the logged-out branch from `MainTabView(initialTab: .account)` to `MainTabView(initialTab: .home)`; logged-in stays `.menu`. Update the doc comment (guests now land on Home, not the Account/Welcome tab). This is the routing half of the guest cold-open change.
 
 ---
 
