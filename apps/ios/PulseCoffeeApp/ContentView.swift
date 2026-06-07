@@ -4,11 +4,12 @@ import SwiftUI
 /// difference between an authenticated user and a guest is which tab
 /// they land on, not whether they get a tab bar.
 ///
-/// - **Logged out:** opens to the Account tab. `AccountView` renders
-///   `WelcomeView` (the cold-open join surface). Sign-in and register
-///   are presented as sheets from the welcome CTAs. The Menu tab is a
-///   public endpoint and remains browsable for guests; Cart / Orders /
-///   Home are reachable but not yet guest-aware — see Navigation README
+/// - **Logged out:** opens to the Home tab, where the
+///   `AccountAvatarButton` is the sign-in entry — tapping it presents
+///   `WelcomeView` (the cold-open join surface) as a sheet, and sign-in
+///   and register are presented as sheets from the welcome CTAs. The Menu
+///   tab is a public endpoint and remains browsable for guests; Cart /
+///   Orders are reachable but not yet guest-aware — see Navigation README
 ///   "Follow-ups" for the guest-gating commits that finish that work.
 /// - **Logged in:** opens to the Menu tab — the user's launch job-to-be-
 ///   done is "order a coffee."
@@ -26,7 +27,7 @@ struct ContentView: View {
     var body: some View {
         switch appState.authState {
         case .loggedOut:
-            MainTabView(initialTab: .account)
+            MainTabView(initialTab: .home)
 
         case .loggedIn:
             MainTabView(initialTab: .menu)

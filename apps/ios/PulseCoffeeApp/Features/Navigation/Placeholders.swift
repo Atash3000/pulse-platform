@@ -1,10 +1,14 @@
 import SwiftUI
 
-// Stub screens for the Home / Orders / Account tabs. They render a
-// title, a tab-appropriate SF Symbol, and a "coming soon" caption so
-// the tab bar is wired end-to-end before the real screens land.
-// Each gets its own `NavigationStack` so its in-tab navigation history
-// (when content arrives) lives independently of the other tabs.
+// Stub screens for the Home / Orders tabs. They render a title, a
+// tab-appropriate SF Symbol, and a "coming soon" caption so the tab bar
+// is wired end-to-end before the real screens land. Each gets its own
+// `NavigationStack` so its in-tab navigation history (when content
+// arrives) lives independently of the other tabs.
+//
+// `AccountView` is no longer a tab — it is reached via the
+// `AccountAvatarButton` on Home — but keeps its placeholder for the
+// logged-in profile surface until the real screen lands.
 
 struct HomeView: View {
     var body: some View {
@@ -12,6 +16,11 @@ struct HomeView: View {
             PlaceholderContent(tab: .home,
                                caption: "Featured drinks, promos, and nearby locations land here.")
                 .navigationTitle(MainTab.home.title)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        AccountAvatarButton()
+                    }
+                }
         }
     }
 }
@@ -36,11 +45,11 @@ struct RewardsView: View {
     }
 }
 
-/// Account tab — splits on auth state.
+/// Account surface — splits on auth state. No longer a tab; reached via
+/// the `AccountAvatarButton` on Home, which presents this as a sheet.
 ///
-/// - Logged out: the `WelcomeView` cold-open / join surface. This is the
-///   landing tab for guests (set in `ContentView`), so this is the first
-///   thing an un-registered user sees.
+/// - Logged out: the `WelcomeView` cold-open / join surface — the sign-in
+///   entry a guest sees when they tap the Home avatar.
 /// - Logged in: the existing placeholder, until the real profile UI
 ///   lands (see Navigation README build sequence).
 ///
@@ -60,11 +69,12 @@ struct AccountView: View {
         case .loggedIn:
             NavigationStack {
                 VStack(spacing: 24) {
-                    PlaceholderContent(tab: .account,
+                    PlaceholderContent(title: "Account",
+                                       symbolName: "person.crop.circle.fill",
                                        caption: "Profile, payment methods, and order history land here.")
-                    // Temporary sign-out CTA. Moved off the Menu toolbar when
-                    // the v4 topbar landed; will live inside a proper profile
-                    // screen once the Account tab gets real content.
+                    // Temporary sign-out CTA. Will live inside a proper profile
+                    // screen once Account (reached via the Home avatar sheet)
+                    // gets real content.
                     Button(role: .destructive) {
                         Task { await appState.logout() }
                     } label: {
@@ -74,22 +84,39 @@ struct AccountView: View {
                     .buttonStyle(.bordered)
                     .padding(.bottom, 32)
                 }
-                .navigationTitle(MainTab.account.title)
+                .navigationTitle("Account")
             }
         }
     }
 }
 
 private struct PlaceholderContent: View {
-    let tab: MainTab
+    let title: String
+    let symbolName: String
     let caption: String
+
+    /// Convenience init for the real tabs, which derive their title and
+    /// symbol from the `MainTab` model.
+    init(tab: MainTab, caption: String) {
+        self.init(title: tab.title,
+                  symbolName: tab.selectedSymbolName,
+                  caption: caption)
+    }
+
+    /// Designated init for surfaces that are no longer modelled as a
+    /// `MainTab` case (e.g. the logged-in Account profile placeholder).
+    init(title: String, symbolName: String, caption: String) {
+        self.title = title
+        self.symbolName = symbolName
+        self.caption = caption
+    }
 
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: tab.selectedSymbolName)
+            Image(systemName: symbolName)
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)
-            Text("\(tab.title) — coming soon")
+            Text("\(title) — coming soon")
                 .font(.headline)
             Text(caption)
                 .font(.footnote)
@@ -101,7 +128,7 @@ private struct PlaceholderContent: View {
     }
 }
 
-#Preview("Home")    { HomeView() }
+#Preview("Home")    { HomeView().environmentObject(AppState()) }   // Home hosts AccountAvatarButton, which needs AppState
 #Preview("Orders")  { OrdersView() }
 #Preview("Rewards") { RewardsView() }
 #Preview("Account — guest") {

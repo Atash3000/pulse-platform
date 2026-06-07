@@ -8,9 +8,10 @@ import SwiftUI
 /// opens ItemDetailView. The existing loading / failed / empty states
 /// and pull-to-refresh remain.
 ///
-/// Sign-out is intentionally NOT on this screen — it moved to the
-/// Account tab when the v4 topbar landed (see Navigation README +
-/// AccountView in `Features/Navigation/Placeholders.swift`).
+/// Sign-out is intentionally NOT on this screen — it lives in `AccountView`,
+/// reached via the Home top-right account avatar (`AccountAvatarButton`). The
+/// Account tab was removed 2026-06-06 (see Navigation README + the
+/// account-avatar-home spec).
 struct MenuView: View {
     @EnvironmentObject private var cart: CartManager
     @StateObject private var viewModel = MenuViewModel()
@@ -65,8 +66,8 @@ struct MenuView: View {
     // HTML: `.topbar` is a flex row with `.logo-row` (dot + brand text)
     // on the left and `.nav-profile` (avatar) on the right. iOS keeps
     // the same shape but puts the cart icon on the right instead of the
-    // avatar — the cart is a critical commerce affordance and the
-    // logged-in profile chip lives on the Account tab.
+    // avatar — the cart is a critical commerce affordance, and the account
+    // avatar lives on the Home screen (not Menu) for now.
 
     private var topbar: some View {
         HStack(spacing: 8) {

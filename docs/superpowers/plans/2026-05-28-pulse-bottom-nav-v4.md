@@ -1,5 +1,7 @@
 # Pulse v4 Bottom Nav (Concern C) Implementation Plan
 
+> **Partially superseded (2026-06-06):** The **Account** tab is being removed from the bottom bar and moved to a top-right avatar on the Home screen (the bar becomes 4 tabs: Home · Menu · Orders · Rewards). The Rewards/Menu-icon/Orders-badge work below still stands. See `docs/superpowers/specs/2026-06-06-account-avatar-home-design.md` + the 2026-06-06 decision-log entry. This plan is kept as the historical record of the original 5-tab build.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Update the iOS bottom tab bar to match v4: add a 5th **Rewards** tab as a "coming soon" placeholder, change the Menu icon from the cup-style mark to a list-lines style, and add a fail-safe-hidden order-count badge on the Orders tab. No backend dependency — fully independent of Concern A.

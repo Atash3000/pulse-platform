@@ -3,9 +3,10 @@ import SwiftUI
 /// Cold-open "Account" screen for unauthenticated users — the welcome /
 /// join surface.
 ///
-/// Lives at the Account tab when `AppState.authState == .loggedOut`. The
-/// signed-in user sees the existing `AccountView` placeholder instead;
-/// the routing happens in `Features/Navigation/Placeholders.swift`.
+/// Shown via `AccountView` when `AppState.authState == .loggedOut` —
+/// presented as a sheet from the Home top-right account avatar
+/// (`AccountAvatarButton`). The signed-in user sees the `AccountView`
+/// placeholder instead; the branch lives in `Features/Navigation/Placeholders.swift`.
 ///
 /// ## Status — STUB COPY WITH BACKEND TODOs
 ///
@@ -597,7 +598,7 @@ private struct WelcomeActionBar: View {
     }
 }
 
-#Preview("Welcome — guest Account tab") {
+#Preview("Welcome — guest account sheet") {
     WelcomeView()
         .environmentObject(AppState())
 }
