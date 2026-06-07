@@ -72,9 +72,9 @@ struct AccountView: View {
                     PlaceholderContent(title: "Account",
                                        symbolName: "person.crop.circle.fill",
                                        caption: "Profile, payment methods, and order history land here.")
-                    // Temporary sign-out CTA. Moved off the Menu toolbar when
-                    // the v4 topbar landed; will live inside a proper profile
-                    // screen once the Account tab gets real content.
+                    // Temporary sign-out CTA. Will live inside a proper profile
+                    // screen once Account (reached via the Home avatar sheet)
+                    // gets real content.
                     Button(role: .destructive) {
                         Task { await appState.logout() }
                     } label: {
