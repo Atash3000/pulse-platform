@@ -17,9 +17,25 @@ struct CartView: View {
     let locationId: String
     /// Loaded menu items (passed by MenuView) — pool for the smart upsell.
     let foodItems: [MenuItem]
+    /// When true (reorder straight-to-checkout path), the cart immediately
+    /// pushes CheckoutView on appear. Default false keeps the normal flow.
+    let autoAdvanceToCheckout: Bool
+    /// Optional one-line banner shown atop the cart when a reorder was
+    /// adjusted (item removed / price changed). nil = no banner.
+    let reorderNotice: String?
 
     @State private var showCheckout = false
     @State private var editLine: CartManager.Line?
+
+    init(locationId: String,
+         foodItems: [MenuItem],
+         autoAdvanceToCheckout: Bool = false,
+         reorderNotice: String? = nil) {
+        self.locationId = locationId
+        self.foodItems = foodItems
+        self.autoAdvanceToCheckout = autoAdvanceToCheckout
+        self.reorderNotice = reorderNotice
+    }
 
     var body: some View {
         NavigationStack {
@@ -49,6 +65,9 @@ struct CartView: View {
                                    editing: .init(lineId: line.id, modifierIds: line.modifierIds, quantity: line.quantity))
                 }
             }
+            .onAppear {
+                if autoAdvanceToCheckout && !cart.isEmpty { showCheckout = true }
+            }
         }
     }
 
@@ -58,6 +77,15 @@ struct CartView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                if let reorderNotice {
+                    Text(reorderNotice)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color.secondary.opacity(0.08))
+                }
                 VStack(spacing: 0) {
                     ForEach(cart.lines) { line in
                         CartLineView(line: line, onEdit: { editLine = line })
