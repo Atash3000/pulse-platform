@@ -266,8 +266,12 @@ private struct PairWithRow: View {
                                 HStack {
                                     Text(food.displayPrice).font(.caption2).foregroundStyle(.secondary)
                                     Spacer()
-                                    Button { onAdd(food) } label: { Image(systemName: "plus") }
-                                        .accessibilityLabel("Add \(food.name)")
+                                    Button { onAdd(food) } label: {
+                                        Image(systemName: "plus")
+                                            .frame(width: 44, height: 44)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .accessibilityLabel("Add \(food.name)")
                                 }
                             }
                             .padding(10)
