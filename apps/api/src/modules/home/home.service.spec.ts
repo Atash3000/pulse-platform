@@ -1,4 +1,3 @@
-import { PaymentStatus } from '../../database/entities';
 import { HomeService } from './home.service';
 
 type FakeItem = {
