@@ -10,21 +10,6 @@ import SwiftUI
 // `AccountAvatarButton` on Home — but keeps its placeholder for the
 // logged-in profile surface until the real screen lands.
 
-struct HomeView: View {
-    var body: some View {
-        NavigationStack {
-            PlaceholderContent(tab: .home,
-                               caption: "Featured drinks, promos, and nearby locations land here.")
-                .navigationTitle(MainTab.home.title)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        AccountAvatarButton()
-                    }
-                }
-        }
-    }
-}
-
 struct OrdersView: View {
     var body: some View {
         NavigationStack {
@@ -128,7 +113,6 @@ private struct PlaceholderContent: View {
     }
 }
 
-#Preview("Home")    { HomeView().environmentObject(AppState()) }   // Home hosts AccountAvatarButton, which needs AppState
 #Preview("Orders")  { OrdersView() }
 #Preview("Rewards") { RewardsView() }
 #Preview("Account — guest") {
