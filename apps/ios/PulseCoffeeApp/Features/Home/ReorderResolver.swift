@@ -39,16 +39,30 @@ enum ReorderResolver {
         guard let item = itemsByID[signature.menuItemId], item.available else {
             return .unavailable
         }
-        let live = liveUnitPriceCents(for: item, modifierIds: signature.modifierIds)
+        // Drop any modifier that no longer exists on the live item — a stale
+        // modifier id must never reach checkout. If the set shrank, the drink
+        // is no longer what the customer ordered, so route to review even when
+        // the price happens to still match (e.g. a discontinued $0 modifier).
+        let liveModifierIds = Set(item.modifierGroups.flatMap { $0.modifiers }.map(\.id))
+        let validModifierIds = signature.modifierIds.filter { liveModifierIds.contains($0) }
+        let modifiersDropped = validModifierIds.count != signature.modifierIds.count
+
+        let live = configuredUnitPriceCents(for: item, modifierIds: validModifierIds)
         let resolution = Resolution(item: item,
                                     quantity: signature.quantity,
-                                    modifierIds: signature.modifierIds,
+                                    modifierIds: validModifierIds,
                                     liveUnitPriceCents: live)
+        if modifiersDropped { return .review(resolution) }
         return live == signature.lastUnitPriceCents ? .ready(resolution) : .review(resolution)
     }
 
-    /// base price + the price deltas of the selected modifiers found on the item.
-    private static func liveUnitPriceCents(for item: MenuItem, modifierIds: [String]) -> Int {
+    /// Base price + the price deltas of the selected modifiers found on the
+    /// item. The single source of truth for a reordered config's per-unit
+    /// price — used by `resolve` (the same-price guard) AND by the Home reorder
+    /// cards/hero for display, so the price shown matches the configured drink
+    /// (base + milk/size/extras), not the bare base price. Display/guard only;
+    /// the server recomputes the authoritative charge at checkout (Golden Rule #8).
+    static func configuredUnitPriceCents(for item: MenuItem, modifierIds: [String]) -> Int {
         let selected = Set(modifierIds)
         let deltas = item.modifierGroups
             .flatMap { $0.modifiers }

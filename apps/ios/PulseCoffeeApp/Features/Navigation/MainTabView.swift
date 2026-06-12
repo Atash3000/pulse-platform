@@ -28,9 +28,10 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack {
-            // TODO: Before Home / Orders start API fetches or polling,
-            // lazy-mount inactive tabs or gate their tasks on `selection`.
-            tabContent(.home) { HomeView() }
+            // Home gates its network load on `isActive` so an eager-mounted but
+            // unselected Home tab doesn't fetch on launch (see HomeView). Orders
+            // still needs the same treatment once it starts polling.
+            tabContent(.home) { HomeView(isActive: selection == .home) }
             tabContent(.menu) { MenuView() }
             tabContent(.orders) { OrdersView() }
             tabContent(.rewards) { RewardsView() }

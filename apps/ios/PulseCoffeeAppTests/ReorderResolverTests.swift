@@ -62,4 +62,44 @@ final class ReorderResolverTests: XCTestCase {
         let idx = ReorderResolver.indexByID(menu)
         XCTAssertEqual(Set(idx.keys), Set(["latte", "matcha"]))
     }
+
+    // MARK: - configured price (the displayed reorder price)
+
+    func test_configuredUnitPriceCents_sumsBaseAndModifierDeltas() {
+        // The Home hero/cards display this — it must include paid modifiers,
+        // not just the base price. base 550 + oat(+75) + extraShot(+100) = 725.
+        let drink = item("latte", base: 550, mods: [mod("oat", 75), mod("extraShot", 100), mod("lightIce", 0)])
+        let cents = ReorderResolver.configuredUnitPriceCents(for: drink, modifierIds: ["oat", "extraShot"])
+        XCTAssertEqual(cents, 725)
+    }
+
+    func test_configuredUnitPriceCents_baseOnlyWhenNoModifiers() {
+        XCTAssertEqual(ReorderResolver.configuredUnitPriceCents(for: item("latte", base: 525), modifierIds: []), 525)
+    }
+
+    // MARK: - modifier validity (a discontinued modifier must not reach checkout)
+
+    func test_resolve_discontinuedModifier_isReview_andDropsTheStaleId() {
+        // The item now offers only "oat"; the signature still references the
+        // retired "decaf". Even though the retired modifier was $0 (so the
+        // price still matches the baseline), the config changed → review, and
+        // the stale id must be dropped so it never reaches checkout.
+        let drink = item("latte", base: 525, mods: [mod("oat", 0)])
+        let items = index([drink])
+        let sig = ReorderSignature(menuItemId: "latte", modifierIds: ["oat", "decaf"], quantity: 1, lastUnitPriceCents: 525)
+        guard case let .review(r) = ReorderResolver.resolve(sig, in: items) else {
+            return XCTFail("expected .review when a modifier was discontinued")
+        }
+        XCTAssertEqual(r.modifierIds, ["oat"], "the retired modifier id must be dropped")
+        XCTAssertFalse(r.modifierIds.contains("decaf"))
+    }
+
+    func test_resolve_allModifiersStillValid_staysReadyWhenPriceMatches() {
+        let drink = item("latte", base: 525, mods: [mod("oat", 0)])
+        let sig = ReorderSignature(menuItemId: "latte", modifierIds: ["oat"], quantity: 1, lastUnitPriceCents: 525)
+        guard case let .ready(r) = ReorderResolver.resolve(sig, in: index([drink])) else {
+            return XCTFail("expected .ready")
+        }
+        XCTAssertEqual(r.modifierIds, ["oat"])
+    }
 }

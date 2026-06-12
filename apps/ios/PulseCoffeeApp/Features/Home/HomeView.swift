@@ -14,6 +14,17 @@ struct HomeView: View {
     @StateObject private var menuVM = MenuViewModel()
     @StateObject private var homeVM = HomeViewModel()
 
+    /// Whether Home is the currently-selected tab. `MainTabView` eager-mounts
+    /// every tab, so this gates the network load to the moment Home is actually
+    /// shown — otherwise a signed-in user opening to Menu would fire /menu,
+    /// /locations AND /home/summary for a screen they never look at (see the
+    /// lazy-mount TODO in `MainTabView`).
+    let isActive: Bool
+
+    /// Load once. Prevents a re-fetch + flash every time the user returns to
+    /// the Home tab.
+    @State private var hasLoaded = false
+
     // Reorder → cart sheet (reuses the existing CartView/Checkout flow).
     @State private var showCart = false
     @State private var autoAdvance = false
@@ -21,6 +32,11 @@ struct HomeView: View {
     // Shown when a reorder can't be fulfilled at all (item gone) — nothing was
     // added to the cart, so the message lives here rather than in an empty cart.
     @State private var reorderAlert: String?
+
+    /// `isActive` defaults true so previews and any non-tab host render eagerly.
+    init(isActive: Bool = true) {
+        self.isActive = isActive
+    }
 
     private var isSignedIn: Bool {
         if case .loggedIn = appState.authState { return true }
@@ -55,7 +71,9 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) { AccountAvatarButton() }
             }
-            .task {
+            .task(id: isActive) {
+                guard isActive, !hasLoaded else { return }
+                hasLoaded = true
                 await menuVM.load()
                 await homeVM.load(isSignedIn: isSignedIn)
             }
@@ -113,7 +131,9 @@ struct HomeView: View {
             showCart = true
         case let .review(r):
             cart.add(item: r.item, quantity: r.quantity, modifierIds: r.modifierIds)
-            reorderNotice = "We updated your order — the price changed since you last ordered this."
+            // Covers both a price change and a since-discontinued modifier — in
+            // either case the drink no longer matches the original, so review.
+            reorderNotice = "We updated your order to match today's menu — review before paying."
             autoAdvance = false         // let the customer review before paying
             showCart = true
         case .unavailable:
@@ -196,17 +216,24 @@ private struct UsualHero: View {
                 HStack {
                     Text("Reorder").fontWeight(.semibold)
                     Spacer()
-                    Text(item.displayPrice).fontWeight(.semibold)
+                    Text(configuredPrice).fontWeight(.semibold)
                 }
                 .padding(.vertical, 14).padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
                 .background(AppTheme.Colors.accentWarm, in: RoundedRectangle(cornerRadius: 12))
                 .foregroundStyle(.white)
             }
-            .accessibilityLabel("Reorder \(item.name), \(item.displayPrice)")
+            .accessibilityLabel("Reorder \(item.name), \(configuredPrice)")
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: AppTheme.Metrics.cardCornerRadius).fill(Color(.secondarySystemBackground)))
+    }
+
+    /// The price of the configured drink (base + milk/size/extras), not the
+    /// bare base price — so the headline CTA matches what checkout will charge.
+    private var configuredPrice: String {
+        CartEstimate.displayPrice(
+            ReorderResolver.configuredUnitPriceCents(for: item, modifierIds: signature.modifierIds))
     }
 
     /// Names of the selected modifiers, resolved from the live item. Empty → nil.
@@ -228,16 +255,18 @@ private struct OrderAgainRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(resolvable, id: \.0.id) { sig, item in
+                        let price = CartEstimate.displayPrice(
+                            ReorderResolver.configuredUnitPriceCents(for: item, modifierIds: sig.modifierIds))
                         Button { onReorder(sig) } label: {
                             VStack(spacing: 6) {
                                 DrinkArt(token: item.artToken, size: 56)
                                 Text(item.name).font(.caption).lineLimit(1)
-                                Text(item.displayPrice).font(.caption2).foregroundStyle(.secondary)
+                                Text(price).font(.caption2).foregroundStyle(.secondary)
                             }
                             .frame(width: 88)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Reorder \(item.name), \(item.displayPrice)")
+                        .accessibilityLabel("Reorder \(item.name), \(price)")
                     }
                 }
             }
