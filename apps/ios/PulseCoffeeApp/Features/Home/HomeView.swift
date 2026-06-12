@@ -73,9 +73,15 @@ struct HomeView: View {
             }
             .task(id: isActive) {
                 guard isActive, !hasLoaded else { return }
-                hasLoaded = true
                 await menuVM.load()
                 await homeVM.load(isSignedIn: isSignedIn)
+                // Mark loaded only after the menu actually loaded, so a first
+                // visit that's cancelled (user taps away mid-load) or fails
+                // retries on the next activation instead of stranding Home on
+                // the featured fallback until relaunch. A degraded /home/summary
+                // (menu loaded, summary failed → fallback) is intentionally NOT
+                // retried — that's the Golden Rule #17 fail-safe state.
+                if case .loaded = menuVM.state { hasLoaded = true }
             }
             .alert("Reorder",
                    isPresented: Binding(get: { reorderAlert != nil },
