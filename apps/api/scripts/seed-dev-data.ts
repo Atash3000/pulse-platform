@@ -17,8 +17,8 @@ import {
 } from '../src/database/entities';
 
 const LOCATION = {
-  name: 'Pulse Coffee — Main St',
-  address: '123 Main Street, New York, NY 10001',
+  name: 'Pulse Coffee — Park Slope',
+  address: '200 5th Avenue, Brooklyn, NY 11215',
   timezone: 'America/New_York',
   phone: null as string | null,
 } as const;
@@ -63,7 +63,10 @@ async function run(): Promise<void> {
     // Idempotency key: name. (Locations don't have a natural FK-friendly key
     // in the schema, so we de-dup by name within the dev seed.)
     const locationRepo = em.getRepository(Location);
-    let location = await locationRepo.findOne({ where: { name: LOCATION.name } });
+    // Single-location MVP: update the lone existing location (whatever its old
+    // name) so a rename is idempotent and never creates a duplicate. Multi-
+    // location seeding is revisited in the nearest-location sub-project.
+    let location = (await locationRepo.find({ order: { created_at: 'ASC' }, take: 1 }))[0] ?? null;
     if (location) {
       location.address = LOCATION.address;
       location.phone = LOCATION.phone;
