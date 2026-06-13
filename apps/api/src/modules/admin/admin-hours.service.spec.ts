@@ -30,6 +30,10 @@ describe('AdminHoursService.setHours', () => {
     const inserted = manager.insert.mock.calls[0][1];
     expect(inserted).toHaveLength(7);
     expect(inserted.every((r: any) => r.location_id === 'loc-1')).toBe(true);
+    // "HH:mm" from the DTO is persisted as "HH:mm:ss" to match the Postgres
+    // `time` column — the round-trip computeStoreStatus relies on.
+    expect(inserted[1].open_time).toBe('07:00:00');
+    expect(inserted[1].close_time).toBe('18:00:00');
   });
 
   it('rejects a missing/duplicate day (must cover 0–6 exactly once)', async () => {
