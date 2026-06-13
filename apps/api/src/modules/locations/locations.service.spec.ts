@@ -17,7 +17,7 @@ import { LocationsService } from './locations.service';
 describe('LocationsService.listActive — currentWaitMinutes on summary', () => {
   function makeService(opts: { locations: Partial<Location>[]; settings: Partial<LocationSettings>[] }) {
     const locRepo = { find: jest.fn().mockResolvedValue(opts.locations) };
-    const hoursRepo = { find: jest.fn() };
+    const hoursRepo = { find: jest.fn().mockResolvedValue([]) };
     const settingsRepo = { find: jest.fn().mockResolvedValue(opts.settings) };
     return new LocationsService(locRepo as any, hoursRepo as any, settingsRepo as any);
   }
@@ -38,5 +38,30 @@ describe('LocationsService.listActive — currentWaitMinutes on summary', () => 
     });
     const out = await svc.listActive();
     expect(out[0].current_wait_minutes).toBe(5);
+  });
+});
+
+describe('LocationsService — store status on payload', () => {
+  const WEEK = [
+    { day_of_week: 1, open_time: '07:00:00', close_time: '18:00:00', is_closed: false },
+  ];
+  function makeService(opts: { locations: any[]; hours: any[]; settings: any[] }) {
+    const locRepo = { find: jest.fn().mockResolvedValue(opts.locations) };
+    const hoursRepo = { find: jest.fn().mockResolvedValue(opts.hours) };
+    const settingsRepo = { find: jest.fn().mockResolvedValue(opts.settings) };
+    return { svc: new LocationsService(locRepo as any, hoursRepo as any, settingsRepo as any), hoursRepo };
+  }
+
+  it('includes status + next_transition_at + today fields on each summary, hours batch-loaded once', async () => {
+    const { svc, hoursRepo } = makeService({
+      locations: [{ id: 'loc-1', name: 'P', address: 'a', phone: null, timezone: 'America/New_York' }],
+      hours: WEEK.map((h) => ({ ...h, location_id: 'loc-1' })),
+      settings: [],
+    });
+    const out = await svc.listActive();
+    expect(Object.keys(out[0])).toEqual(
+      expect.arrayContaining(['status', 'next_transition_at', 'today_open', 'today_close']),
+    );
+    expect(hoursRepo.find).toHaveBeenCalledTimes(1);
   });
 });

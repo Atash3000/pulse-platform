@@ -7,6 +7,7 @@ import {
   LocationHours,
   LocationSettings,
 } from '../../database/entities';
+import { computeStoreStatus, StoreStatusResult } from './store-status';
 
 export interface PublicLocationSummary {
   id: string;
@@ -15,6 +16,10 @@ export interface PublicLocationSummary {
   phone: string | null;
   timezone: string;
   current_wait_minutes: number;
+  status: 'open' | 'closing_soon' | 'closed' | null;
+  next_transition_at: string | null;
+  today_open: string | null;
+  today_close: string | null;
 }
 
 export interface PublicLocationDetail extends PublicLocationSummary {
@@ -46,18 +51,33 @@ export class LocationsService {
       order: { name: 'ASC' },
     });
 
-    // Batch the settings lookup (no N+1): one query for all returned
-    // locations, then a Map lookup per row. current_wait_minutes defaults to
-    // 5 — same default getById uses — when a location has no settings row.
+    // Batch the settings + hours lookups (no N+1): one query each for all
+    // returned locations, then Map lookups per row. current_wait_minutes
+    // defaults to 5 — same default getById uses — when a location has no
+    // settings row. Store status is computed from the batched hours.
     const ids = rows.map((l) => l.id);
-    const settingsRows = ids.length
-      ? await this.settings.find({ where: { location_id: In(ids) } })
-      : [];
+    const [settingsRows, hoursRows] = await Promise.all([
+      ids.length ? this.settings.find({ where: { location_id: In(ids) } }) : Promise.resolve([]),
+      ids.length ? this.hours.find({ where: { location_id: In(ids) } }) : Promise.resolve([]),
+    ]);
     const waitByLocation = new Map(
       settingsRows.map((s) => [s.location_id, s.current_wait_minutes]),
     );
+    const hoursByLocation = new Map<string, typeof hoursRows>();
+    for (const h of hoursRows) {
+      const list = hoursByLocation.get(h.location_id) ?? [];
+      list.push(h);
+      hoursByLocation.set(h.location_id, list);
+    }
 
-    return rows.map((l) => toSummary(l, waitByLocation.get(l.id) ?? 5));
+    const now = new Date();
+    return rows.map((l) =>
+      toSummary(
+        l,
+        waitByLocation.get(l.id) ?? 5,
+        computeStoreStatus(hoursByLocation.get(l.id) ?? [], l.timezone, now),
+      ),
+    );
   }
 
   async getById(id: string): Promise<PublicLocationDetail> {
@@ -75,9 +95,10 @@ export class LocationsService {
     ]);
 
     const currentWaitMinutes = settings?.current_wait_minutes ?? 5;
+    const status = computeStoreStatus(hours, location.timezone, new Date());
 
     return {
-      ...toSummary(location, currentWaitMinutes),
+      ...toSummary(location, currentWaitMinutes, status),
       hours: hours.map((h) => ({
         day_of_week: h.day_of_week,
         open_time: h.open_time,
@@ -94,7 +115,11 @@ export class LocationsService {
   }
 }
 
-function toSummary(l: Location, currentWaitMinutes: number): PublicLocationSummary {
+function toSummary(
+  l: Location,
+  currentWaitMinutes: number,
+  status: StoreStatusResult,
+): PublicLocationSummary {
   return {
     id: l.id,
     name: l.name,
@@ -102,5 +127,9 @@ function toSummary(l: Location, currentWaitMinutes: number): PublicLocationSumma
     phone: l.phone,
     timezone: l.timezone,
     current_wait_minutes: currentWaitMinutes,
+    status: status.status,
+    next_transition_at: status.next_transition_at,
+    today_open: status.today_open,
+    today_close: status.today_close,
   };
 }
