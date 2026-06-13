@@ -60,6 +60,19 @@ final class MenuViewModel: ObservableObject {
         }
     }
 
+    /// Re-fetch only the location (for the store-status live flip). Preserves the
+    /// already-loaded menu; on failure leaves the current state untouched (the
+    /// badge keeps its last value — Golden Rule #17 fail-safe).
+    func refreshLocation() async {
+        guard case let .loaded(_, menu) = state else { return }
+        do {
+            let location = try await locations.firstLocation()
+            state = .loaded(location, menu)
+        } catch {
+            // Non-critical: keep showing the last-known status.
+        }
+    }
+
     private static func message(for error: APIError) -> String {
         switch error {
         case .invalidURL:
