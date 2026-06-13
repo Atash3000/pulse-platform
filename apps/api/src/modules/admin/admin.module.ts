@@ -6,6 +6,7 @@ import {
   FeatureFlag,
   Inventory,
   Location,
+  LocationHours,
   LocationSettings,
   MenuCategory,
   MenuItem,
@@ -24,6 +25,8 @@ import { AdminDashboardController } from './admin-dashboard.controller';
 import { AdminDashboardService } from './admin-dashboard.service';
 import { AdminFeatureFlagsController } from './admin-feature-flags.controller';
 import { AdminFeatureFlagsService } from './admin-feature-flags.service';
+import { AdminHoursController } from './admin-hours.controller';
+import { AdminHoursService } from './admin-hours.service';
 import { AdminItemsController } from './admin-items.controller';
 import { AdminItemsService } from './admin-items.service';
 import { AdminOrderingController } from './admin-ordering.controller';
@@ -42,6 +45,7 @@ import { AdminOrdersService } from './admin-orders.service';
       Refund,
       Customer,
       Location,
+      LocationHours,
       LocationSettings,
       MenuItem,
       MenuCategory,
@@ -58,6 +62,7 @@ import { AdminOrdersService } from './admin-orders.service';
     AdminOrderingController,
     AdminDashboardController,
     AdminFeatureFlagsController,
+    AdminHoursController,
   ],
   providers: [
     AdminOrdersService,
@@ -65,6 +70,7 @@ import { AdminOrdersService } from './admin-orders.service';
     AdminOrderingService,
     AdminDashboardService,
     AdminFeatureFlagsService,
+    AdminHoursService,
   ],
 })
 export class AdminModule {}
