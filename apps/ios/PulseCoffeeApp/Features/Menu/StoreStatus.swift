@@ -12,6 +12,19 @@ enum StoreStatus: Equatable {
     case closed
 }
 
+extension StoreStatus {
+    /// Maps the backend wire string to the badge enum. Unknown / nil → nil
+    /// (badge hidden, Golden Rule #17 — never assert "open" on bad data).
+    init?(wire: String?) {
+        switch wire {
+        case "open": self = .open
+        case "closing_soon": self = .closingSoon
+        case "closed": self = .closed
+        default: return nil
+        }
+    }
+}
+
 /// How long before the close time the store enters "closing soon".
 /// 60 minutes per the founder's spec ("closes at 6pm, opens menu at
 /// 17:01 ⇒ yellow").
