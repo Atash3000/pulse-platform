@@ -68,6 +68,7 @@ async function run(): Promise<void> {
     // location seeding is revisited in the nearest-location sub-project.
     let location = (await locationRepo.find({ order: { created_at: 'ASC' }, take: 1 }))[0] ?? null;
     if (location) {
+      location.name = LOCATION.name; // apply the rename to the existing row
       location.address = LOCATION.address;
       location.phone = LOCATION.phone;
       location.timezone = LOCATION.timezone;
