@@ -71,7 +71,16 @@ struct MenuView: View {
 
     private var topbar: some View {
         HStack(spacing: 8) {
-            StoreStatusDot(status: currentStoreStatus())
+            if let location = loadedLocation, let status = location.storeStatus {
+                StoreStatusDot(status: status)
+                    .task(id: location.nextTransitionAt) {
+                        guard let delay = StoreStatusRefreshClock.secondsUntilNextTransition(location.nextTransitionAt)
+                        else { return }
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        guard !Task.isCancelled else { return }
+                        await viewModel.refreshLocation()
+                    }
+            }
             Text(topbarLocationName)
                 .font(.system(size: 17, weight: .bold))
                 .tracking(-0.34)  // -0.02em on a 17pt size
@@ -98,6 +107,14 @@ struct MenuView: View {
     /// doesn't filter). `nil` until the menu loads.
     private var loadedMenu: Menu? {
         if case .loaded(_, let menu) = viewModel.state { return menu }
+        return nil
+    }
+
+    /// The loaded location — source of the topbar store-status dot. `nil`
+    /// until the location loads, which keeps the dot hidden (Golden Rule
+    /// #17 fail-safe).
+    private var loadedLocation: LocationSummary? {
+        if case .loaded(let location, _) = viewModel.state { return location }
         return nil
     }
 

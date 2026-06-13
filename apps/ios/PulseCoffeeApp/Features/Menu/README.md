@@ -15,7 +15,8 @@ Design source: `design/v4/pulse-coffee-v4.html`. Spec: `docs/superpowers/specs/2
 | `MenuListRow.swift` | Vertical row reused for the rest of a spotlight section (and for any `display_style == .list` category). Drink mini + name + temperature pill + price + `+` button. The static `canInstantAdd(_:)` is the smart-add rule (true iff no required modifier groups). |
 | `CategoryTabBar.swift` | Sticky, data-driven **category selector** — one pill per category (Matcha / Coffee / Food), labels read straight from the loaded menu. Tapping a pill shows that category's section (one category at a time); it is not a scroll-spy nav. The active dark-espresso pill **slides** between tabs via `matchedGeometryEffect` + a spring (see "Active-pill slide animation" below). |
 | `DrinkArt.swift` | Token-driven SwiftUI drink visuals. `DrinkArtKind` (matcha / classic / food), `DrinkArtSpec` (palette + glyph + isFallback), `DrinkArtRegistry` (15 seeded tokens). All hex colors copied verbatim from `design/v4/pulse-coffee-v4.html`. Includes a `Color(hex: UInt32)` convenience init. |
-| `StoreStatus.swift` | **Hardcoded** topbar status calculation. Pure `currentStoreStatus(now:calendar:)` returns `.open` / `.closingSoon` / `.closed` based on local wall-clock against 7:00–18:00 hours. Carries a TODO pointing at `docs/superpowers/todos/2026-05-28-store-status-backend.md` for the backend hand-off. |
+| `StoreStatus.swift` | The `StoreStatus` enum (`.open` / `.closingSoon` / `.closed`) plus `init?(wire:)` that maps the backend `status` string to the badge (unknown / nil → nil, so the dot is hidden — Golden Rule #17). Status is computed **server-side** and arrives on the `/locations` payload as `LocationSummary.storeStatus`; the client no longer computes hours locally. |
+| `StoreStatusRefreshClock.swift` | Pure timing helper for the live flip. `secondsUntilNextTransition(_:now:)` returns the delay until `next_transition_at` (nil when absent, 0 when past). `MenuView` sleeps that long then calls `MenuViewModel.refreshLocation()` to pick up the fresh status. |
 | `StoreStatusDot.swift` | 10pt circle bound to a `StoreStatus`. Green / amber / red + gentle `repeatForever` pulse. VoiceOver-labelled. |
 
 ## Companion tests
@@ -25,6 +26,7 @@ Design source: `design/v4/pulse-coffee-v4.html`. Spec: `docs/superpowers/specs/2
 | `MenuTests.swift` | Codable round-trip for `Menu` / `MenuCategory` / `MenuItem`, fail-safe decoding of `temperature` / `featured` / `art_token` / `display_style` (Golden Rule #17), legacy v3 JSON still decodes with defaults. |
 | `DrinkArtTests.swift` | Registry kind resolution (matcha / classic / food), unknown / nil → fallback with `isFallback: true`, **every backend-seeded token is registered** (so a future drink lands loud at review). |
 | `SpotlightSectionTests.swift` | `hero(in:)` + `nonHeroItems(in:hero:)` + sub-hero/vertical split rules. |
+| `StoreStatusRefreshClockTests.swift` | `secondsUntilNextTransition(_:now:)` — nil transition → nil, past → 0 (refresh now), future → positive delay. |
 
 ## Design choices
 
