@@ -59,4 +59,39 @@ describe('computeStoreStatus', () => {
     expect(r.today_close).toBeNull();
     expect(r.next_transition_at).toBe('2026-06-15T11:00:00.000Z'); // Mon 07:00 NY
   });
+
+  // --- exact boundaries (spec §9): [open, close) is open-inclusive, close-exclusive ---
+
+  it('is open exactly at open time', () => {
+    // Mon 07:00 NY = 11:00Z. Transition at close-60 = 17:00 NY = 21:00Z.
+    const r = computeStoreStatus(WEEK, TZ, nyMondayAt('11:00'));
+    expect(r.status).toBe('open');
+    expect(r.next_transition_at).toBe('2026-06-15T21:00:00.000Z');
+  });
+
+  it('is closing_soon exactly 60 minutes before close', () => {
+    // Mon 17:00 NY = 21:00Z, exactly 60 min before 18:00 close → closing_soon.
+    const r = computeStoreStatus(WEEK, TZ, nyMondayAt('21:00'));
+    expect(r.status).toBe('closing_soon');
+    expect(r.next_transition_at).toBe('2026-06-15T22:00:00.000Z'); // 18:00 NY
+  });
+
+  it('is closed exactly at close time (close is exclusive)', () => {
+    // Mon 18:00 NY = 22:00Z. At close → closed; next open Tue 07:00 = 2026-06-16T11:00Z.
+    const r = computeStoreStatus(WEEK, TZ, nyMondayAt('22:00'));
+    expect(r.status).toBe('closed');
+    expect(r.next_transition_at).toBe('2026-06-16T11:00:00.000Z');
+  });
+
+  // --- DST: a winter date is EST (UTC-5), proving the offset isn't hard-coded to EDT ---
+
+  it('uses the correct standard-time offset in winter (EST, UTC-5)', () => {
+    // 2026-01-05 is a Monday in EST. NY 10:00 = 15:00Z.
+    const winterMon10 = new Date('2026-01-05T15:00:00Z');
+    const r = computeStoreStatus(WEEK, TZ, winterMon10);
+    expect(r.status).toBe('open');
+    expect(r.today_open).toBe('07:00');
+    // close-60 = 17:00 NY EST = 22:00Z (not 21:00Z, which would be the EDT bug).
+    expect(r.next_transition_at).toBe('2026-01-05T22:00:00.000Z');
+  });
 });
