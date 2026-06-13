@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import {
   Location,
@@ -14,6 +14,7 @@ export interface PublicLocationSummary {
   address: string;
   phone: string | null;
   timezone: string;
+  current_wait_minutes: number;
 }
 
 export interface PublicLocationDetail extends PublicLocationSummary {
@@ -44,7 +45,19 @@ export class LocationsService {
       where: { active: true },
       order: { name: 'ASC' },
     });
-    return rows.map(toSummary);
+
+    // Batch the settings lookup (no N+1): one query for all returned
+    // locations, then a Map lookup per row. current_wait_minutes defaults to
+    // 5 — same default getById uses — when a location has no settings row.
+    const ids = rows.map((l) => l.id);
+    const settingsRows = ids.length
+      ? await this.settings.find({ where: { location_id: In(ids) } })
+      : [];
+    const waitByLocation = new Map(
+      settingsRows.map((s) => [s.location_id, s.current_wait_minutes]),
+    );
+
+    return rows.map((l) => toSummary(l, waitByLocation.get(l.id) ?? 5));
   }
 
   async getById(id: string): Promise<PublicLocationDetail> {
@@ -61,8 +74,10 @@ export class LocationsService {
       this.settings.findOne({ where: { location_id: id } }),
     ]);
 
+    const currentWaitMinutes = settings?.current_wait_minutes ?? 5;
+
     return {
-      ...toSummary(location),
+      ...toSummary(location, currentWaitMinutes),
       hours: hours.map((h) => ({
         day_of_week: h.day_of_week,
         open_time: h.open_time,
@@ -71,7 +86,7 @@ export class LocationsService {
       })),
       settings: {
         mobile_ordering_paused: settings?.mobile_ordering_paused ?? false,
-        current_wait_minutes: settings?.current_wait_minutes ?? 5,
+        current_wait_minutes: currentWaitMinutes,
         scheduled_ordering: settings?.scheduled_ordering ?? true,
         max_schedule_days: settings?.max_schedule_days ?? 7,
       },
@@ -79,12 +94,13 @@ export class LocationsService {
   }
 }
 
-function toSummary(l: Location): PublicLocationSummary {
+function toSummary(l: Location, currentWaitMinutes: number): PublicLocationSummary {
   return {
     id: l.id,
     name: l.name,
     address: l.address,
     phone: l.phone,
     timezone: l.timezone,
+    current_wait_minutes: currentWaitMinutes,
   };
 }

@@ -14,6 +14,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { CelebrationModule } from './modules/celebration/celebration.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { HomeModule } from './modules/home/home.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -41,6 +42,7 @@ import { WorkersModule } from './workers/workers.module';
 
     HealthModule,
     AuthModule,
+    HomeModule,
     LocationsModule,
     MenuModule,
     PricingModule,
