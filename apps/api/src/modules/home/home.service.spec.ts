@@ -83,4 +83,20 @@ describe('HomeService.getHomeSummary', () => {
     const andWhereCalls = qb.andWhere.mock.calls.flat();
     expect(andWhereCalls.some((c: string) => typeof c === 'string' && c.includes('payment_status'))).toBe(true);
   });
+
+  it('scopes to a location when locationId is given (Golden Rule #13)', async () => {
+    const { service, qb } = makeService([item('latte', [], 525, '2026-06-01')]);
+    await service.getHomeSummary('cust-1', 'loc-1');
+    const calls = qb.andWhere.mock.calls;
+    const locCall = calls.find((c: any[]) => typeof c[0] === 'string' && c[0].includes('location_id'));
+    expect(locCall).toBeDefined();
+    expect(locCall![1]).toMatchObject({ loc: 'loc-1' });
+  });
+
+  it('does NOT scope by location when locationId is omitted', async () => {
+    const { service, qb } = makeService([item('latte', [], 525, '2026-06-01')]);
+    await service.getHomeSummary('cust-1');
+    const calls = qb.andWhere.mock.calls;
+    expect(calls.some((c: any[]) => typeof c[0] === 'string' && c[0].includes('location_id'))).toBe(false);
+  });
 });

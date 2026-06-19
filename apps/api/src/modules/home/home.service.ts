@@ -28,15 +28,26 @@ export class HomeService {
     private readonly orderItems: Repository<OrderItem>,
   ) {}
 
-  async getHomeSummary(customerId: string): Promise<HomeSummaryResponse> {
-    const items = await this.orderItems
+  /**
+   * Reorder summary for a customer. When `locationId` is provided, the summary
+   * is scoped to that location (Golden Rule #13) so a customer's "usual" at
+   * Location A doesn't surface as a dead-end card at Location B — checkout
+   * rejects cross-location items, so an unscoped hero would break for any
+   * multi-store customer. Omitting `locationId` returns the all-locations view
+   * (single-store callers / backwards compatibility).
+   */
+  async getHomeSummary(customerId: string, locationId?: string): Promise<HomeSummaryResponse> {
+    const qb = this.orderItems
       .createQueryBuilder('oi')
       .innerJoinAndSelect('oi.order', 'o')
       .where('o.customer_id = :cid', { cid: customerId })
-      .andWhere('o.payment_status = :paid', { paid: PaymentStatus.SUCCEEDED })
-      .orderBy('o.created_at', 'DESC')
-      .take(MAX_ITEMS)
-      .getMany();
+      .andWhere('o.payment_status = :paid', { paid: PaymentStatus.SUCCEEDED });
+
+    if (locationId) {
+      qb.andWhere('o.location_id = :loc', { loc: locationId });
+    }
+
+    const items = await qb.orderBy('o.created_at', 'DESC').take(MAX_ITEMS).getMany();
 
     const buckets = new Map<string, Bucket>();
     for (const it of items) {
