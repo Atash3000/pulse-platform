@@ -66,7 +66,10 @@ struct CartView: View {
                 }
             }
             .onAppear {
-                if autoAdvanceToCheckout && !cart.isEmpty { showCheckout = true }
+                // `!locationId.isEmpty` mirrors the checkout-CTA gate —
+                // never auto-advance into a checkout that would post an
+                // empty location id.
+                if autoAdvanceToCheckout && !cart.isEmpty && !locationId.isEmpty { showCheckout = true }
             }
         }
     }
@@ -154,6 +157,14 @@ struct CartView: View {
                 .padding(.vertical, 16).padding(.horizontal, 20).frame(maxWidth: .infinity)
                 .background(DetailPalette.ink, in: RoundedRectangle(cornerRadius: 14))
             }
+            // No location id yet (menu still loading / failed — reachable
+            // when items were added from Home's "Pair with" row and the
+            // cart opened before /menu resolved): checkout would fire
+            // `POST /checkout` with `locationId: ""` and 400. Gate the
+            // CTA; CheckoutViewModel.placeOrder has the matching guard
+            // as defense-in-depth.
+            .disabled(locationId.isEmpty)
+            .opacity(locationId.isEmpty ? 0.5 : 1)
             .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 10)
             .background(DetailPalette.warmCream)
         }
@@ -234,9 +245,14 @@ private struct CartLineView: View {
                     Image(systemName: "minus").font(.system(size: 14, weight: .semibold)).foregroundStyle(DetailPalette.inkSoft)
                 }.accessibilityLabel("Decrease quantity")
                 Text("\(line.quantity)").font(.system(size: 14, weight: .semibold).monospacedDigit()).frame(minWidth: 14)
+                // Same 1…12 ceiling as the item-detail stepper
+                // (CartManager.maxLineQuantity); setQuantity also clamps.
                 Button { cart.setQuantity(for: line.id, to: line.quantity + 1) } label: {
-                    Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(DetailPalette.ink)
-                }.accessibilityLabel("Increase quantity")
+                    Image(systemName: "plus").font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(line.quantity < CartManager.maxLineQuantity ? DetailPalette.ink : DetailPalette.inkFaint)
+                }
+                .disabled(line.quantity >= CartManager.maxLineQuantity)
+                .accessibilityLabel("Increase quantity")
             }
             .buttonStyle(.plain)
             .padding(.vertical, 6).padding(.horizontal, 10)

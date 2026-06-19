@@ -13,10 +13,11 @@ import StripePaymentSheet
 ///    and the totals.
 ///
 /// **Idempotency:** the same checkout attempt — including network-blip
-/// retries — uses the same idempotency key, so the backend dedupes and
-/// the customer is never double-charged. See `CheckoutViewModel.placeOrder`
-/// for the key-stability guarantee. The "Place Order" button is locked
-/// on first tap (`isProcessing`) as the second layer of protection.
+/// retries and re-entering checkout over an unchanged cart — uses the
+/// same idempotency key, so the backend dedupes and the customer is
+/// never double-charged. See `CartManager.idempotencyKey(for:)` for the
+/// key-stability guarantee. The "Place Order" button is locked on first
+/// tap (`isProcessing`) as the second layer of protection.
 struct CheckoutView: View {
 
     @Environment(\.dismiss) private var dismiss
@@ -53,10 +54,6 @@ struct CheckoutView: View {
 
         case .ready(let response):
             readyContent(response: response)
-
-        case .paying:
-            ProgressView("Confirming payment…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .success(let orderId, let display):
             successContent(orderId: orderId, display: display)

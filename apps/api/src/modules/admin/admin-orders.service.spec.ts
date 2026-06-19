@@ -492,27 +492,49 @@ describe('AdminOrdersService.refund', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 1 — Pre-validation rejects refund on a FAILED order.
+  // Test 1 — A FAILED order that captured money CAN be refunded
+  // (cleanup-after-pay remediation).
   //
-  // FAILED is terminal in the state machine (no outgoing transitions).
-  // A full refund attempt should run the assertTransition check in Phase 1
-  // and throw BEFORE Stripe is called.
+  // FAILED is no longer terminal: the PendingPaymentCleanupTask can reap an
+  // order to FAILED, then a lagging payment_intent.succeeded webhook records
+  // the captured money (payment_status=SUCCEEDED + payments row). The manager
+  // must be able to refund it — FAILED → REFUNDED [manager] now exists. A
+  // genuinely-failed payment has no payments row and is still rejected by the
+  // "no payment row" guard (covered by its own test below).
   // ---------------------------------------------------------------------------
 
-  it('Phase 1 rejects refund on a FAILED order without calling Stripe', async () => {
+  it('refunds a FAILED order that captured money (cleanup-after-pay remediation)', async () => {
     const order = makeOrder({
+      id: 'order-failed-remediation',
       order_status: OrderStatus.FAILED,
-      payment_status: PaymentStatus.FAILED,
+      payment_status: PaymentStatus.SUCCEEDED,
+      total_cents: 545,
     });
     ordersFindOne.mockResolvedValueOnce(order);
     phase1SumGetRawOne.mockResolvedValueOnce({ total: '0' });
     paymentsFindOne.mockResolvedValueOnce({ id: 'pay-1', stripe_payment_id: order.stripe_payment_id });
+    createRefundMock.mockResolvedValueOnce({ id: 're_failed_remediation' });
+    txGetOneOrder.mockResolvedValueOnce(order);
+    phase3SumGetRawOne.mockResolvedValueOnce({ total: '0' });
+    ordersFindOne.mockResolvedValueOnce(order);
+    customersFindOne.mockResolvedValueOnce(
+      Object.assign(new Customer(), {
+        id: order.customer_id,
+        first_name: 'Reaped',
+        last_name: 'Customer',
+        nickname: null,
+      }),
+    );
 
-    await expect(
-      service.refund(STAFF, order.id, 'fraud claim', order.total_cents),
-    ).rejects.toThrow(/INVALID_TRANSITION|terminal|cannot transition/i);
+    const result = await service.refund(STAFF, order.id, 'paid-but-reaped', 545);
 
-    expect(createRefundMock).not.toHaveBeenCalled();
+    expect(createRefundMock).toHaveBeenCalledTimes(1);
+    expect(order.order_status).toBe(OrderStatus.REFUNDED);
+    expect(order.payment_status).toBe(PaymentStatus.REFUNDED);
+    if (result.status !== 'committed') {
+      throw new Error(`expected status='committed' but got status='${result.status}'`);
+    }
+    expect(result.order.order_status).toBe(OrderStatus.REFUNDED);
   });
 
   // ---------------------------------------------------------------------------

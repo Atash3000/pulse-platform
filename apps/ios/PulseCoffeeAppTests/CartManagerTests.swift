@@ -150,16 +150,141 @@ final class CartManagerTests: XCTestCase {
         XCTAssertEqual(items[1].modifierIds, ["m-1"])
     }
 
-    // MARK: - itemIds (for idempotency key)
+    // MARK: - Idempotency key lifecycle (Golden Rule #4)
 
-    func test_itemIds_repeatsByQuantity() {
+    /// Fixed clock so key derivations are deterministic regardless of
+    /// whether the test crosses a wall-clock second boundary.
+    private func makeCartWithFixedClock() -> CartManager {
+        CartManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+    }
+
+    func test_idempotencyKey_isStableWhileCartUnchanged() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem())
+
+        let k1 = cart.idempotencyKey(for: "user-1")
+        let k2 = cart.idempotencyKey(for: "user-1")
+
+        XCTAssertEqual(k1, k2, "Unchanged cart must replay the same key — backend dedup depends on this")
+    }
+
+    func test_idempotencyKey_invalidatedByAdd() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem(id: "a"))
+        let before = cart.idempotencyKey(for: "u")
+
+        cart.add(item: makeItem(id: "b"))
+
+        XCTAssertNotEqual(cart.idempotencyKey(for: "u"), before, "Adding an item changes the cart — the key must change")
+    }
+
+    func test_idempotencyKey_invalidatedByQuantityChange() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem())
+        let before = cart.idempotencyKey(for: "u")
+
+        cart.setQuantity(for: cart.lines[0].id, to: 2)
+
+        XCTAssertNotEqual(cart.idempotencyKey(for: "u"), before)
+    }
+
+    func test_idempotencyKey_notInvalidatedBySameQuantityWrite() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem(), quantity: 2)
+        let before = cart.idempotencyKey(for: "u")
+
+        cart.setQuantity(for: cart.lines[0].id, to: 2) // no-op write
+
+        XCTAssertEqual(cart.idempotencyKey(for: "u"), before,
+                       "A no-op quantity write must not mint a new key — that would defeat replay protection")
+    }
+
+    func test_idempotencyKey_invalidatedByRemove() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem(id: "a"))
+        cart.add(item: makeItem(id: "b"))
+        let before = cart.idempotencyKey(for: "u")
+
+        cart.remove(lineId: cart.lines[0].id)
+
+        XCTAssertNotEqual(cart.idempotencyKey(for: "u"), before)
+    }
+
+    func test_idempotencyKey_invalidatedByUpdateLine() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem(), modifierIds: ["oat"])
+        let before = cart.idempotencyKey(for: "u")
+
+        cart.updateLine(lineId: cart.lines[0].id, modifierIds: ["whole"])
+
+        XCTAssertNotEqual(cart.idempotencyKey(for: "u"), before,
+                          "Editing a drink's modifiers is a different payment intent — the key must change")
+    }
+
+    func test_idempotencyKey_invalidatedByClear() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem())
+        let before = cart.idempotencyKey(for: "u")
+
+        cart.clear()
+        cart.add(item: makeItem(id: "other"))
+
+        XCTAssertNotEqual(cart.idempotencyKey(for: "u"), before)
+    }
+
+    func test_idempotencyKey_sameItemsDifferentModifiers_differ() {
+        // Two carts with the same drink but different modifier choices
+        // must never share a key — the old generator hashed only the
+        // flattened item IDs, so they did.
+        let cart1 = makeCartWithFixedClock()
+        let cart2 = makeCartWithFixedClock()
+        cart1.add(item: makeItem(), modifierIds: ["oat-milk"])
+        cart2.add(item: makeItem(), modifierIds: [])
+
+        XCTAssertNotEqual(cart1.idempotencyKey(for: "u"), cart2.idempotencyKey(for: "u"))
+    }
+
+    func test_idempotencyKey_differentUser_getsDifferentKey() {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem())
+
+        let keyA = cart.idempotencyKey(for: "user-a")
+        let keyB = cart.idempotencyKey(for: "user-b")
+
+        XCTAssertNotEqual(keyA, keyB, "A cached key derived for one user must never be served to another")
+    }
+
+    // MARK: - Quantity clamp
+
+    func test_setQuantity_aboveMax_clampsToMaxLineQuantity() {
         let cart = CartManager()
-        cart.add(item: makeItem(id: "latte"), quantity: 3)
-        cart.add(item: makeItem(id: "espresso"), quantity: 1)
+        cart.add(item: makeItem())
+        let lineId = cart.lines[0].id
 
-        // Idempotency key generator sees `[latte, latte, latte, espresso]`
-        // and sorts internally, so order here is insertion order.
-        XCTAssertEqual(cart.itemIds, ["latte", "latte", "latte", "espresso"])
+        cart.setQuantity(for: lineId, to: CartManager.maxLineQuantity + 5)
+
+        XCTAssertEqual(cart.lines[0].quantity, CartManager.maxLineQuantity,
+                       "Cart quantity control shares the item-detail stepper's 1…12 ceiling")
+    }
+
+    // MARK: - Logout signal clears the cart
+
+    func test_didLogoutNotification_clearsCartAndIdempotencyKey() async throws {
+        let cart = makeCartWithFixedClock()
+        cart.add(item: makeItem())
+        _ = cart.idempotencyKey(for: "user-a")
+
+        NotificationCenter.default.post(name: .didLogout, object: nil)
+
+        // The observer hops onto a Task @MainActor — poll briefly
+        // (same pattern as AppStateTests).
+        let deadline = Date().addingTimeInterval(1.0)
+        while Date() < deadline {
+            if cart.isEmpty { break }
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+
+        XCTAssertTrue(cart.isEmpty, "Logout must clear the cart — user B must never inherit user A's cart")
     }
 
     // MARK: - Detail → cart wiring (via ItemCustomization)

@@ -22,6 +22,12 @@ import SwiftUI
 @MainActor
 final class CartManager: ObservableObject {
 
+    /// Maximum quantity for a single cart line. Shared by the item-detail
+    /// stepper and the cart's quantity control so the two surfaces can't
+    /// drift apart (the cart stepper used to be uncapped while the detail
+    /// page clamped at 12).
+    static let maxLineQuantity = 12
+
     /// One line in the cart. Identified by item + the specific set of
     /// modifier IDs selected for that item — two cart lines of the same
     /// item but different modifiers count as separate lines (the user
@@ -42,6 +48,28 @@ final class CartManager: ObservableObject {
 
     @Published private(set) var lines: [Line] = []
 
+    /// Clock used when deriving the idempotency-key timestamp. Injectable
+    /// so tests can pin it and assert key determinism hermetically.
+    private let now: () -> Date
+
+    /// `nonisolated(unsafe)` for the same reason as
+    /// `AppState.authRequiredObserver`: `NSObjectProtocol` is not Sendable
+    /// and `deinit` runs on an unspecified executor. Written once in
+    /// `init` (on the MainActor), read once in `deinit` — no concurrent
+    /// access.
+    nonisolated(unsafe) private var logoutObserver: NSObjectProtocol?
+
+    init(now: @escaping () -> Date = Date.init) {
+        self.now = now
+        subscribeToLogout()
+    }
+
+    deinit {
+        if let observer = logoutObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
     // MARK: - Observation
 
     /// Number of distinct cart lines. Two lines of the same item with
@@ -54,11 +82,38 @@ final class CartManager: ObservableObject {
 
     var isEmpty: Bool { lines.isEmpty }
 
-    /// Item IDs in insertion order — fed into `IdempotencyKey.generate`
-    /// at checkout. The idempotency key generator sorts internally, so
-    /// the order here is irrelevant for the hash.
-    var itemIds: [String] {
-        lines.flatMap { line in Array(repeating: line.item.id, count: line.quantity) }
+    // MARK: - Idempotency key (Golden Rule #4)
+
+    /// The cached checkout idempotency key plus the user it was derived
+    /// for. Lives here — NOT in `CheckoutViewModel` — because the view
+    /// model is a fresh `@StateObject` per navigation: if the key lived
+    /// there, backing out of a failed checkout and re-entering would mint
+    /// a new key and create a second backend order for the same cart
+    /// (double-charge when the first payment actually went through but
+    /// the network dropped before the SDK saw the result).
+    private var cachedIdempotencyKey: (userId: String, key: String)?
+
+    /// Returns the idempotency key for the current cart contents,
+    /// deriving and caching it on first call. Every cart mutation
+    /// (add / remove / quantity / edit / clear) invalidates the cache,
+    /// so an unchanged cart always replays the same key (backend
+    /// dedupes — Golden Rule #4) and a changed cart gets a fresh one
+    /// (a different cart is a new payment intent, not a replay).
+    func idempotencyKey(for userId: String) -> String {
+        if let cached = cachedIdempotencyKey, cached.userId == userId {
+            return cached.key
+        }
+        let key = IdempotencyKey.generate(
+            userId: userId,
+            lines: toCheckoutItems(),
+            timestamp: Int(now().timeIntervalSince1970)
+        )
+        cachedIdempotencyKey = (userId, key)
+        return key
+    }
+
+    private func invalidateIdempotencyKey() {
+        cachedIdempotencyKey = nil
     }
 
     // MARK: - Mutation
@@ -69,6 +124,7 @@ final class CartManager: ObservableObject {
     func add(item: MenuItem, quantity: Int = 1, modifierIds: [String] = []) {
         guard quantity > 0 else { return }
 
+        invalidateIdempotencyKey()
         if let index = lines.firstIndex(where: { $0.item.id == item.id && $0.modifierIds == modifierIds }) {
             lines[index].quantity += quantity
         } else {
@@ -77,18 +133,28 @@ final class CartManager: ObservableObject {
     }
 
     /// Sets the quantity for a specific line. Removes the line entirely
-    /// if `quantity <= 0`.
+    /// if `quantity <= 0`; clamps to `maxLineQuantity` at the top so the
+    /// cart stepper can't run past the detail page's 1…12 range.
     func setQuantity(for lineId: Line.ID, to quantity: Int) {
         guard let index = lines.firstIndex(where: { $0.id == lineId }) else { return }
         if quantity <= 0 {
+            invalidateIdempotencyKey()
             lines.remove(at: index)
         } else {
-            lines[index].quantity = quantity
+            let clamped = min(quantity, Self.maxLineQuantity)
+            // No-op writes (same quantity) must NOT invalidate the
+            // idempotency key — the cart hasn't actually changed, and a
+            // fresh key on an unchanged cart would defeat backend replay
+            // protection (Golden Rule #4).
+            guard clamped != lines[index].quantity else { return }
+            invalidateIdempotencyKey()
+            lines[index].quantity = clamped
         }
     }
 
     /// Removes a line entirely regardless of its quantity.
     func remove(lineId: Line.ID) {
+        invalidateIdempotencyKey()
         lines.removeAll { $0.id == lineId }
     }
 
@@ -100,6 +166,7 @@ final class CartManager: ObservableObject {
     /// to avoid index aliasing.
     func updateLine(lineId: Line.ID, modifierIds: [String], quantity: Int? = nil) {
         guard let index = lines.firstIndex(where: { $0.id == lineId }) else { return }
+        invalidateIdempotencyKey()
         let old = lines[index]
         let newQty = quantity ?? old.quantity
         lines.remove(at: index)
@@ -112,9 +179,33 @@ final class CartManager: ObservableObject {
         }
     }
 
-    /// Clears the cart. Called after a successful checkout completes.
+    /// Clears the cart and the cached idempotency key. Called after a
+    /// successful checkout completes and on logout (via the
+    /// `.didLogout` signal below).
     func clear() {
+        invalidateIdempotencyKey()
         lines.removeAll()
+    }
+
+    // MARK: - Logout signal
+
+    /// Subscribes to `Notification.Name.didLogout`, posted by
+    /// `AppState.logout()` for BOTH explicit sign-out and the forced
+    /// 401 path (`.authRequired` → `AppState.logout()` → `.didLogout`).
+    ///
+    /// `CartManager` is App-scoped (`@StateObject` in `PulseCoffeeApp`),
+    /// so it survives the auth state flip — without this, user B signing
+    /// in on the same device could see (and pay for) user A's cart.
+    private func subscribeToLogout() {
+        logoutObserver = NotificationCenter.default.addObserver(
+            forName: .didLogout,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.clear()
+            }
+        }
     }
 }
 

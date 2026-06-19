@@ -138,6 +138,15 @@ actor APIClient {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            // Task cancellation (tab switch, view teardown mid-load) is
+            // navigation, not a network failure. Surface a distinct case
+            // so view models can skip the failure state + Sentry capture.
+            throw APIError.cancelled
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession reports a cancelled task as URLError.cancelled
+            // rather than CancellationError — same meaning, same mapping.
+            throw APIError.cancelled
         } catch {
             throw APIError.network(error)
         }
@@ -211,13 +220,16 @@ actor APIClient {
                 throw APIError.authRequired
             }
 
-            do {
-                _ = try await refresher.refresh()
-            } catch {
-                // TokenRefresher already posted authRequired on its own
-                // path; just propagate the error.
-                throw APIError.authRequired
-            }
+            // Refresh failures are NOT all auth failures. TokenRefresher
+            // throws `.authRequired` only for genuine auth rejections
+            // (missing/expired/revoked refresh token — and it posts the
+            // logout notification itself on that path). Transport blips
+            // (`.network`), throttling (`.rateLimited`), and decode
+            // failures propagate as their own APIError so callers show
+            // retryable copy instead of "please sign in again". The old
+            // code converted every refresher error to `.authRequired`,
+            // which read like a forced logout after a Wi-Fi blip.
+            _ = try await refresher.refresh()
 
             return try await perform(method, path: path, query: query, body: body, isRetry: true)
 
@@ -350,6 +362,12 @@ enum APIError: Error, @unchecked Sendable {
     /// Surfaces as a discrete case (not `unexpected(429)`) so view
     /// models don't have to parse status codes out of unrelated paths.
     case rateLimited
+
+    /// The request's Task was cancelled (tab switch, view teardown).
+    /// Not a failure — view models stay in (or revert to) their
+    /// pre-load state and never capture this to Sentry. Mapped from
+    /// `CancellationError` / `URLError.cancelled` in `perform`.
+    case cancelled
 
     /// Backend returned a non-2xx status that didn't match any of
     /// the known structured-error shapes. The status code is

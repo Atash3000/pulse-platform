@@ -676,6 +676,10 @@ export interface OrderItemModifierSnapshot {
 }
 
 @Entity({ name: 'order_items' })
+// Postgres does NOT auto-index FKs. order_items(order_id) serves every
+// items-by-order join: customer order detail (polled every 10s while active),
+// the home reorder summary, and the admin queue/dashboard item loads.
+@Index('IDX_order_items_order_id', ['order_id'])
 export class OrderItem {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -1148,6 +1152,31 @@ export class OutboxEvent {
   created_at!: Date;
 }
 
+/**
+ * Structural webhook dedup ledger. One row per Stripe event id we have
+ * processed (or started processing — the insert happens at the top of the
+ * webhook handler transaction, so a rolled-back attempt releases the claim
+ * and Stripe's retry re-processes cleanly).
+ *
+ * The order-state guards in WebhookOrdersService remain the primary
+ * idempotency mechanism for the current handlers; this table makes dedup
+ * structural for ALL future event types (belt and braces). Append-only;
+ * pruning old rows is deferred until volume warrants it.
+ */
+@Entity({ name: 'processed_stripe_events' })
+export class ProcessedStripeEvent {
+  /** Stripe event id (`evt_...`) — natural PK, enforces at-most-once. */
+  @PrimaryColumn({ type: 'text' })
+  event_id!: string;
+
+  /** Stripe event type (`payment_intent.succeeded`, ...) for forensics. */
+  @Column({ type: 'text' })
+  event_type!: string;
+
+  @CreateDateColumn({ type: 'timestamptz' })
+  created_at!: Date;
+}
+
 @Entity({ name: 'feature_flags' })
 export class FeatureFlag {
   @PrimaryColumn({ type: 'text' })
@@ -1195,5 +1224,6 @@ export const ALL_ENTITIES = [
   LoyaltyAccount,
   LoyaltyTransaction,
   OutboxEvent,
+  ProcessedStripeEvent,
   FeatureFlag,
 ];

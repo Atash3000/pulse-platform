@@ -100,7 +100,18 @@ const TRANSITIONS: ReadonlyMap<OrderStatus, ReadonlyMap<OrderStatus, readonly Ac
         [OrderStatus.REFUNDED, ['manager']],
       ]),
     ],
-    [OrderStatus.FAILED, new Map()],     // terminal
+    [
+      OrderStatus.FAILED,
+      new Map<OrderStatus, readonly ActorType[]>([
+        // cleanup-after-pay remediation: PendingPaymentCleanupTask reaped the
+        // order to FAILED, then the lagging payment_intent.succeeded webhook
+        // recorded the captured money (payment_status=SUCCEEDED + payments
+        // row). The manager refunds via POST /admin/orders/:id/refund —
+        // exactly like the CANCELLED → REFUNDED path above. Without this
+        // transition a paid-but-reaped order could never be refunded.
+        [OrderStatus.REFUNDED, ['manager']],
+      ]),
+    ],
     [OrderStatus.REFUNDED, new Map()],   // terminal
   ]);
 

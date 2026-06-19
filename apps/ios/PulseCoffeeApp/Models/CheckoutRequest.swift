@@ -6,18 +6,20 @@ import Foundation
 // Maps to backend DTO: `apps/api/src/modules/checkout/dto/checkout-request.dto.ts`
 // (`CheckoutRequestDto`).
 //
-// Snake_case wire format with explicit CodingKeys per the iOS Codable
-// convention (see decision-log "[iOS] Contracts source of truth").
+// Unlike the snake_case auth/menu payloads, the checkout DTO is
+// camelCase on the wire (`locationId`, `idempotencyKey`, `menuItemId`,
+// …) — matching the backend DTO's property names directly. CodingKeys
+// stay explicit per the iOS Codable convention so the wire shape is
+// visible at the definition (see decision-log "[iOS] Contracts source
+// of truth").
 // =============================================================================
 
 /// One line in the cart as it ships to the backend. Modifier IDs are
 /// the IDs of the chosen modifiers within their respective groups —
 /// the backend joins these against `modifier_groups` for the item to
-/// resolve names and prices.
-///
-/// Personal-MVP scope: `modifierIds` is always empty because MVP items
-/// don't expose modifier selection UI. Field is here so the wire format
-/// stays correct against the backend's `CartItemDto`.
+/// resolve names and prices. Populated from the cart line's selected
+/// modifiers (`CartManager.Line.modifierIds`, chosen in the item-detail
+/// customization UI).
 struct CheckoutCartItem: Encodable, Equatable {
     let menuItemId: String
     let quantity: Int

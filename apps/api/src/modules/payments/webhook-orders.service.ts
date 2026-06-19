@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
+import * as Sentry from '@sentry/node';
 import type Stripe from 'stripe';
 
 import {
@@ -57,6 +58,16 @@ export class WebhookOrdersService {
     }
 
     await this.ds.transaction(async (em) => {
+      // Structural dedup BEFORE any state reads — a duplicate delivery of
+      // this exact event id is a guaranteed no-op. The order-state guards
+      // below remain in place (belt and braces).
+      if (!(await this.claimStripeEvent(em, event))) {
+        this.logger.log(
+          `webhook duplicate delivery: stripe_event=${event.id} already processed — no-op`,
+        );
+        return;
+      }
+
       // SELECT FOR UPDATE prevents two concurrent webhook deliveries (Stripe
       // can send two of the same event a few ms apart) from both running the
       // body. The second one finds payment_status=SUCCEEDED and bails.
@@ -116,6 +127,10 @@ export class WebhookOrdersService {
       const raceType = this.detectPostPaymentRace(order.order_status);
       if (raceType) {
         const amountReceived = intent.amount_received ?? intent.amount;
+        // Snapshot the at-race payment status BEFORE the money-recording
+        // mutation below — the outbox payload documents what the race
+        // looked like, not what we corrected it to.
+        const paymentStatusAtRace = order.payment_status;
         this.logger.warn(
           `webhook race detected: order ${order.id} is ${order.order_status} ` +
             `but payment_intent.succeeded arrived ` +
@@ -123,16 +138,41 @@ export class WebhookOrdersService {
             `amount_received=${amountReceived}, request_id=${requestId}). ` +
             `Returning 200 to Stripe; manager intervention required for refund.`,
         );
+        // Money liability — make sure an operator sees this even if nobody
+        // is watching the logs. Ids and codes only, no PII.
+        Sentry.captureMessage('WEBHOOK_RACE_PAYMENT_AFTER_TERMINAL_STATE', {
+          level: 'error',
+          extra: {
+            orderId: order.id,
+            raceType,
+            orderStatus: order.order_status,
+            stripeEventId: event.id,
+            paymentIntentId: intent.id,
+            amountReceivedCents: amountReceived,
+            requestId,
+          },
+        });
 
-        // Emit REFUND_CREATED outbox row for races where money was actually
-        // received but the order is in a no-fulfilment state. The notifications
-        // module surfaces this to the owner; the manager runs the refund via
-        // POST /admin/orders/:id/refund. No outbox row for REFUNDED — already
-        // refunded, nothing to surface.
+        // Money was actually received but the order is in a no-fulfilment
+        // state. Record the money inside this same transaction, then emit
+        // the REFUND_CREATED outbox row. The notifications module surfaces
+        // it to the owner; the manager runs the refund via
+        // POST /admin/orders/:id/refund. No mutation/outbox for REFUNDED —
+        // already refunded, nothing to surface.
         if (
           raceType === 'cancel-after-pay' ||
           raceType === 'cleanup-after-pay'
         ) {
+          // Record payment truth (Golden Rule #3): payment_status=SUCCEEDED +
+          // the payments ledger row. order_status deliberately stays
+          // CANCELLED/FAILED — the three status enums are independent
+          // (Golden Rule #14). Without this, the admin refund endpoint 400s
+          // ("No payment row found") and the ledger shows no captured money.
+          order.payment_status = PaymentStatus.SUCCEEDED;
+          order.stripe_payment_id = intent.id;
+          await em.save(order);
+          await this.insertPaymentRow(em, order.id, intent);
+
           await em.insert(OutboxEvent, {
             event_type: OutboxEventType.REFUND_CREATED,
             status: OutboxStatus.PENDING,
@@ -148,11 +188,62 @@ export class WebhookOrdersService {
               requestId,
               raceType,
               orderStatusAtRace: order.order_status,
-              paymentStatusAtRace: order.payment_status,
+              paymentStatusAtRace,
               actionRequired: 'manager-refund-via-admin-endpoint',
             },
           });
         }
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // Defense in depth before transitioning (Golden Rules #7/#8 spirit):
+      // the captured amount must match what WE calculated, and the intent
+      // must be the one checkout attached to this order. A mismatch means a
+      // cross-wired PaymentIntent or tampered metadata — transitioning would
+      // record wrong money. Log ERROR with a stable code + alert Sentry, do
+      // NOT transition, return 200 (webhook anomalies log, never 5xx — a
+      // throw would put Stripe into a 3-day retry storm that can never
+      // succeed; see decision-log "Webhook-after-state-change races").
+      // -----------------------------------------------------------------------
+      const amountReceived = intent.amount_received ?? intent.amount;
+      if (amountReceived !== order.total_cents) {
+        this.logger.error(
+          `WEBHOOK_AMOUNT_MISMATCH: order ${order.id} expected total_cents=${order.total_cents} ` +
+            `but payment_intent ${intent.id} reports amount_received=${amountReceived} ` +
+            `(stripe_event=${event.id}, request_id=${requestId}). ` +
+            `NOT transitioning to PAID; manual investigation required.`,
+        );
+        Sentry.captureMessage('WEBHOOK_AMOUNT_MISMATCH', {
+          level: 'error',
+          extra: {
+            orderId: order.id,
+            stripeEventId: event.id,
+            paymentIntentId: intent.id,
+            expectedCents: order.total_cents,
+            receivedCents: amountReceived,
+            requestId,
+          },
+        });
+        return;
+      }
+      if (order.stripe_payment_id !== null && order.stripe_payment_id !== intent.id) {
+        this.logger.error(
+          `WEBHOOK_PI_MISMATCH: order ${order.id} is bound to payment_intent ` +
+            `${order.stripe_payment_id} but payment_intent.succeeded arrived for ${intent.id} ` +
+            `(stripe_event=${event.id}, request_id=${requestId}). ` +
+            `NOT transitioning to PAID; manual investigation required.`,
+        );
+        Sentry.captureMessage('WEBHOOK_PI_MISMATCH', {
+          level: 'error',
+          extra: {
+            orderId: order.id,
+            stripeEventId: event.id,
+            boundPaymentIntentId: order.stripe_payment_id,
+            arrivedPaymentIntentId: intent.id,
+            requestId,
+          },
+        });
         return;
       }
 
@@ -161,7 +252,9 @@ export class WebhookOrdersService {
       // Validate the transition. Webhook is the only actor permitted to set PAID.
       OrderStateMachine.assertTransition(fromStatus, OrderStatus.PAID, 'stripe-webhook');
 
-      // 1. Update the order itself.
+      // 1. Update the order itself. The stripe_payment_id assignment is safe
+      // by construction here — the WEBHOOK_PI_MISMATCH guard above already
+      // returned for any conflicting non-null value.
       order.order_status = OrderStatus.PAID;
       order.payment_status = PaymentStatus.SUCCEEDED;
       order.stripe_payment_id = intent.id;
@@ -181,29 +274,8 @@ export class WebhookOrdersService {
         },
       });
 
-      // 3. Payments row — full Stripe payload retained for debugging.
-      // ON CONFLICT DO NOTHING handles the (extremely rare) duplicate where
-      // the same PaymentIntent ID arrives twice and the SELECT FOR UPDATE
-      // race is somehow lost.
-      // Round-trip through JSON.parse so we end up with a plain object that
-      // TypeORM's QueryBuilder partial type accepts as JSONB. Stripe's typed
-      // shape is incompatible with TypeORM's _QueryDeepPartialEntity here.
-      const stripeResponse = JSON.parse(JSON.stringify(intent)) as Record<string, unknown>;
-
-      await em
-        .createQueryBuilder()
-        .insert()
-        .into(Payment)
-        .values({
-          order_id: order.id,
-          stripe_payment_id: intent.id,
-          amount_cents: intent.amount_received ?? intent.amount,
-          payment_status: PaymentStatus.SUCCEEDED,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          stripe_response: stripeResponse as any,
-        })
-        .orIgnore()
-        .execute();
+      // 3. Payments row — see insertPaymentRow.
+      await this.insertPaymentRow(em, order.id, intent);
 
       // 4. Outbox rows — atomic with the order update. Two events emitted
       // in the same transaction (C5 split-event design):
@@ -254,6 +326,67 @@ export class WebhookOrdersService {
   }
 
   /**
+   * Structural webhook dedup — claims `event.id` in processed_stripe_events
+   * via INSERT ... ON CONFLICT DO NOTHING inside the caller's transaction.
+   *
+   *   - first delivery inserts the row → returns true, caller proceeds;
+   *   - duplicate delivery inserts nothing → returns false, caller logs and
+   *     returns 200 so Stripe stops retrying;
+   *   - if the caller's transaction rolls back, the claim rolls back with
+   *     it, so a failed processing attempt stays retryable.
+   *
+   * Belt and braces with the order-state guards: those protect the CURRENT
+   * handlers; this makes dedup structural for all future event types. Raw
+   * SQL on purpose (cf. OutboxWorker.claimBatch) — RETURNING is the reliable
+   * way to learn whether the conflict-safe insert actually happened.
+   */
+  private async claimStripeEvent(em: EntityManager, event: Stripe.Event): Promise<boolean> {
+    const inserted = (await em.query(
+      `INSERT INTO processed_stripe_events (event_id, event_type)
+       VALUES ($1, $2)
+       ON CONFLICT (event_id) DO NOTHING
+       RETURNING event_id`,
+      [event.id, event.type],
+    )) as Array<{ event_id: string }>;
+    return inserted.length > 0;
+  }
+
+  /**
+   * Inserts the payments ledger row — full Stripe payload retained for
+   * debugging. Used by BOTH the happy path and the cancel/cleanup-after-pay
+   * race branch (the money is equally real in both).
+   *
+   * ON CONFLICT DO NOTHING handles the (extremely rare) duplicate where the
+   * same PaymentIntent ID arrives twice and the SELECT FOR UPDATE race is
+   * somehow lost.
+   */
+  private async insertPaymentRow(
+    em: EntityManager,
+    orderId: string,
+    intent: Stripe.PaymentIntent,
+  ): Promise<void> {
+    // Round-trip through JSON.parse so we end up with a plain object that
+    // TypeORM's QueryBuilder partial type accepts as JSONB. Stripe's typed
+    // shape is incompatible with TypeORM's _QueryDeepPartialEntity here.
+    const stripeResponse = JSON.parse(JSON.stringify(intent)) as Record<string, unknown>;
+
+    await em
+      .createQueryBuilder()
+      .insert()
+      .into(Payment)
+      .values({
+        order_id: orderId,
+        stripe_payment_id: intent.id,
+        amount_cents: intent.amount_received ?? intent.amount,
+        payment_status: PaymentStatus.SUCCEEDED,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        stripe_response: stripeResponse as any,
+      })
+      .orIgnore()
+      .execute();
+  }
+
+  /**
    * Identifies whether the current order_status corresponds to a known
    * post-payment race when a payment_intent.succeeded webhook arrives.
    *
@@ -291,7 +424,11 @@ export class WebhookOrdersService {
    *
    * Idempotency layers
    * ------------------
-   * Three guards, in order:
+   * Four guards, in order:
+   *
+   *   0. Structural event-id dedup (`claimStripeEvent`) → a duplicate
+   *      delivery of the exact same Stripe event id no-ops before any
+   *      state is read.
    *
    *   1. `order_status === FAILED` → idempotent return. Duplicate webhook
    *      delivery for the already-failed case.
@@ -330,6 +467,14 @@ export class WebhookOrdersService {
     }
 
     await this.ds.transaction(async (em) => {
+      // Structural dedup — same contract as in markPaidFromWebhook.
+      if (!(await this.claimStripeEvent(em, event))) {
+        this.logger.log(
+          `webhook duplicate delivery: stripe_event=${event.id} already processed — no-op`,
+        );
+        return;
+      }
+
       const order = await em
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')

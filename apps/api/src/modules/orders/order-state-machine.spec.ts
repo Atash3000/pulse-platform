@@ -177,6 +177,7 @@ describe('OrderStateMachine', () => {
       OrderStatus.READY,
       OrderStatus.PICKED_UP,
       OrderStatus.CANCELLED,
+      OrderStatus.FAILED,
     ];
 
     it.each(refundFromAny)('manager can transition %s → REFUNDED', (from) => {
@@ -189,6 +190,39 @@ describe('OrderStateMachine', () => {
       expect(() =>
         OrderStateMachine.assertTransition(OrderStatus.PAID, OrderStatus.REFUNDED, 'staff'),
       ).toThrow(ConflictException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FAILED → REFUNDED — the cleanup-after-pay remediation. The cleanup task
+  // reaped a PENDING_PAYMENT order to FAILED, then the lagging
+  // payment_intent.succeeded webhook recorded the captured money. The manager
+  // must be able to refund that money; nobody else may drive the transition.
+  // ---------------------------------------------------------------------------
+
+  describe('FAILED → REFUNDED (cleanup-after-pay remediation)', () => {
+    it('is allowed for the manager actor (mirrors CANCELLED → REFUNDED)', () => {
+      expect(() =>
+        OrderStateMachine.assertTransition(OrderStatus.FAILED, OrderStatus.REFUNDED, 'manager'),
+      ).not.toThrow();
+    });
+
+    it.each(['customer', 'stripe-webhook', 'staff', 'system'] as ActorType[])(
+      'is rejected for the %s actor',
+      (actor) => {
+        expect(() =>
+          OrderStateMachine.assertTransition(OrderStatus.FAILED, OrderStatus.REFUNDED, actor),
+        ).toThrow(ConflictException);
+      },
+    );
+
+    it('REFUNDED is the only valid transition from FAILED, and only for managers', () => {
+      expect(OrderStateMachine.getValidTransitions(OrderStatus.FAILED, 'manager')).toEqual([
+        OrderStatus.REFUNDED,
+      ]);
+      for (const actor of ['customer', 'system', 'stripe-webhook', 'staff'] as ActorType[]) {
+        expect(OrderStateMachine.getValidTransitions(OrderStatus.FAILED, actor)).toEqual([]);
+      }
     });
   });
 
@@ -234,15 +268,17 @@ describe('OrderStateMachine', () => {
   });
 
   describe('terminal states', () => {
-    it.each([OrderStatus.FAILED, OrderStatus.REFUNDED])(
-      '%s is terminal — no transitions for any actor',
-      (status) => {
-        expect(OrderStateMachine.isTerminal(status)).toBe(true);
-        for (const actor of ['customer', 'system', 'stripe-webhook', 'staff', 'manager'] as ActorType[]) {
-          expect(OrderStateMachine.getValidTransitions(status, actor)).toEqual([]);
-        }
-      },
-    );
+    it('REFUNDED is terminal — no transitions for any actor', () => {
+      expect(OrderStateMachine.isTerminal(OrderStatus.REFUNDED)).toBe(true);
+      for (const actor of ['customer', 'system', 'stripe-webhook', 'staff', 'manager'] as ActorType[]) {
+        expect(OrderStateMachine.getValidTransitions(OrderStatus.REFUNDED, actor)).toEqual([]);
+      }
+    });
+
+    it('FAILED is no longer terminal — manager refund is the single escape hatch', () => {
+      // Changed by the cleanup-after-pay remediation (FAILED → REFUNDED).
+      expect(OrderStateMachine.isTerminal(OrderStatus.FAILED)).toBe(false);
+    });
 
     it('PICKED_UP allows only manager refund (terminal-for-most-actors)', () => {
       expect(OrderStateMachine.getValidTransitions(OrderStatus.PICKED_UP, 'staff')).toEqual([]);

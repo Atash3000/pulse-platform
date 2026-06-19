@@ -142,7 +142,9 @@ final class AuthViewModel: ObservableObject {
         case .network:
             generalErrors = ["Couldn't reach the backend. Check your connection and try again."]
 
-        case .decoding, .invalidURL, .unexpected, .authRequired:
+        case .decoding, .invalidURL, .unexpected, .authRequired, .cancelled:
+            // `.cancelled` is near-impossible here (login/register aren't
+            // auto-cancelled by navigation) — generic copy is fine.
             generalErrors = [Self.genericErrorMessage]
         }
     }

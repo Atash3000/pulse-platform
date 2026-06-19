@@ -7,8 +7,8 @@ import Sentry
 /// **Flow:**
 /// 1. `.idle` → user opens CheckoutView.
 /// 2. User taps "Place Order". ViewModel locks (`isProcessing = true`),
-///    generates a stable idempotency key (one per tap; same key across
-///    retries), and calls `POST /api/v1/checkout`.
+///    asks `CartManager` for the cart's stable idempotency key, and
+///    calls `POST /api/v1/checkout`.
 /// 3. `.ready(checkoutResponse)` → backend returned `clientSecret` +
 ///    `display` totals. PaymentSheet is constructed and shown.
 /// 4. User completes the PaymentSheet (Apple Pay or card). Stripe
@@ -24,10 +24,13 @@ import Sentry
 /// - iOS never marks the order paid (Golden Rule #3). PaymentSheet
 ///   completion just means "Stripe accepted the confirmation"; the
 ///   actual `PAID` transition happens on the backend webhook.
-/// - The idempotency key is generated **once per tap** of "Place Order"
-///   and held in `idempotencyKey` for the duration of the attempt.
-///   Tapping again after an error (without cart changes) reuses the
-///   same key.
+/// - The idempotency key is owned by `CartManager`, NOT this view
+///   model. This VM is a fresh `@StateObject` per navigation, so a
+///   key held here would not survive "Back to Cart" → re-enter — and a
+///   payment that confirmed with Stripe just before a network blip
+///   would be charged a second time under a fresh key. CartManager
+///   caches one key per cart contents and invalidates it on any cart
+///   mutation; see `CartManager.idempotencyKey(for:)`.
 /// - Checkout button locks on first tap (`isProcessing`) — protects
 ///   against double-tap creating two orders.
 @MainActor
@@ -37,7 +40,6 @@ final class CheckoutViewModel: ObservableObject {
         case idle
         case creatingOrder
         case ready(CheckoutResponse)
-        case paying
         case success(orderId: String, display: CheckoutDisplay)
         case failed(message: String)
     }
@@ -48,12 +50,6 @@ final class CheckoutViewModel: ObservableObject {
     /// `true` while a network request or PaymentSheet is in flight.
     /// Used to lock the "Place Order" button against double-tap.
     @Published private(set) var isProcessing: Bool = false
-
-    /// Stable idempotency key for this checkout attempt. Set the first
-    /// time `placeOrder` is invoked; cleared only when the cart contents
-    /// change (caller's responsibility) or after a terminal success.
-    /// Retries of the same tap reuse this value.
-    private var idempotencyKey: String?
 
     /// `paymentSheet` is constructed once we have a clientSecret. The
     /// view layer reads it to present the sheet. `nil` until `.ready`.
@@ -90,24 +86,29 @@ final class CheckoutViewModel: ObservableObject {
             state = .failed(message: "Please sign in to check out.")
             return
         }
+        // Defense-in-depth: an empty locationId means the menu (and its
+        // location) never loaded — e.g. items added from Home's
+        // "Pair with" row, then checkout entered via the Menu tab's cart
+        // icon before /menu resolved. The backend would 400 with raw
+        // validator text; fail friendly here without a network call.
+        // (The UI also guards this path — CartView disables its checkout
+        // CTA while the location is unknown.)
+        guard !locationId.isEmpty else {
+            state = .failed(message: "We couldn't determine your pickup location. Please reopen the menu and try again.")
+            return
+        }
 
         isProcessing = true
         defer { isProcessing = false }
 
         state = .creatingOrder
 
-        // Generate idempotency key once per tap. Held in
-        // `self.idempotencyKey` so error retries (user taps Place Order
-        // again after a network failure) reuse the same key and the
-        // backend deduplicates. Only regenerated when the cart contents
-        // change between attempts — handled via `resetForRetry()` at
-        // the call site if needed.
-        let key = idempotencyKey ?? IdempotencyKey.generate(
-            userId: customer.id,
-            cartItemIds: cart.itemIds,
-            timestamp: Int(Date().timeIntervalSince1970)
-        )
-        idempotencyKey = key
+        // The idempotency key comes from CartManager, which caches one
+        // key per cart contents — so error retries (including retries
+        // from a brand-new CheckoutViewModel after the user backed out
+        // and re-entered) reuse the same key and the backend
+        // deduplicates. Any cart mutation invalidates the cached key.
+        let key = cart.idempotencyKey(for: customer.id)
 
         let request = CheckoutRequest(
             locationId: locationId,
@@ -149,6 +150,12 @@ final class CheckoutViewModel: ObservableObject {
             )
 
             state = .ready(response)
+        } catch APIError.cancelled {
+            // The hosting view was torn down mid-request (user navigated
+            // away). Not a defect — no Sentry capture. If the user comes
+            // back, the unchanged cart re-derives the same idempotency
+            // key, so the attempt replays safely (Golden Rule #4).
+            state = .failed(message: Self.message(for: .cancelled))
         } catch let error as APIError {
             state = .failed(message: Self.message(for: error))
             SentrySDK.capture(error: error)
@@ -169,9 +176,9 @@ final class CheckoutViewModel: ObservableObject {
             // server-side webhook (Golden Rule #3 — iOS never marks
             // an order paid). For MVP-3, we route to the success
             // state; MVP-4 will poll the backend for the real PAID
-            // confirmation.
+            // confirmation. `cart.clear()` also drops the cached
+            // idempotency key — the next cart is a new payment intent.
             cart.clear()
-            idempotencyKey = nil
             state = .success(orderId: orderId, display: display)
 
             addBreadcrumb(
@@ -276,18 +283,10 @@ final class CheckoutViewModel: ObservableObject {
         let underlyingDescription: String?
     }
 
-    /// Resets the idempotency key — call this when the cart contents
-    /// change between checkout attempts (so a different cart gets a
-    /// new server-side order, not a replay).
-    func resetIdempotencyKey() {
-        idempotencyKey = nil
-    }
-
     // MARK: - Internals
 
     private func handleAlreadyPaid(response: CheckoutResponse) {
         cart.clear()
-        idempotencyKey = nil
         state = .success(orderId: response.orderId, display: response.display)
         addBreadcrumb(
             level: .info,
@@ -340,6 +339,8 @@ final class CheckoutViewModel: ObservableObject {
             return "Please sign in again to check out."
         case .rateLimited:
             return "Too many checkout attempts. Please wait a minute and try again."
+        case .cancelled:
+            return "Checkout was interrupted. Please try again."
         case .unexpected(let code):
             return "Checkout failed with status \(code)."
         }

@@ -9,20 +9,29 @@ describe('HomeController', () => {
 
   it('delegates to the service with the customer id from the JWT', async () => {
     const { controller, service } = makeController({ usual: null, recent: [] });
-    const out = await controller.summary({ user: { sub: 'cust-9', type: 'customer' } } as any);
-    expect(service.getHomeSummary).toHaveBeenCalledWith('cust-9');
+    const out = await controller.summary({ user: { sub: 'cust-9', type: 'customer' } } as any, {} as any);
+    expect(service.getHomeSummary).toHaveBeenCalledWith('cust-9', undefined);
     expect(out).toEqual({ usual: null, recent: [] });
+  });
+
+  it('forwards the optional locationId query param to the service', async () => {
+    const { controller, service } = makeController({ usual: null, recent: [] });
+    await controller.summary(
+      { user: { sub: 'cust-9', type: 'customer' } } as any,
+      { locationId: 'loc-1' } as any,
+    );
+    expect(service.getHomeSummary).toHaveBeenCalledWith('cust-9', 'loc-1');
   });
 
   it('rejects a staff token with 403', async () => {
     const { controller } = makeController();
     await expect(
-      controller.summary({ user: { sub: 'staff-1', type: 'staff', role: 'OWNER' } } as any),
+      controller.summary({ user: { sub: 'staff-1', type: 'staff', role: 'OWNER' } } as any, {} as any),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('rejects a missing user with 403', async () => {
     const { controller } = makeController();
-    await expect(controller.summary({} as any)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(controller.summary({} as any, {} as any)).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

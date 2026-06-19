@@ -1,5 +1,6 @@
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { Test } from '@nestjs/testing';
+import * as Sentry from '@sentry/node';
 import type Stripe from 'stripe';
 
 import {
@@ -13,6 +14,13 @@ import {
 } from '../../database/entities';
 import { WebhookOrdersService } from './webhook-orders.service';
 
+// Sentry is mocked so the money-liability capture sites are assertable
+// (and so no test ever talks to a real DSN).
+jest.mock('@sentry/node', () => ({
+  captureMessage: jest.fn(),
+  captureException: jest.fn(),
+}));
+
 // =============================================================================
 // WebhookOrdersService — race-condition tests for markPaidFromWebhook.
 //
@@ -21,10 +29,14 @@ import { WebhookOrdersService } from './webhook-orders.service';
 //
 //   - return 200 to Stripe (no throw → Stripe stops retrying)
 //   - log the race with full diagnostic detail
-//   - emit a REFUND_CREATED outbox row for CANCELLED + FAILED only
-//     (REFUNDED is terminal — already refunded, nothing to surface)
-//   - leave order_status unchanged (the race-state IS the truth — manager
-//     intervention via /admin/orders/:id/refund handles the refund)
+//   - for CANCELLED + FAILED (money actually captured): record the money in
+//     the SAME transaction — payment_status=SUCCEEDED, stripe_payment_id,
+//     a payments ledger row — and emit a REFUND_CREATED outbox row. Without
+//     the money recording, the admin refund endpoint 400s ("No payment row
+//     found") and the captured money is invisible in the ledger.
+//   - leave order_status unchanged (three-status independence, Golden Rule
+//     #14 — the order stays CANCELLED/FAILED; only payment truth moves)
+//   - for REFUNDED: log only (already refunded, nothing to surface)
 //
 // Without this defence, OrderStateMachine.assertTransition rejects the
 // transition and the webhook returns 5xx → Stripe retries every few minutes
@@ -38,13 +50,16 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
   let mockSave: jest.Mock;
   let mockInsert: jest.Mock;
   let mockQbInsert: jest.Mock;
+  let mockEmQuery: jest.Mock;
   let warnSpy: jest.SpyInstance;
 
   beforeEach(async () => {
     txGetOne = jest.fn();
-    mockSave = jest.fn();
+    mockSave = jest.fn().mockImplementation(async (entity) => entity);
     mockInsert = jest.fn();
-    mockQbInsert = jest.fn();
+    mockQbInsert = jest.fn().mockResolvedValue({ identifiers: [{}] });
+    // claimStripeEvent's INSERT ... RETURNING — one row back = first delivery.
+    mockEmQuery = jest.fn().mockResolvedValue([{ event_id: 'evt_test' }]);
 
     // Mock the SELECT FOR UPDATE chain
     const fakeQbSelect = {
@@ -69,6 +84,7 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
       ),
       save: mockSave,
       insert: mockInsert,
+      query: mockEmQuery,
     };
     const fakeDs = {
       transaction: jest
@@ -88,6 +104,7 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
     warnSpy = jest
       .spyOn((service as unknown as { logger: { warn: (msg: string) => void } }).logger, 'warn')
       .mockImplementation(() => {});
+    (Sentry.captureMessage as jest.Mock).mockClear();
   });
 
   afterEach(() => {
@@ -99,23 +116,28 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
   // ---------------------------------------------------------------------------
 
   describe('cancel-after-pay race (order_status = CANCELLED)', () => {
-    const cancelledOrder = makeOrder({
-      order_status: OrderStatus.CANCELLED,
-      // payment_status is REQUIRES_PAYMENT here — not SUCCEEDED — so the
-      // existing idempotency early-return does NOT fire. The new race branch
-      // is what catches us.
-      payment_status: PaymentStatus.REQUIRES_PAYMENT,
-    });
+    // Fresh order per test — the race branch now mutates payment_status, so
+    // a shared fixture would leak state across tests.
+    const makeCancelledOrder = () =>
+      makeOrder({
+        order_status: OrderStatus.CANCELLED,
+        // payment_status is REQUIRES_PAYMENT here — not SUCCEEDED — so the
+        // existing idempotency early-return does NOT fire. The race branch
+        // is what catches us.
+        payment_status: PaymentStatus.REQUIRES_PAYMENT,
+        // checkout never bound a PI (cancel raced ahead of the webhook).
+        stripe_payment_id: null,
+      });
 
     it('does not throw — returns 200 to Stripe', async () => {
-      txGetOne.mockResolvedValueOnce(cancelledOrder);
+      txGetOne.mockResolvedValueOnce(makeCancelledOrder());
       await expect(
         service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-1'),
       ).resolves.toBeUndefined();
     });
 
     it('emits a structured warn log identifying the race', async () => {
-      txGetOne.mockResolvedValueOnce(cancelledOrder);
+      txGetOne.mockResolvedValueOnce(makeCancelledOrder());
       await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-1');
 
       expect(warnSpy).toHaveBeenCalledTimes(1);
@@ -128,7 +150,26 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
       expect(logLine).toContain('request_id=req-1');
     });
 
+    it('alerts Sentry with a PII-free payload (money liability)', async () => {
+      txGetOne.mockResolvedValueOnce(makeCancelledOrder());
+      await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-1');
+
+      expect(Sentry.captureMessage).toHaveBeenCalledWith(
+        'WEBHOOK_RACE_PAYMENT_AFTER_TERMINAL_STATE',
+        expect.objectContaining({
+          level: 'error',
+          extra: expect.objectContaining({
+            orderId: 'order-id',
+            raceType: 'cancel-after-pay',
+            stripeEventId: 'evt_test',
+            paymentIntentId: 'pi_test',
+          }),
+        }),
+      );
+    });
+
     it('inserts a REFUND_CREATED outbox row with the race metadata', async () => {
+      const cancelledOrder = makeCancelledOrder();
       txGetOne.mockResolvedValueOnce(cancelledOrder);
       await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-1');
 
@@ -152,24 +193,34 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
         requestId: 'req-1',
         raceType: 'cancel-after-pay',
         orderStatusAtRace: OrderStatus.CANCELLED,
+        // The snapshot taken BEFORE the money recording — documents what the
+        // race looked like.
         paymentStatusAtRace: PaymentStatus.REQUIRES_PAYMENT,
         actionRequired: 'manager-refund-via-admin-endpoint',
       });
     });
 
-    it('does NOT mutate the order or insert a payments row or order_event', async () => {
+    // Regression test for the P1 fix: webhook-succeeded-on-CANCELLED must
+    // record the captured money so the admin refund endpoint can find it.
+    it('records the money: payment_status=SUCCEEDED + stripe_payment_id + payments row, order_status unchanged', async () => {
+      const cancelledOrder = makeCancelledOrder();
       txGetOne.mockResolvedValueOnce(cancelledOrder);
       await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-1');
 
-      // No order save (em.save) — order_status stays CANCELLED, payment_status untouched.
-      expect(mockSave).not.toHaveBeenCalled();
-      // The Payment INSERT path uses createQueryBuilder().insert()...execute().
-      // execute() is mockQbInsert — should NOT have been called in the race branch.
-      expect(mockQbInsert).not.toHaveBeenCalled();
-      // The audit-trail OrderEvent insert isn't fired either; only the
-      // outbox row was inserted.
+      // Payment truth recorded (Golden Rule #3)…
+      expect(cancelledOrder.payment_status).toBe(PaymentStatus.SUCCEEDED);
+      expect(cancelledOrder.stripe_payment_id).toBe('pi_test');
+      expect(mockSave).toHaveBeenCalledWith(cancelledOrder);
+      // …including the payments ledger row (conflict-safe insert executed).
+      expect(mockQbInsert).toHaveBeenCalledTimes(1);
+      // …but order_status stays CANCELLED (Golden Rule #14 — three-status
+      // independence; the order is still not fulfillable).
+      expect(cancelledOrder.order_status).toBe(OrderStatus.CANCELLED);
+      // No PAID transition artifacts: no OrderEvent audit row, no ORDER_PAID
+      // outbox rows — the only em.insert is the REFUND_CREATED outbox row.
       expect(mockInsert).toHaveBeenCalledTimes(1);
-      expect(mockInsert.mock.calls[0]![0]).not.toBe(OrderEvent);
+      expect(mockInsert.mock.calls[0]![0]).toBe(OutboxEvent);
+      expect(mockInsert.mock.calls[0]![1].event_type).toBe(OutboxEventType.REFUND_CREATED);
     });
   });
 
@@ -178,20 +229,21 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
   // ---------------------------------------------------------------------------
 
   describe('cleanup-after-pay race (order_status = FAILED)', () => {
-    const failedOrder = makeOrder({
-      order_status: OrderStatus.FAILED,
-      payment_status: PaymentStatus.FAILED,
-    });
+    const makeFailedOrder = () =>
+      makeOrder({
+        order_status: OrderStatus.FAILED,
+        payment_status: PaymentStatus.FAILED,
+      });
 
     it('does not throw — returns 200 to Stripe', async () => {
-      txGetOne.mockResolvedValueOnce(failedOrder);
+      txGetOne.mockResolvedValueOnce(makeFailedOrder());
       await expect(
         service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-2'),
       ).resolves.toBeUndefined();
     });
 
     it('emits a structured warn log identifying the race', async () => {
-      txGetOne.mockResolvedValueOnce(failedOrder);
+      txGetOne.mockResolvedValueOnce(makeFailedOrder());
       await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-2');
 
       expect(warnSpy).toHaveBeenCalledTimes(1);
@@ -201,7 +253,7 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
     });
 
     it('inserts a REFUND_CREATED outbox row with raceType=cleanup-after-pay', async () => {
-      txGetOne.mockResolvedValueOnce(failedOrder);
+      txGetOne.mockResolvedValueOnce(makeFailedOrder());
       await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-2');
 
       expect(mockInsert).toHaveBeenCalledTimes(1);
@@ -209,6 +261,26 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
       expect(payload.event_type).toBe(OutboxEventType.REFUND_CREATED);
       expect(payload.payload.raceType).toBe('cleanup-after-pay');
       expect(payload.payload.orderStatusAtRace).toBe(OrderStatus.FAILED);
+      expect(payload.payload.paymentStatusAtRace).toBe(PaymentStatus.FAILED);
+    });
+
+    // Regression test for the P1 fix: webhook-succeeded-on-FAILED must record
+    // the captured money so the admin refund endpoint can find it.
+    it('records the money: payment_status=SUCCEEDED + stripe_payment_id + payments row, order_status unchanged', async () => {
+      const failedOrder = makeFailedOrder();
+      txGetOne.mockResolvedValueOnce(failedOrder);
+      await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-2');
+
+      expect(failedOrder.payment_status).toBe(PaymentStatus.SUCCEEDED);
+      expect(failedOrder.stripe_payment_id).toBe('pi_test');
+      expect(mockSave).toHaveBeenCalledWith(failedOrder);
+      expect(mockQbInsert).toHaveBeenCalledTimes(1);
+      // Order stays FAILED — the cleanup task's verdict on fulfilment stands;
+      // only the payment truth moved (Golden Rule #14).
+      expect(failedOrder.order_status).toBe(OrderStatus.FAILED);
+      // REFUND_CREATED is still emitted (the manager's remediation signal).
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+      expect(mockInsert.mock.calls[0]![1].event_type).toBe(OutboxEventType.REFUND_CREATED);
     });
   });
 
@@ -236,6 +308,14 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
       await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-3');
       expect(mockInsert).not.toHaveBeenCalled();
     });
+
+    it('does NOT record money for REFUNDED (no save, no payments row)', async () => {
+      txGetOne.mockResolvedValueOnce(refundedOrder);
+      await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-3');
+      expect(mockSave).not.toHaveBeenCalled();
+      expect(mockQbInsert).not.toHaveBeenCalled();
+      expect(refundedOrder.payment_status).toBe(PaymentStatus.REFUNDED);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -261,6 +341,144 @@ describe('WebhookOrdersService — markPaidFromWebhook race detection', () => {
       expect(warnSpy).not.toHaveBeenCalled();
       // No outbox insert.
       expect(mockInsert).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Structural event-id dedup — a duplicate delivery of the SAME Stripe
+  // event id no-ops before any state is read (claimStripeEvent's
+  // INSERT ... ON CONFLICT DO NOTHING returns zero rows).
+  // ---------------------------------------------------------------------------
+
+  describe('structural stripe-event-id dedup', () => {
+    it('second delivery of the same event id is a complete no-op', async () => {
+      // RETURNING came back empty → event id already claimed.
+      mockEmQuery.mockResolvedValueOnce([]);
+
+      await expect(
+        service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-dup'),
+      ).resolves.toBeUndefined();
+
+      // Nothing past the dedup gate ran: no order lock, no save, no inserts.
+      expect(txGetOne).not.toHaveBeenCalled();
+      expect(mockSave).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockQbInsert).not.toHaveBeenCalled();
+    });
+
+    it('first delivery claims the event id with INSERT ... ON CONFLICT DO NOTHING', async () => {
+      txGetOne.mockResolvedValueOnce(
+        makeOrder({
+          order_status: OrderStatus.PENDING_PAYMENT,
+          payment_status: PaymentStatus.REQUIRES_PAYMENT,
+        }),
+      );
+
+      await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-first');
+
+      expect(mockEmQuery).toHaveBeenCalledTimes(1);
+      const [sql, params] = mockEmQuery.mock.calls[0]!;
+      expect(sql).toContain('INSERT INTO processed_stripe_events');
+      expect(sql).toContain('ON CONFLICT (event_id) DO NOTHING');
+      expect(sql).toContain('RETURNING event_id');
+      expect(params).toEqual(['evt_test', 'payment_intent.succeeded']);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Defense-in-depth verification — amount + PI-id mismatch. Both branches
+  // must log an ERROR with a stable code, alert Sentry, NOT transition, and
+  // return 200 (never throw — Stripe would retry for 3 days).
+  // ---------------------------------------------------------------------------
+
+  describe('amount / payment-intent verification (defense in depth)', () => {
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      errorSpy = jest
+        .spyOn(
+          (service as unknown as { logger: { error: (msg: string) => void } }).logger,
+          'error',
+        )
+        .mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    it('WEBHOOK_AMOUNT_MISMATCH: amount_received != total_cents → no transition, no payments row, 200', async () => {
+      const order = makeOrder({
+        order_status: OrderStatus.PENDING_PAYMENT,
+        payment_status: PaymentStatus.REQUIRES_PAYMENT,
+        total_cents: 825,
+      });
+      txGetOne.mockResolvedValueOnce(order);
+
+      await expect(
+        service.markPaidFromWebhook(
+          makeIntent({ amount_received: 9999 } as Partial<Stripe.PaymentIntent>),
+          makeEvent(),
+          'req-amount',
+        ),
+      ).resolves.toBeUndefined();
+
+      // Stable code in the ERROR log + Sentry alert.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]![0]).toContain('WEBHOOK_AMOUNT_MISMATCH');
+      expect(Sentry.captureMessage).toHaveBeenCalledWith(
+        'WEBHOOK_AMOUNT_MISMATCH',
+        expect.objectContaining({ level: 'error' }),
+      );
+      // No transition, no writes of any kind.
+      expect(order.order_status).toBe(OrderStatus.PENDING_PAYMENT);
+      expect(order.payment_status).toBe(PaymentStatus.REQUIRES_PAYMENT);
+      expect(mockSave).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockQbInsert).not.toHaveBeenCalled();
+    });
+
+    it('WEBHOOK_PI_MISMATCH: order bound to a different intent → no transition, no payments row, 200', async () => {
+      const order = makeOrder({
+        order_status: OrderStatus.PENDING_PAYMENT,
+        payment_status: PaymentStatus.REQUIRES_PAYMENT,
+        stripe_payment_id: 'pi_checkout_bound', // checkout bound a DIFFERENT intent
+      });
+      txGetOne.mockResolvedValueOnce(order);
+
+      await expect(
+        service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-pi'),
+      ).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]![0]).toContain('WEBHOOK_PI_MISMATCH');
+      expect(Sentry.captureMessage).toHaveBeenCalledWith(
+        'WEBHOOK_PI_MISMATCH',
+        expect.objectContaining({ level: 'error' }),
+      );
+      // The unconditional stripe_payment_id overwrite is gone — the binding
+      // is preserved and nothing transitions.
+      expect(order.stripe_payment_id).toBe('pi_checkout_bound');
+      expect(order.order_status).toBe(OrderStatus.PENDING_PAYMENT);
+      expect(mockSave).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockQbInsert).not.toHaveBeenCalled();
+    });
+
+    it('matching amount + matching bound PI proceeds to the normal PAID transition', async () => {
+      const order = makeOrder({
+        order_status: OrderStatus.PENDING_PAYMENT,
+        payment_status: PaymentStatus.REQUIRES_PAYMENT,
+        stripe_payment_id: 'pi_test', // same intent checkout bound
+        total_cents: 825,
+      });
+      txGetOne.mockResolvedValueOnce(order);
+
+      await service.markPaidFromWebhook(makeIntent(), makeEvent(), 'req-ok');
+
+      expect(order.order_status).toBe(OrderStatus.PAID);
+      expect(order.payment_status).toBe(PaymentStatus.SUCCEEDED);
+      expect(errorSpy).not.toHaveBeenCalled();
     });
   });
 });
@@ -314,6 +532,8 @@ describe('WebhookOrdersService — markPaidFromWebhook happy path (C5 split-even
       ),
       save: mockSave,
       insert: mockInsert,
+      // claimStripeEvent — one row back = first delivery, proceed.
+      query: jest.fn().mockResolvedValue([{ event_id: 'evt_test' }]),
     };
     const fakeDs = {
       transaction: jest.fn().mockImplementation(async (cb: (em: typeof fakeEm) => unknown) => cb(fakeEm)),
@@ -440,6 +660,8 @@ describe('WebhookOrdersService — markFailedFromWebhook idempotency', () => {
       createQueryBuilder: jest.fn().mockImplementation(() => fakeQbSelect),
       save: mockSave,
       insert: mockInsert,
+      // claimStripeEvent — one row back = first delivery, proceed.
+      query: jest.fn().mockResolvedValue([{ event_id: 'evt_failed_test' }]),
     };
     const fakeDs = {
       transaction: jest

@@ -109,6 +109,51 @@ describe('AuthService.registerCustomer', () => {
   });
 });
 
+// =============================================================================
+// Constructor boot guards — secrets must be present AND distinct. Equal
+// secrets would let a 30-day refresh token verify as a 15-minute access
+// token, collapsing the two-token model. The service throws at construction
+// (boot time) rather than at first request.
+// =============================================================================
+
+describe('AuthService constructor — JWT secret guards', () => {
+  function buildService(secrets: { access?: string; refresh?: string }): AuthService {
+    const config = {
+      get: jest.fn((key: string) => {
+        switch (key) {
+          case 'JWT_ACCESS_SECRET':
+            return secrets.access;
+          case 'JWT_REFRESH_SECRET':
+            return secrets.refresh;
+          default:
+            return undefined;
+        }
+      }),
+    } as unknown as ConfigService;
+    return new AuthService(
+      {} as Repository<Customer>,
+      {} as Repository<StaffUser>,
+      { signAsync: jest.fn() } as unknown as JwtService,
+      config,
+    );
+  }
+
+  it('throws at construction when either secret is missing', () => {
+    expect(() => buildService({ access: 'a-secret' })).toThrow(/must be set/);
+    expect(() => buildService({ refresh: 'r-secret' })).toThrow(/must be set/);
+  });
+
+  it('throws at construction when access and refresh secrets are identical', () => {
+    expect(() => buildService({ access: 'same-secret', refresh: 'same-secret' })).toThrow(
+      /must be different/,
+    );
+  });
+
+  it('constructs cleanly with two distinct secrets', () => {
+    expect(() => buildService({ access: 'a-secret', refresh: 'r-secret' })).not.toThrow();
+  });
+});
+
 describe('Customer display-name getters', () => {
   function customerWith(fields: Partial<Customer>): Customer {
     return Object.assign(new Customer(), fields);

@@ -16,10 +16,12 @@ import SwiftUI
 ///
 /// When `Notification.Name.authRequired` fires (refresh-token expired,
 /// token revoked, etc.), `AppState.logout()` flips `authState` back to
-/// `.loggedOut`, this view re-evaluates, the tab tree swaps to its
-/// guest configuration, and any in-flight SwiftUI state inside the tab
-/// tree is naturally torn down (cart in memory, view-model state) — no
-/// explicit reset needed beyond Keychain clearing in `AppState.logout`.
+/// `.loggedOut` and this view re-evaluates the tab tree into its guest
+/// configuration. Note that App-scoped state (`CartManager`,
+/// `FavoritesStore`) is NOT torn down by that swap — it lives on
+/// `PulseCoffeeApp`, above this view. Per-user state is reset via the
+/// `.didLogout` signal `AppState.logout()` posts (CartManager clears
+/// the cart + cached idempotency key on receipt).
 struct ContentView: View {
 
     @EnvironmentObject private var appState: AppState

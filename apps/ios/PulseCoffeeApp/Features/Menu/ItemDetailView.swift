@@ -42,10 +42,11 @@ struct ItemDetailView: View {
         self.item = item
         self.pairings = pairings
         self.editing = editing
-        // Clamp the seed to the stepper's 1…12 range: a cart line can hold >12
-        // (the cart's per-line control is uncapped today — see todo-endpoints.md),
-        // and opening above 12 would make the first "−" tap silently jump to 12.
-        _quantity = State(initialValue: min(12, max(1, editing?.quantity ?? 1)))
+        // Clamp the seed to the stepper's 1…maxLineQuantity range — the cart's
+        // own control shares the same ceiling (CartManager.maxLineQuantity),
+        // but clamping defensively keeps a stale >12 line from making the
+        // first "−" tap silently jump down.
+        _quantity = State(initialValue: min(CartManager.maxLineQuantity, max(1, editing?.quantity ?? 1)))
         if let editing {
             _customization = State(initialValue: ItemCustomization(item: item, preselectedModifierIds: editing.modifierIds))
         } else {
@@ -292,7 +293,7 @@ struct ItemDetailView: View {
     private var totalPrice: String { String(format: "$%.2f", Double(totalPriceCents) / 100.0) }
 
     private func setQuantity(_ n: Int) {
-        let clamped = min(12, max(1, n))
+        let clamped = min(CartManager.maxLineQuantity, max(1, n))
         guard clamped != quantity else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         quantity = clamped
@@ -305,7 +306,7 @@ struct ItemDetailView: View {
                 .font(.system(size: 16, weight: .semibold).monospacedDigit())
                 .frame(minWidth: 20)
                 .foregroundStyle(DetailPalette.ink)
-            stepButton(systemName: "plus", enabled: quantity < 12) { setQuantity(quantity + 1) }
+            stepButton(systemName: "plus", enabled: quantity < CartManager.maxLineQuantity) { setQuantity(quantity + 1) }
         }
         .padding(.horizontal, 6)
         .background(Capsule().fill(DetailPalette.warmCream))
