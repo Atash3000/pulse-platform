@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 
 import {
   Inventory,
@@ -24,6 +24,7 @@ import { OrderStateMachine } from '../orders/order-state-machine';
 import { StripeService } from '../payments/stripe.service';
 import {
   CalculateOrderItem,
+  OrderCalculation,
   PricingService,
 } from '../pricing/pricing.service';
 import { CartItemDto, CheckoutRequestDto } from './dto/checkout-request.dto';
@@ -150,8 +151,56 @@ export class CheckoutService {
     // -----------------------------------------------------------------------
     // Step 5: Atomic transaction — re-check inventory, create order + items,
     // create Stripe PaymentIntent, persist its id, commit. ALL OR NOTHING.
+    //
+    // Concurrent same-key race: two POSTs with the same idempotency key in
+    // flight at once both pass the step-1 lookup (no row yet), and the loser
+    // hits the unique index on orders.idempotency_key at INSERT time. That's
+    // not a server fault — re-run the idempotency lookup, which now sees the
+    // winner's committed row and produces the correct replay/409.
     // -----------------------------------------------------------------------
-    const result = await this.ds.transaction(async (em) => {
+    let result: { orderId: string; clientSecret: string; totalCents: number };
+    try {
+      result = await this.runCheckoutTransaction(customerId, dto, validatedItems, calculation, estimatedReadyAt);
+    } catch (err) {
+      if (isIdempotencyKeyUniqueViolation(err)) {
+        this.logger.warn(
+          `checkout idempotency-key insert race: key already taken, replaying lookup ` +
+            `(customer=${customerId})`,
+        );
+        const replay = await this.tryReturnCachedResponse(customerId, dto);
+        // tryReturnCachedResponse either returns the winner's payload or
+        // throws the appropriate 409. A null here means the unique violation
+        // fired but no row is visible — genuinely anomalous, surface the
+        // original error.
+        if (replay) return replay;
+      }
+      throw err;
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 6: Return.
+    // -----------------------------------------------------------------------
+    return {
+      orderId: result.orderId,
+      clientSecret: result.clientSecret,
+      totalCents: result.totalCents,
+      display: calculation.display,
+    };
+  }
+
+  /**
+   * Step 5's transaction body, extracted so checkout() can wrap the call with
+   * the concurrent-same-key recovery above without burying the happy path in
+   * a try block.
+   */
+  private async runCheckoutTransaction(
+    customerId: string,
+    dto: CheckoutRequestDto,
+    validatedItems: ValidatedCartItem[],
+    calculation: OrderCalculation,
+    estimatedReadyAt: Date | null,
+  ): Promise<{ orderId: string; clientSecret: string; totalCents: number }> {
+    return this.ds.transaction(async (em) => {
       // Re-check inventory inside the transaction. Another customer or a staff
       // sold-out toggle could have flipped between step 3 and now.
       await this.assertItemsStillAvailable(
@@ -253,16 +302,6 @@ export class CheckoutService {
         totalCents: calculation.totalCents,
       };
     });
-
-    // -----------------------------------------------------------------------
-    // Step 6: Return.
-    // -----------------------------------------------------------------------
-    return {
-      orderId: result.orderId,
-      clientSecret: result.clientSecret,
-      totalCents: result.totalCents,
-      display: calculation.display,
-    };
   }
 
   // ---------------------------------------------------------------------------
@@ -290,15 +329,23 @@ export class CheckoutService {
         orderId: existing.id,
         clientSecret: '',
         totalCents: existing.total_cents,
-        display: {
-          subtotal: fmtCents(existing.subtotal_cents),
-          modifier: fmtCents(existing.modifier_cents),
-          discount: fmtCents(existing.discount_cents),
-          tax: fmtCents(existing.tax_cents),
-          tip: fmtCents(existing.tip_cents),
-          total: fmtCents(existing.total_cents),
-        },
+        display: displayFromOrder(existing),
       };
+    }
+
+    // REQUIRES_PAYMENT replay: the original response was lost in transit
+    // (network drop after the PaymentIntent was created) and the customer is
+    // retrying with the same key. Re-fetch the intent from Stripe and replay
+    // the original success payload — without this, the payment is
+    // unrecoverable (every retry 409s and the PI's client_secret is gone).
+    // PROCESSING deliberately stays 409: the customer already confirmed in
+    // the Stripe sheet and the result is in flight — handing the
+    // client_secret back could double-confirm.
+    if (existing.payment_status === PaymentStatus.REQUIRES_PAYMENT && existing.stripe_payment_id) {
+      const replayed = await this.tryReplayClientSecret(existing);
+      if (replayed) return replayed;
+      // Retrieve failed or the PI is no longer confirmable → fall through to
+      // the conservative 409 below.
     }
 
     if (
@@ -318,6 +365,53 @@ export class CheckoutService {
       reason: 'IDEMPOTENCY_REPLAY_BLOCKED',
       message: `Cannot replay an idempotency key whose order is in payment_status=${existing.payment_status}.`,
     });
+  }
+
+  /**
+   * Attempts to replay the ORIGINAL checkout response for an order stuck in
+   * REQUIRES_PAYMENT: retrieves the stored PaymentIntent and, if it is still
+   * in a customer-confirmable state, rebuilds {orderId, clientSecret,
+   * totalCents, display} exactly as the original response did (display from
+   * the persisted cents — same derivation as the SUCCEEDED replay).
+   *
+   * Returns null when the intent cannot be confirmed (succeeded/canceled/
+   * processing) or the Stripe retrieve fails — the caller then falls back to
+   * the conservative 409 PAYMENT_IN_FLIGHT.
+   */
+  private async tryReplayClientSecret(existing: Order): Promise<CheckoutResponse | null> {
+    // The PI states a customer can still act on with the client_secret.
+    const confirmableStates = new Set<string>([
+      'requires_payment_method',
+      'requires_confirmation',
+      'requires_action',
+    ]);
+    try {
+      const intent = await this.stripe.retrievePaymentIntent(existing.stripe_payment_id!);
+      if (!intent.client_secret || !confirmableStates.has(intent.status)) {
+        this.logger.warn(
+          `checkout replay declined: order=${existing.id} pi=${existing.stripe_payment_id} ` +
+            `status=${intent.status} is not confirmable — falling back to 409`,
+        );
+        return null;
+      }
+      this.logger.log(
+        `checkout replay: order=${existing.id} pi=${intent.id} re-issued client_secret to the same customer`,
+      );
+      return {
+        orderId: existing.id,
+        clientSecret: intent.client_secret,
+        totalCents: existing.total_cents,
+        display: displayFromOrder(existing),
+      };
+    } catch (err) {
+      // Stripe unreachable / intent gone. Not fatal — the conservative 409
+      // path still protects the order; the customer can retry later.
+      this.logger.warn(
+        `checkout replay failed to retrieve PI for order=${existing.id}: ${(err as Error).message} ` +
+          `— falling back to 409`,
+      );
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -507,4 +601,41 @@ export class CheckoutService {
 
 function fmtCents(cents: number): string {
   return (cents / 100).toFixed(2);
+}
+
+/**
+ * True when `err` is the Postgres unique-violation (23505) on the
+ * orders.idempotency_key unique index — i.e. a concurrent same-key checkout
+ * lost the INSERT race. Lets checkout() re-run the idempotency lookup and
+ * replay/409 (the designed outcome) instead of leaking a raw 500. Scoped to
+ * the idempotency_key constraint so any OTHER unique violation still surfaces
+ * as a real error rather than being silently swallowed.
+ */
+function isIdempotencyKeyUniqueViolation(err: unknown): boolean {
+  if (!(err instanceof QueryFailedError)) return false;
+  const driver = (err as QueryFailedError).driverError as
+    | { code?: string; constraint?: string; detail?: string }
+    | undefined;
+  if (!driver || driver.code !== '23505') return false;
+  // The Postgres error names the offending constraint and/or echoes the
+  // column in `detail` ("Key (idempotency_key)=(...) already exists.").
+  return `${driver.constraint ?? ''} ${driver.detail ?? ''}`.includes('idempotency_key');
+}
+
+/**
+ * Rebuilds the CheckoutResponse `display` block from a persisted order's
+ * integer-cent columns, using the same `fmtCents` as the live pricing path.
+ * Used when replaying a cached/idempotent response (success replay, or the
+ * lost-response client_secret replay) where the original OrderCalculation is
+ * no longer in hand. Display only (Golden Rule #8) — never used to charge.
+ */
+function displayFromOrder(order: Order): CheckoutResponse['display'] {
+  return {
+    subtotal: fmtCents(order.subtotal_cents),
+    modifier: fmtCents(order.modifier_cents),
+    discount: fmtCents(order.discount_cents),
+    tax: fmtCents(order.tax_cents),
+    tip: fmtCents(order.tip_cents),
+    total: fmtCents(order.total_cents),
+  };
 }
