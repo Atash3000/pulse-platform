@@ -51,6 +51,20 @@ export class StripeService {
   }
 
   /**
+   * Retrieves an existing PaymentIntent. Used by the checkout idempotent
+   * replay: a retry against an order stuck in REQUIRES_PAYMENT (the original
+   * response was lost in transit) re-fetches the intent so the customer gets
+   * the original client_secret back instead of an unrecoverable 409.
+   *
+   * Throws whatever Stripe throws (network, invalid id) — the caller treats
+   * any failure as "cannot replay" and falls back to the 409 path, so a
+   * Stripe blip never turns a safe replay into a 5xx.
+   */
+  async retrievePaymentIntent(intentId: string): Promise<Stripe.PaymentIntent> {
+    return this.stripe.paymentIntents.retrieve(intentId);
+  }
+
+  /**
    * Creates a Stripe refund against an existing PaymentIntent. Used by the
    * admin refund flow. We pass the order UUID + staff user id in metadata so
    * Stripe's dashboard search can find the refund alongside the original PI.
