@@ -376,9 +376,13 @@ final class APIClientTests: XCTestCase {
 ///   crash the test, only fails the assertion.
 /// - `capturedRequests` holds every request the client sent, in order.
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
-    private struct StubResponse {
-        let statusCode: Int
-        let body: String
+    private enum StubResponse {
+        case success(statusCode: Int, body: String)
+        /// Fails the connection with the given transport error (e.g.
+        /// `URLError(.notConnectedToInternet)`, `URLError(.cancelled)`)
+        /// — for tests that exercise network-failure / cancellation
+        /// paths hermetically.
+        case failure(Error)
     }
 
     nonisolated(unsafe) private static var responseQueue: [StubResponse] = []
@@ -386,7 +390,11 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var capturedBodies: [Data?] = []
 
     static func stub(statusCode: Int, body: String) {
-        responseQueue.append(StubResponse(statusCode: statusCode, body: body))
+        responseQueue.append(.success(statusCode: statusCode, body: body))
+    }
+
+    static func stubError(_ error: Error) {
+        responseQueue.append(.failure(error))
     }
 
     static func reset() {
@@ -414,19 +422,25 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
         // Pop the next stubbed response; fall back to 200 {} if empty.
         let stub = Self.responseQueue.isEmpty
-            ? StubResponse(statusCode: 200, body: "{}")
+            ? StubResponse.success(statusCode: 200, body: "{}")
             : Self.responseQueue.removeFirst()
 
-        let url = request.url ?? URL(string: "http://stub")!
-        let response = HTTPURLResponse(
-            url: url,
-            statusCode: stub.statusCode,
-            httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "application/json"]
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: stub.body.data(using: .utf8) ?? Data())
-        client?.urlProtocolDidFinishLoading(self)
+        switch stub {
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+
+        case .success(let statusCode, let body):
+            let url = request.url ?? URL(string: "http://stub")!
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body.data(using: .utf8) ?? Data())
+            client?.urlProtocolDidFinishLoading(self)
+        }
     }
 
     override func stopLoading() {}

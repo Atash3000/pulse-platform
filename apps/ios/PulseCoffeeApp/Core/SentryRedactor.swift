@@ -15,7 +15,8 @@ import Sentry
 /// | `event.request.headers["Authorization"]` | `<redacted>` |
 /// | `breadcrumb.data["headers"]["Authorization"]` (each breadcrumb) | `<redacted>` |
 /// | `breadcrumb.data["body"][<sensitive key>]` | `<redacted>` |
-/// | Stripe object IDs (`pi_*`, `ch_*`, `re_*`) in `breadcrumb.data["url"]` | `<prefix>_<redacted>` |
+/// | `client_secret=<value>` query params in `breadcrumb.data["url"]` | `client_secret=<redacted>` |
+/// | Stripe object IDs (`pi_*`, `seti_*`, `ch_*`, `re_*`, `pm_*`) in `breadcrumb.data["url"]` | `<prefix>_<redacted>` |
 ///
 /// Sensitive body keys (cf. decision-log entry "[iOS] APIClient + Keychain
 /// + Codables + ATS for localhost"):
@@ -24,6 +25,10 @@ import Sentry
 /// - `client_secret` — Stripe PaymentIntent client secret. Grants payment
 ///   authorization to whoever holds it; the most sensitive value the iOS
 ///   client touches.
+/// - `refresh_token` / `access_token` — auth credentials. `TokenRefresher`
+///   sends `refresh_token` in the `/auth/refresh` body, and auth
+///   responses carry both; either appearing in a breadcrumb body would
+///   leak a live session.
 /// - `idempotency_key` — payment-dedup key. Leaking it doesn't enable
 ///   theft but exposes our dedup strategy; cheap to redact.
 /// - `cvv` / `cvc` / `card_number` — PCI-tier card data. The Stripe SDK
@@ -40,6 +45,8 @@ enum SentryRedactor {
     static let sensitiveBodyFields: Set<String> = [
         "password",
         "client_secret",
+        "refresh_token",
+        "access_token",
         "idempotency_key",
         "cvv",
         "cvc",
@@ -54,12 +61,28 @@ enum SentryRedactor {
     ]
 
     /// Matches Stripe object IDs in arbitrary strings: payment intents
-    /// (`pi_*`), charges (`ch_*`), refunds (`re_*`). Replacement
-    /// template preserves the prefix so the breadcrumb still indicates
-    /// *what kind* of object was referenced.
+    /// (`pi_*`), setup intents (`seti_*`), charges (`ch_*`), refunds
+    /// (`re_*`), payment methods (`pm_*`). The character class includes
+    /// `_` because real Stripe tokens contain underscores — notably
+    /// `pi_xxx_secret_yyy` client secrets, which the old
+    /// `[A-Za-z0-9]+`-only pattern truncated at the first underscore,
+    /// leaving the `_secret_…` tail intact in network breadcrumbs. The
+    /// leading `\b` keeps `re_`/`pi_` from matching inside ordinary
+    /// words (`feature_flag`). Replacement template preserves the
+    /// prefix so the breadcrumb still indicates *what kind* of object
+    /// was referenced.
     private static let stripeIDPattern: NSRegularExpression = {
         // swiftlint:disable:next force_try
-        try! NSRegularExpression(pattern: #"(pi|ch|re)_[A-Za-z0-9]+"#, options: [])
+        try! NSRegularExpression(pattern: #"\b(pi|seti|ch|re|pm)_[A-Za-z0-9_]+"#, options: [])
+    }()
+
+    /// Matches `client_secret=<value>` query params in URL strings. The
+    /// Sentry SDK's network breadcrumbs swizzle the Stripe SDK's own
+    /// URLSession calls, which carry `?client_secret=pi_…_secret_…` —
+    /// the value must be stripped wholesale, not just the Stripe-ID part.
+    private static let clientSecretParamPattern: NSRegularExpression = {
+        // swiftlint:disable:next force_try
+        try! NSRegularExpression(pattern: #"client_secret=[^&\s]+"#, options: [])
     }()
 
     /// Returns the event with sensitive fields redacted. Always returns
@@ -74,7 +97,7 @@ enum SentryRedactor {
     // MARK: - Helpers exposed for unit tests
 
     /// Returns the input string with any Stripe object IDs replaced.
-    /// Visible to tests; used internally by `redactBreadcrumbs`.
+    /// Visible to tests; used internally by `redactURLString`.
     static func redactStripeIDs(in text: String) -> String {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return stripeIDPattern.stringByReplacingMatches(
@@ -83,6 +106,26 @@ enum SentryRedactor {
             range: range,
             withTemplate: "$1_\(redactedPlaceholder)"
         )
+    }
+
+    /// Returns the input string with any `client_secret=<value>` query
+    /// param values replaced. Visible to tests; used internally by
+    /// `redactURLString`.
+    static func redactClientSecretParams(in text: String) -> String {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return clientSecretParamPattern.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: range,
+            withTemplate: "client_secret=\(redactedPlaceholder)"
+        )
+    }
+
+    /// Full URL-string scrub: strips `client_secret` query params, then
+    /// any remaining Stripe object IDs. Visible to tests; applied to
+    /// every breadcrumb's `data["url"]`.
+    static func redactURLString(_ url: String) -> String {
+        redactStripeIDs(in: redactClientSecretParams(in: url))
     }
 
     /// Returns a copy of `body` with sensitive field values replaced by
@@ -135,7 +178,7 @@ enum SentryRedactor {
         }
 
         if let url = data["url"] as? String {
-            data["url"] = redactStripeIDs(in: url)
+            data["url"] = redactURLString(url)
         }
 
         breadcrumb.data = data

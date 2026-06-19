@@ -16,7 +16,9 @@ struct PulseCoffeeApp: App {
     /// In-memory cart. Persists across Menu / Cart / Checkout
     /// navigation; cleared on app close (no server-side cart per
     /// `docs/ai-onboarding/ios.md` rule #2). Cleared post-checkout
-    /// by `CheckoutViewModel`.
+    /// by `CheckoutViewModel` and on logout via the `.didLogout`
+    /// signal (CartManager subscribes — it outlives the auth flip,
+    /// so user B must never inherit user A's cart).
     @StateObject private var cart = CartManager()
 
     /// Local UserDefaults-backed favorite item-ID store. Non-critical
@@ -57,12 +59,15 @@ struct PulseCoffeeApp: App {
             // sensitive values from outbound events before delivery.
             // - `Authorization` headers on the event request + on each
             //   breadcrumb's request snapshot.
-            // - `password`, `client_secret`, `idempotency_key`, `cvv`,
-            //   `cvc`, `card_number` field values in any breadcrumb's
+            // - `password`, `client_secret`, `refresh_token`,
+            //   `access_token`, `idempotency_key`, `cvv`, `cvc`,
+            //   `card_number` field values in any breadcrumb's
             //   request body.
-            // - Stripe object IDs (`pi_*`, `ch_*`, `re_*`) in breadcrumb
-            //   URLs (defense-in-depth — not credentials, but they
-            //   shouldn't appear in error tracking either).
+            // - `client_secret=…` query params and Stripe object IDs
+            //   (`pi_*`, `seti_*`, `ch_*`, `re_*`, `pm_*`) in breadcrumb
+            //   URLs — the network breadcrumbs below swizzle the Stripe
+            //   SDK's own calls, which carry the PaymentIntent client
+            //   secret in the query string.
             //
             // See `Core/SentryRedactor.swift` for the redaction rules
             // and `PulseCoffeeAppTests/SentryRedactorTests.swift` for

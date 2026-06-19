@@ -33,6 +33,11 @@ final class HomeViewModel: ObservableObject {
         guard isSignedIn else { content = .fallback; return }
         do {
             content = .signedIn(try await fetch())
+        } catch APIError.cancelled, is CancellationError {
+            // Tab switch / view teardown cancelled the fetch — that's
+            // navigation, not a failure: no Sentry capture, and stay in
+            // `.loading` (which the view renders as the fail-safe
+            // featured fallback) so the next `load` retries cleanly.
         } catch {
             SentrySDK.capture(error: error)
             content = .fallback

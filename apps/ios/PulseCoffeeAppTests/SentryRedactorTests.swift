@@ -53,6 +53,22 @@ final class SentryRedactorTests: XCTestCase {
         XCTAssertEqual(result["email"] as? String, "leave@me.alone")
     }
 
+    /// Regression: `TokenRefresher` sends a `refresh_token` body to
+    /// `/auth/refresh`, and auth responses carry both tokens — neither
+    /// was in the scrub list, so a breadcrumb could leak a live session.
+    func test_redactBody_redactsRefreshAndAccessTokens() {
+        let input: [String: Any] = [
+            "refresh_token": "rt-live-session-token",
+            "access_token": "eyJhbGc.live.jwt",
+            "email": "leave@me.alone",
+        ]
+        let result = SentryRedactor.redactBody(input)
+
+        XCTAssertEqual(result["refresh_token"] as? String, "<redacted>")
+        XCTAssertEqual(result["access_token"] as? String, "<redacted>")
+        XCTAssertEqual(result["email"] as? String, "leave@me.alone")
+    }
+
     func test_redactBody_idempotent() {
         let once = SentryRedactor.redactBody(["password": "hunter2"])
         let twice = SentryRedactor.redactBody(once)
@@ -83,6 +99,51 @@ final class SentryRedactorTests: XCTestCase {
     func test_redactStripeIDs_leavesUnrelatedTextAlone() {
         let input = "pickup=ASAP location=loc-uuid-7"
         XCTAssertEqual(SentryRedactor.redactStripeIDs(in: input), input)
+    }
+
+    /// Regression: the old pattern's `[A-Za-z0-9]+` body stopped at the
+    /// first underscore, so `pi_3Abc_secret_xyz` survived as
+    /// `pi_<redacted>_secret_xyz` — leaking the secret tail.
+    func test_redactStripeIDs_consumesUnderscoreContainingTokens() {
+        let input = "/payment_intents/pi_3Abc_secret_xyz"
+        XCTAssertEqual(
+            SentryRedactor.redactStripeIDs(in: input),
+            "/payment_intents/pi_<redacted>"
+        )
+    }
+
+    func test_redactStripeIDs_coversSetupIntentAndPaymentMethodPrefixes() {
+        let input = "seti=seti_1Abc pm=pm_1Xyz"
+        XCTAssertEqual(
+            SentryRedactor.redactStripeIDs(in: input),
+            "seti=seti_<redacted> pm=pm_<redacted>"
+        )
+    }
+
+    func test_redactStripeIDs_doesNotMatchInsideOrdinaryWords() {
+        // `re_` / `pi_` must not fire mid-word now that the body class
+        // includes underscores.
+        let input = "feature_flag=on api_version=2"
+        XCTAssertEqual(SentryRedactor.redactStripeIDs(in: input), input)
+    }
+
+    // MARK: - redactURLString (client_secret query params)
+
+    /// Regression: `enableNetworkBreadcrumbs` swizzles the Stripe SDK's
+    /// own calls, whose URLs carry `?client_secret=pi_…_secret_…`. The
+    /// value must be stripped wholesale.
+    func test_redactURLString_stripsClientSecretQueryParam() {
+        let input = "https://api.stripe.com/v1/payment_intents/pi_3Abc?client_secret=pi_3Abc_secret_xYz9&locale=en"
+        let result = SentryRedactor.redactURLString(input)
+        XCTAssertFalse(result.contains("secret_xYz9"), "client_secret value must not survive: \(result)")
+        XCTAssertTrue(result.contains("client_secret=<redacted>"), "got: \(result)")
+        XCTAssertTrue(result.contains("&locale=en"), "Unrelated query params survive: \(result)")
+        XCTAssertFalse(result.contains("pi_3Abc?"), "Path Stripe ID is also redacted: \(result)")
+    }
+
+    func test_redactClientSecretParams_leavesOtherParamsAlone() {
+        let input = "https://api.pulsecoffee.com/menu?locationId=loc-7"
+        XCTAssertEqual(SentryRedactor.redactClientSecretParams(in: input), input)
     }
 
     // MARK: - Full event pipeline

@@ -44,6 +44,10 @@ final class MenuViewModel: ObservableObject {
             let location = try await locations.firstLocation()
             let menu = try await menus.fetchMenu(locationId: location.id)
             state = .loaded(location, menu)
+        } catch APIError.cancelled {
+            handleCancelledLoad()
+        } catch is CancellationError {
+            handleCancelledLoad()
         } catch let error as LocationServiceError {
             switch error {
             case .noLocationsAvailable:
@@ -73,6 +77,17 @@ final class MenuViewModel: ObservableObject {
         }
     }
 
+    /// A cancelled load (tab switch / view teardown mid-request) is
+    /// navigation, not a failure: no `.failed` wall, no Sentry capture.
+    /// Revert to `.idle` — the pre-load state — so the view's
+    /// `.task { if case .idle … }` guard re-fires the load the next
+    /// time the screen appears instead of stranding it on the spinner.
+    private func handleCancelledLoad() {
+        if case .loading = state {
+            state = .idle
+        }
+    }
+
     private static func message(for error: APIError) -> String {
         switch error {
         case .invalidURL:
@@ -90,6 +105,10 @@ final class MenuViewModel: ObservableObject {
             return "Authentication required for menu (unexpected)."
         case .rateLimited:
             return "Hit a rate limit. Please wait a minute and try again."
+        case .cancelled:
+            // Handled before this mapper runs (`handleCancelledLoad`);
+            // kept for switch exhaustiveness only.
+            return "The request was interrupted. Please try again."
         case .unexpected(let code):
             return "Menu request failed with status \(code)."
         }
