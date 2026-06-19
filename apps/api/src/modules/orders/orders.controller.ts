@@ -23,6 +23,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import type { JwtPayload } from '../auth/jwt-payload';
+import { ThrottleByCustomer } from '../../common/throttle/throttle-by-customer.decorator';
 import { OrderHistoryQueryDto } from './dto/order-history-query.dto';
 import {
   OrderDetail,
@@ -41,8 +42,13 @@ const DEFAULT_OFFSET = 0;
 @ApiBearerAuth('jwt')
 @Controller('orders')
 @UseGuards(AuthGuard('jwt'))
-// 60/min/IP — iOS polls GET /orders/:id every 10s while the order is active.
+// 60/min — iOS polls GET /orders/:id every 10s while the order is active.
+// @ThrottleByCustomer() keys the bucket by authenticated customer id (decoded
+// from the Authorization header by CustomerAwareThrottlerGuard) instead of IP,
+// so customers polling from behind one NAT / coffee-shop Wi-Fi — or all
+// arriving via Render's proxy — don't share one bucket.
 @Throttle({ default: { limit: 60, ttl: 60_000 } })
+@ThrottleByCustomer()
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 

@@ -68,13 +68,15 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Refresh access token',
-    description: 'Exchange a valid refresh token for a new 15-minute access token. Re-validates the underlying account still exists and is active.',
+    description: 'Public (token in body, no guard). Rate-limited 10/min/IP — generous for legitimate 15-minute access-token expiry, tight enough to blunt stolen-refresh-token brute forcing. Exchange a valid refresh token for a new 15-minute access token. Re-validates the underlying account still exists and is active.',
   })
   @ApiResponse({ status: 200, description: 'New access token issued.' })
   @ApiResponse({ status: 400, description: 'refresh_token missing or not a JWT.' })
   @ApiResponse({ status: 401, description: 'Token invalid/expired, or account no longer exists / disabled.' })
+  @ApiResponse({ status: 429, description: 'Too many requests (>10/min from this IP).' })
   refresh(@Body() dto: RefreshDto): Promise<RefreshResponse> {
     return this.auth.refresh(dto.refresh_token);
   }

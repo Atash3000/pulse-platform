@@ -17,6 +17,17 @@ async function bootstrap(): Promise<void> {
     rawBody: true,
   });
 
+  // Behind Render's reverse proxy every request arrives from the proxy's
+  // address, so req.ip is the proxy — not the customer. The throttler keys
+  // buckets on req.ips[0] ?? req.ip (see customer-aware-throttler.guard.ts),
+  // which without this line collapses ALL customers into one shared bucket.
+  // 'trust proxy' = 1 trusts exactly one hop of X-Forwarded-For (Render's own
+  // proxy) and ignores any client-spoofed entries beyond it.
+  const expressInstance = app.getHttpAdapter().getInstance() as {
+    set: (setting: string, value: unknown) => void;
+  };
+  expressInstance.set('trust proxy', 1);
+
   app.setGlobalPrefix('api/v1');
 
   app.useGlobalPipes(

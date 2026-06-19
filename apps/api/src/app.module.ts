@@ -1,10 +1,11 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
 import { CustomerAwareThrottlerGuard } from './common/throttle/customer-aware-throttler.guard';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { dataSourceOptions } from './database/data-source';
@@ -61,6 +62,11 @@ import { WorkersModule } from './workers/workers.module';
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomerAwareThrottlerGuard },
+    // Golden Rule #10: Sentry must actually receive errors. Nest's exception
+    // layer catches everything before Sentry's process-level hooks see it, so
+    // this filter reports 5xx / unexpected errors then delegates to the
+    // default handling (response shapes unchanged).
+    { provide: APP_FILTER, useClass: SentryExceptionFilter },
   ],
 })
 export class AppModule implements NestModule {
