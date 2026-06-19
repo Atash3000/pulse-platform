@@ -123,6 +123,104 @@ final class CheckoutViewModelTests: XCTestCase {
                        "Retries of the same checkout attempt must share one idempotency key — backend dedup depends on this")
     }
 
+    /// Regression (double-charge): the key used to be minted per
+    /// CheckoutViewModel, and the VM is a fresh @StateObject per
+    /// navigation. Payment confirms with Stripe, network drops before
+    /// the SDK sees it, user backs out to the cart and re-enters →
+    /// new VM → new key → second backend order → double charge.
+    /// The key now lives in CartManager, so two sequential VMs over the
+    /// SAME unchanged cart must send the SAME key on the wire.
+    func test_idempotencyKey_survivesViewModelRecreation_overUnchangedCart() async throws {
+        StubURLProtocol.stub(statusCode: 500, body: "{}")
+        StubURLProtocol.stub(statusCode: 500, body: "{}")
+        let (vm1, cart, appState) = makeVMLoggedIn()
+        cart.add(item: makeItem())
+
+        await vm1.placeOrder()
+
+        // Simulate "Back to Cart" → re-enter checkout: a brand-new VM
+        // over the same cart / appState.
+        let vm2 = CheckoutViewModel(api: makeAPIClient(), cart: cart, appState: appState, locationId: "loc-1")
+        await vm2.placeOrder()
+
+        let keys = StubURLProtocol.capturedBodies.compactMap { extractIdempotencyKey(from: $0) }
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertEqual(keys[0], keys[1],
+                       "A new CheckoutViewModel over an unchanged cart must reuse the same idempotency key — otherwise re-entering checkout double-charges")
+    }
+
+    /// Companion to the above: mutating the cart between attempts is a
+    /// NEW payment intent and must produce a new key (otherwise the
+    /// backend replays the old, smaller order).
+    func test_idempotencyKey_changesWhenCartMutates() async throws {
+        StubURLProtocol.stub(statusCode: 500, body: "{}")
+        StubURLProtocol.stub(statusCode: 500, body: "{}")
+        let (vm, cart, _) = makeVMLoggedIn()
+        cart.add(item: makeItem())
+
+        await vm.placeOrder()
+        cart.add(item: makeItem(id: "item-2"))
+        await vm.placeOrder()
+
+        let keys = StubURLProtocol.capturedBodies.compactMap { extractIdempotencyKey(from: $0) }
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertNotEqual(keys[0], keys[1],
+                          "A mutated cart is a new payment intent — replaying the old key would replay the old order")
+    }
+
+    /// Regression: the old key hashed only flattened item IDs, so a
+    /// Latte-with-oat and a plain Latte produced the same key. Same
+    /// items + different modifiers must differ at the wire level.
+    func test_idempotencyKey_sameItemsDifferentModifiers_differOnTheWire() async throws {
+        // Fixed clock pins the timestamp section of both keys, so the
+        // ONLY difference between the two carts is the modifier set.
+        let fixedNow = { Date(timeIntervalSince1970: 1_700_000_000) }
+
+        StubURLProtocol.stub(statusCode: 500, body: "{}")
+        let cart1 = CartManager(now: fixedNow)
+        cart1.add(item: makeItem(), modifierIds: ["oat-milk"])
+        let (vm1, appState1) = makeVMLoggedIn(cart: cart1)
+        _ = appState1
+        await vm1.placeOrder()
+
+        StubURLProtocol.stub(statusCode: 500, body: "{}")
+        let cart2 = CartManager(now: fixedNow)
+        cart2.add(item: makeItem(), modifierIds: [])
+        let (vm2, appState2) = makeVMLoggedIn(cart: cart2)
+        _ = appState2
+        await vm2.placeOrder()
+
+        let keys = StubURLProtocol.capturedBodies.compactMap { extractIdempotencyKey(from: $0) }
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertNotEqual(keys[0], keys[1],
+                          "Same drink with different modifiers is a different payment intent and needs a different key")
+    }
+
+    // MARK: - Empty locationId guard
+
+    /// Regression: items added from Home's "Pair with" row + the Menu
+    /// tab's cart icon before /menu resolved passes `locationId: ""` all
+    /// the way to checkout, which auto-fires on appear → backend 400
+    /// with raw validator text shown to the customer. The view model
+    /// must fail friendly without a network call.
+    func test_placeOrder_emptyLocationId_failsWithoutNetwork() async {
+        let cart = CartManager()
+        cart.add(item: makeItem())
+        let (vm, appState) = makeVMLoggedIn(cart: cart, locationId: "")
+        _ = appState
+
+        await vm.placeOrder()
+
+        if case .failed(let message) = vm.state {
+            XCTAssertTrue(message.contains("location"), "got: \(message)")
+            XCTAssertFalse(message.lowercased().contains("must be"), "No raw validator text in customer copy")
+        } else {
+            XCTFail("Expected .failed for empty locationId, got \(vm.state)")
+        }
+        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 0,
+                       "Empty-locationId check must not hit the network")
+    }
+
     // MARK: - Server errors mapped to user copy
 
     func test_placeOrder_400Validation_surfacesServerMessage() async {
@@ -248,9 +346,9 @@ final class CheckoutViewModelTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeItem() -> MenuItem {
+    private func makeItem(id: String = "item-1") -> MenuItem {
         MenuItem(
-            id: "item-1",
+            id: id,
             name: "Latte",
             description: nil,
             basePriceCents: 650,
@@ -292,14 +390,24 @@ final class CheckoutViewModelTests: XCTestCase {
     /// Builds a logged-in AppState by pre-populating Keychain so init's
     /// bootstrap reads the customer profile and transitions to .loggedIn.
     private func makeVMLoggedIn() -> (CheckoutViewModel, CartManager, AppState) {
+        let cart = CartManager()
+        let (vm, appState) = makeVMLoggedIn(cart: cart)
+        return (vm, cart, appState)
+    }
+
+    /// Variant that accepts a caller-built cart (e.g. with a fixed clock)
+    /// and/or a non-default location id.
+    private func makeVMLoggedIn(
+        cart: CartManager,
+        locationId: String = "loc-1"
+    ) -> (CheckoutViewModel, AppState) {
         try? Keychain.saveAccessToken("test-access")
         try? Keychain.saveRefreshToken("test-refresh")
         try? Keychain.saveCustomer(.init(id: "cust-1", email: "x@y", firstName: "Test", lastName: "User", nickname: nil))
-        let cart = CartManager()
         let api = makeAPIClient()
         let appState = AppState(api: api)
-        let vm = CheckoutViewModel(api: api, cart: cart, appState: appState, locationId: "loc-1")
-        return (vm, cart, appState)
+        let vm = CheckoutViewModel(api: api, cart: cart, appState: appState, locationId: locationId)
+        return (vm, appState)
     }
 
     private func extractIdempotencyKey(from data: Data?) -> String? {

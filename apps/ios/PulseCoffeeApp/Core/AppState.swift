@@ -99,6 +99,11 @@ final class AppState: ObservableObject {
     func logout() async {
         try? Keychain.clearAll()
         authState = .loggedOut
+        // Signal bus for per-user in-memory state that outlives the auth
+        // flip (CartManager clears the cart + cached idempotency key).
+        // Posted from here so both logout paths — explicit Sign Out and
+        // the forced `.authRequired` path — emit exactly one signal.
+        NotificationCenter.default.post(name: .didLogout, object: nil)
     }
 
     // MARK: - Private

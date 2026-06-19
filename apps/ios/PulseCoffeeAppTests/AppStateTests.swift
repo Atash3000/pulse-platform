@@ -187,6 +187,67 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(try Keychain.loadAccessToken())
     }
 
+    // MARK: - Logout clears the cart (via the .didLogout signal bus)
+
+    /// Regression: `CartManager` is App-scoped and used to survive
+    /// logout untouched — user B could see (and pay for) user A's cart.
+    /// Explicit Sign Out path: `AppState.logout()` posts `.didLogout`,
+    /// CartManager clears.
+    func test_logout_explicit_clearsCart() async throws {
+        try Keychain.saveAccessToken("a")
+        try Keychain.saveRefreshToken("r")
+        try Keychain.saveCustomer(.init(id: "1", email: "x", firstName: "y", lastName: "z", nickname: nil))
+        let appState = AppState(api: makeAPIClient())
+        let cart = CartManager()
+        cart.add(item: makeMenuItem())
+        XCTAssertFalse(cart.isEmpty)
+
+        await appState.logout()
+
+        try await waitUntil { cart.isEmpty }
+        XCTAssertTrue(cart.isEmpty, "Explicit logout must clear the cart")
+    }
+
+    /// Same regression, forced path: a 401 storm posts `.authRequired`
+    /// → `AppState.logout()` → `.didLogout` → cart cleared.
+    func test_logout_forcedViaAuthRequired_clearsCart() async throws {
+        try Keychain.saveAccessToken("a")
+        try Keychain.saveRefreshToken("r")
+        try Keychain.saveCustomer(.init(id: "1", email: "x", firstName: "y", lastName: "z", nickname: nil))
+        let appState = AppState(api: makeAPIClient())
+        let cart = CartManager()
+        cart.add(item: makeMenuItem())
+
+        NotificationCenter.default.post(name: .authRequired, object: nil)
+
+        try await waitUntil { appState.authState == .loggedOut && cart.isEmpty }
+        XCTAssertEqual(appState.authState, .loggedOut)
+        XCTAssertTrue(cart.isEmpty, "Forced (401) logout must clear the cart too")
+    }
+
+    /// Polls a MainActor condition for up to 1s — both notification
+    /// observers hop onto `Task { @MainActor … }`, so delivery is async.
+    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(1.0)
+        while Date() < deadline {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+    }
+
+    private func makeMenuItem() -> MenuItem {
+        MenuItem(
+            id: "item-1",
+            name: "Latte",
+            description: nil,
+            basePriceCents: 650,
+            imageURL: nil,
+            available: true,
+            quantityLeft: nil,
+            modifierGroups: []
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeAPIClient() -> APIClient {

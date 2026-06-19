@@ -19,4 +19,18 @@ extension Notification.Name {
     /// the event happened. See decision-log entry "[iOS] Auth foundation
     /// — AppState, TokenRefresher, login/register UI".
     static let authRequired = Notification.Name("com.pulsecoffee.app.auth.required")
+
+    /// Broadcast by `AppState.logout()` after the session has been torn
+    /// down (Keychain cleared, `authState` flipped to `.loggedOut`).
+    /// Fires for BOTH logout paths — the explicit Sign Out button and the
+    /// forced path where `.authRequired` triggers `AppState.logout()`.
+    ///
+    /// Subscribers reset per-user in-memory state that outlives the auth
+    /// flip. Today that's `CartManager` (App-scoped; clears cart lines +
+    /// the cached checkout idempotency key so user B never sees — or pays
+    /// for — user A's cart).
+    ///
+    /// `object` and `userInfo` are both nil — receivers only care that
+    /// the event happened.
+    static let didLogout = Notification.Name("com.pulsecoffee.app.auth.logged-out")
 }
