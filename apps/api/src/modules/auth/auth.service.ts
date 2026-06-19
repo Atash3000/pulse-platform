@@ -69,6 +69,12 @@ export class AuthService {
     if (!accessSecret || !refreshSecret) {
       throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be set');
     }
+    // Equal secrets would let a long-lived refresh token verify as an access
+    // token (and vice versa), collapsing the two-token model into one. Fail
+    // the boot, not the first exploited request.
+    if (accessSecret === refreshSecret) {
+      throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different values');
+    }
     this.accessSecret = accessSecret;
     this.refreshSecret = refreshSecret;
   }
